@@ -1,6 +1,6 @@
 # Paxsy
 
-The **paxsy** project is freely available under the MIT license. You can read it at [this link](https://github.com/aiv-tmc/Paxsi/blob/main/LICENSE).
+The **paxsy** project is freely available under the MIT license. You can read it at [this link](https://github.com/aiv-tmc/Paxsy/blob/main/LICENSE).
 
 <!--Install-->
 ## Install (Linux)
