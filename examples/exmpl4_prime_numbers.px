@@ -1,0 +1,33 @@
+#inclib "_zero"
+#inclib "sys"
+#inclib "inout"
+#inclib "bool"
+#inclib "type"
+#inclib "cyclic"
+#go .start
+
+func start(none) {
+    var low : Byte = zero;
+    var hight : Byte = zero;
+
+    io::print("Enter the range (lower and upper bounds): ");
+    io::scanW(Byte, low);
+    io::scanL(Byte, hight);
+    io::print('\n');
+    io::print("Prime numbers in the range: ", low, ", ", hight, '\n');
+    
+    var i : Byte = low;
+    while (i <= hight) {
+        var is_prime : Bool = true;
+        if (i < 2) => continue;
+        
+        var j : Byte = low;
+        while (j * j <= i) {
+            if (i % j == 0) => is_prime = false;
+        j++;}
+        if (is_prime) => io::print(i);
+    i++;}
+    io::print('\n');
+
+    sys::exit(0);
+}

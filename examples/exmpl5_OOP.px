@@ -1,0 +1,36 @@
+#inclib "inout"
+#inclib "string"
+#inclib "type"
+#inclib "sys"
+#go .start
+
+class Person;
+class Employee : Person;
+
+func calc(var num1 : Int<2>, var num2 : Int<2>) : Int<2>;
+
+func start(none) {
+    obj tom : Employee;
+    io::scan(typeof(tom->name), tom->name);
+    io::scan(typeof(tom->age), tom->age);
+    io::scan(typeof(tom->specif), tom->specif);
+    io::print("name:\t", tom->name, '\n');
+    io::print("age:\t", tom->age, '\n');
+    io::print("specif:\t", tom->specif, '\n');
+    
+    if (tom->age < 18 or tom->age > 85) => sys::exit(1);
+    
+    io::print("calc print:", calc(24, 10), '\n');
+    
+    sys::exit(0);
+}
+
+func calc( var num1 : Int<2>
+         , var num2 : Int<2>
+         ) : Int<2> => return num1 + num2;
+
+class Person {
+    var name : Str;
+    var age : Int<1>;
+    var specif : Flex;
+};

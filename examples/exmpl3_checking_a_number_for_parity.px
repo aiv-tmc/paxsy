@@ -1,0 +1,17 @@
+#inclib "_zero"
+#inclib "sys"
+#inclib "inout"
+#go .start
+
+func start(none) {
+    var number : Int<1> = zero;
+
+    io::print("Enter a number: ");
+    io::scanL(Int<1>, number);
+    io::print('\n');
+
+    if (number % 2 == 0) => io::print(number, " even number");
+    else => io::print(number, " odd number");
+    
+    sys::exit(0);
+}

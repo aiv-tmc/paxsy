@@ -1,0 +1,8 @@
+#inclib "sys"
+#inclib "inout"
+#go .start
+
+func start(none) {
+    io::print("Hello, World!");
+    sys::exit(0);
+}
