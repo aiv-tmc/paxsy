@@ -8,16 +8,17 @@
 #go .start
 
 func start(none) {
-    io::print( calc( 1.9
-                   , 2
-                   , 0x5.3Ae3
-                   , mth::PI(2)
-                   )
-             );
+    io::print
+        ( calc
+            ( 1.9
+            , 2
+            , mth::PI(2)
+        )
+    );
     sys::exit(0);
 }
 
-func calc(var num : Float, ...) : static Float {
+func calc(var num : Float/*, ...*/) : static Float {
     var result : Float = zero;
     var factor : VLS = zero;
     
