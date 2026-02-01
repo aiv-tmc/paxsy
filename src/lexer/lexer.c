@@ -82,14 +82,9 @@ static void init_symbol_table(void) {
         {"null",        TOKEN_NULL              },
         
         /* State keywords */
-        {"label",       TOKEN_STATE             },
         {"func",        TOKEN_STATE             },
         {"var",         TOKEN_STATE             },
         {"let",         TOKEN_STATE             },
-        {"array",       TOKEN_STATE             },
-        {"list",        TOKEN_STATE             },
-        {"ulist",       TOKEN_STATE             },
-        {"enum",        TOKEN_STATE             },
         {"obj",         TOKEN_STATE             },
         {"struct",      TOKEN_STATE             },
         {"class",       TOKEN_STATE             },
@@ -107,6 +102,7 @@ static void init_symbol_table(void) {
         
         /* Modifier keywords */
         {"const",       TOKEN_MODIFIER          },
+        {"fixed",       TOKEN_MODIFIER          },
         {"unsigned",    TOKEN_MODIFIER          },
         {"signed",      TOKEN_MODIFIER          },
         {"extern",      TOKEN_MODIFIER          },
