@@ -52,7 +52,6 @@ static Type *parse_type_specifier_silent(ParserState *state,
                                         bool parse_prefixes);
 static Type *parse_type_specifier(ParserState *state, bool parse_prefixes);
 static bool is_argument_start(ParserState *state);
-static ASTNode *parse_argument(ParserState *state);
 static ASTNode *parse_push_statement(ParserState *state);
 static ASTNode *parse_pop_statement(ParserState *state);
 static ASTNode *parse_fixed_argument_function(ParserState *state,
@@ -1452,7 +1451,7 @@ static ASTNode *parse_primary_expression(ParserState *state) {
             return create_ast_node(state, AST_REGISTER, 0, value, 
                                   NULL, NULL, NULL);
         
-        case TOKEN_LPAREN: {
+        case TOKEN_LPAREN:
             advance_token(state);
             int saved_pos = state->current_token_position;
             
@@ -1477,12 +1476,11 @@ static ASTNode *parse_primary_expression(ParserState *state) {
                 CONSUME_TOKEN(state, TOKEN_RPAREN);
                 return expression;
             }
-        }
         
         case TOKEN_LCURLY:
             return parse_multi_initializer(state);
         
-        case TOKEN_SIZEOF: {
+        case TOKEN_SIZEOF:
             ASTNodeType node_type = (token->type == TOKEN_SIZEOF) 
                                    ? AST_SIZEOF 
                                    : AST_TYPEOF;
@@ -1492,7 +1490,6 @@ static ASTNode *parse_primary_expression(ParserState *state) {
             if (!arguments) return NULL;
             CONSUME_TOKEN(state, TOKEN_RPAREN);
             return create_ast_node(state, node_type, 0, NULL, arguments, NULL, NULL);
-        }
         
         case TOKEN_POP:
             return parse_pop_statement(state);
@@ -1520,15 +1517,24 @@ static ASTNode *parse_primary_expression(ParserState *state) {
                 , NULL
                 , NULL
             );
+            break;
         }
         
         case TOKEN_ID: {
             char *value = safe_strdup(state, token->value);
             advance_token(state);
             
-            ASTNode *node = create_ast_node(state, AST_IDENTIFIER, 0, value, 
-                                           NULL, NULL, NULL);
+            ASTNode *node = create_ast_node
+                ( state
+                , AST_IDENTIFIER
+                , 0
+                , value
+                , NULL
+                , NULL
+                , NULL
+            );
             return parse_postfix_expression(state, node);
+            break;
         }
         
         case TOKEN_ERROR:
@@ -1741,34 +1747,6 @@ static bool is_argument_start(ParserState *state) {
         default:
             return false;
     }
-}
-
-/*
- * Parse argument list for function calls
- * @param state: parser state
- * @return: block node containing arguments
- */
-static ASTNode *parse_argument(ParserState *state) {
-    CONSUME_TOKEN(state, TOKEN_LPAREN);
-    
-    AST *arg_list = parse_universal_list
-        ( state
-        , parse_expression
-        , is_argument_start
-        , TOKEN_COMMA
-        , TOKEN_RPAREN
-    );
-    if (!arg_list) return NULL;
-    
-    return create_ast_node
-        ( state
-        , AST_BLOCK
-        , 0
-        , NULL
-        , NULL
-        , NULL
-        , (ASTNode*)arg_list
-    );
 }
 
 /*
@@ -2772,22 +2750,6 @@ typedef struct {
     StatementParser parser;
 } StatementHandler;
 
-static StatementHandler statement_handlers[] = {
-    { TOKEN_LCURLY, parse_block_statement },
-    { TOKEN_IF, parse_if_statement },
-    { TOKEN_RETURN, parse_return_statement },
-    { TOKEN_FREE, parse_free_statement },
-    { TOKEN_DOT, parse_label_declaration },
-    { TOKEN_JUMP, parse_jump_statement },
-    { TOKEN_INTER, parse_inter },
-    { TOKEN_SIGNAL, parse_signal },
-    { TOKEN_PARSEOF, parse_parseof_statement },
-    { TOKEN_PUSH, parse_push_statement },
-    { TOKEN_NOP, parse_nop_statement },
-    { TOKEN_HALT, parse_halt_statement },
-    { TOKEN_THEN, parse_block_statement }
-};
-
 /*
  * Parse statement with new TOKEN_STATE handling
  * - TOKEN_STATE is REQUIRED for object declarations
@@ -2856,46 +2818,55 @@ static ASTNode *parse_statement(ParserState *state) {
         case TOKEN_FREE: {
             ASTNode *free_stmt = parse_free_statement(state);
             if (free_stmt) return free_stmt;
+            break;
         }
         
         case TOKEN_DOT: {
             ASTNode *label_stmt = parse_label_declaration(state);
             if (label_stmt) return label_stmt;
+            break;
         }
         
         case TOKEN_JUMP: {
             ASTNode *jump_stmt = parse_jump_statement(state);
             if (jump_stmt) return jump_stmt;
+            break;
         }
         
         case TOKEN_INTER: {
             ASTNode *inter_stmt = parse_inter(state);
             if (inter_stmt) return inter_stmt;
+            break;
         }
         
         case TOKEN_SIGNAL: {
             ASTNode *signal_stmt = parse_signal(state);
             if (signal_stmt) return signal_stmt;
+            break;
         }
         
         case TOKEN_PARSEOF: {
             ASTNode *parseof_stmt = parse_parseof_statement(state);
             if (parseof_stmt) return parseof_stmt;
+            break;
         }
         
         case TOKEN_PUSH: {
             ASTNode *push_stmt = parse_push_statement(state);
             if (push_stmt) return push_stmt;
+            break;
         }
         
         case TOKEN_NOP: {
             ASTNode *nop_stmt = parse_nop_statement(state);
             if (nop_stmt) return nop_stmt;
+            break;
         }
         
         case TOKEN_HALT: {
             ASTNode *halt_stmt = parse_halt_statement(state);
             if (halt_stmt) return halt_stmt;
+            break;
         }
         
         default: break;
