@@ -30,11 +30,11 @@ syn keyword pxNumber    none null
 syn match   pxType  "\<\d\+\(Int\|Real\|Char\|Void\)\>"
 syn keyword pxType  Int Real Char Void
 syn keyword pxType  const unsigned signed extern static volatile public protected private
-" syn keyword pxType  Byte Short Rune Word Long Float Double Noi80 Decimal Size sInt sReal Time Bool Str VLS
+" syn keyword pxType  Byte Short Rune Word Long Float Double Noi80 Decimal Size Time Bool Str VLS
 " syn keyword pxType dynamic
 
 " State
-syn keyword pxState label func var let obj struct class
+syn keyword pxState func var let obj struct class
 
 " Comments
 syn match   pxComment "\/\/.*$"                         contains=pxTodo,@Spell
