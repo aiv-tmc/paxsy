@@ -11,8 +11,8 @@ func start(none) {
     var hight : Byte = zero;
 
     io::print("Enter the range (lower and upper bounds): ");
-    io::scanW(Byte, low);
-    io::scanL(Byte, hight);
+    io::scanW('i', low);
+    io::scanL('i', hight);
     io::print('\n');
     io::print("Prime numbers in the range: ", low, ", ", hight, '\n');
     
