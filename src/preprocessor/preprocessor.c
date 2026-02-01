@@ -1,35 +1,20 @@
 #include "preprocessor.h"
-#include "DPP__begin/DPPF__begin.h"
-#include "DPP__program/DPPF__program.h"
-#include "DPP__include/DPPF__include.h"
-#include "DPP__define/DPPF__define.h"
-#include "DPP__ifdef/DPPF__ifdef.h"
-#include "DPP__ifndef/DPPF__ifndef.h"
-#include "DPP__if/DPPF__if.h"
-#include "DPP__elif/DPPF__elif.h"
-#include "DPP__else/DPPF__else.h"
-#include "DPP__endif/DPPF__endif.h"
+#include "preprocessor_state.h"
+//#include "DPP__go/DPPF__go.h"
+//#include "DPP__program/DPPF__program.h"
+//#include "DPP__inclib/DPPF__inclib.h"
+//#include "DPP__incfile/DPPF__incfile.h"
+//#include "DPP__define/DPPF__define.h"
+//#include "DPP__if/DPPF__if.h"
+//#include "DPP__ifdef/DPPF__ifdef.h"
+//#include "DPP__ifndef/DPPF__ifndef.h"
+//#include "DPP__elif/DPPF__elif.h"
+//#include "DPP__else/DPPF__else.h"
+//#include "DPP__endif/DPPF__endif.h"
+#include "../errman/errman.h"
 
 #include <stdlib.h>
 #include <string.h>
-
-/* Preprocessor state structure */
-typedef struct {
-    const char* input;
-    char* output;
-    size_t input_pos;
-    size_t output_pos;
-    size_t output_capacity;
-    uint16_t line;
-    uint16_t column;
-    uint8_t in_single_line_comment : 1;
-    uint8_t in_multi_line_comment : 1;
-    uint8_t in_string : 1;
-    uint8_t in_char : 1;
-    uint8_t in_preprocessor_directive : 1;
-    uint8_t in_config_macro : 1;
-    uint8_t bracket_depth;
-} PreprocessorState;
 
 /**
  * Ensure output buffer has enough capacity
@@ -86,6 +71,112 @@ static int is_alnum(char c) {
     return (c >= '0' && c <= '9') || is_alpha(c);
 }
 
+static int is_whitespace(char c) {
+    return c == ' ' || c == '\t' || c == '\r';
+}
+
+/**
+ * Clear directive buffer
+ */
+static void clear_directive_buffer(PreprocessorState* state) {
+    state->directive_pos = 0;
+    state->directive_buffer[0] = '\0';
+}
+
+/**
+ * Add character to directive buffer
+ */
+static void add_to_directive_buffer(PreprocessorState* state, char c) {
+    if (state->directive_pos < sizeof(state->directive_buffer) - 1) {
+        state->directive_buffer[state->directive_pos++] = c;
+        state->directive_buffer[state->directive_pos] = '\0';
+    }
+}
+
+/**
+ * Process preprocessor directive
+ */
+static void process_directive(PreprocessorState* state) {
+    char* directive = state->directive_buffer;
+    
+    if (state->directive_pos == 0) return;
+    
+    /* Skip leading whitespace after '#' */
+    char* ptr = directive;
+    while (*ptr && is_whitespace(*ptr)) ptr++;
+    
+    /* Check if this is actually a directive */
+    if (*ptr != '#') return;
+    ptr++; /* Skip '#' */
+    
+    /* Skip whitespace after '#' */
+    while (*ptr && is_whitespace(*ptr)) ptr++;
+    
+    if (*ptr == '\0') {
+        /* Empty directive, ignore */
+        return;
+    }
+    
+    /* Extract directive command */
+    char* command_start = ptr;
+    while (*ptr && !is_whitespace(*ptr) && *ptr != '\n' && *ptr != '\r') ptr++;
+    
+    size_t command_len = ptr - command_start;
+    if (command_len == 0) return;
+    
+    char command[32];
+    if (command_len >= sizeof(command)) {
+        errman__report_error(state->directive_start_line, 
+                             state->directive_start_column + (command_start - directive),
+                             "Preprocessor directive command too long");
+        return;
+    }
+    
+    memcpy(command, command_start, command_len);
+    command[command_len] = '\0';
+    
+    /* Skip whitespace before arguments */
+    while (*ptr && is_whitespace(*ptr)) ptr++;
+    
+    // char* args = ptr;
+    
+    /* Process known directives - строго определенные команды */
+    int known_directive = 1;
+    
+    //if (strcmp(command, "go") == 0) {
+    //    DPPF__go(state, args);
+    //} else if (strcmp(command, "program") == 0) {
+    //    DPPF__program(state, args);
+    //} else if (strcmp(command, "inclib") == 0) {
+    //    DPPF__inclib(state, args);
+    //} else if (strcmp(command, "incfile") == 0) {
+    //    DPPF__incfile(state, args);
+    //} else if (strcmp(command, "define") == 0) {
+    //    DPPF__define(state, args);
+    //} else if (strcmp(command, "if") == 0) {
+    //    DPPF__if(state, args);
+    //} else if (strcmp(command, "ifdef") == 0) {
+    //    DPPF__ifdef(state, args);
+    //} else if (strcmp(command, "ifndef") == 0) {
+    //    DPPF__ifndef(state, args);
+    //} else if (strcmp(command, "elif") == 0) {
+    //    DPPF__elif(state, args);
+    //} else if (strcmp(command, "else") == 0) {
+    //    DPPF__else(state, args);
+    //} else if (strcmp(command, "endif") == 0) {
+    //    DPPF__endif(state, args);
+    //} else {
+    //    known_directive = 0;
+    //}
+    
+    /* Report error for unknown directive */
+    if (!known_directive) {
+        errman__report_error(state->directive_start_line, 
+                             state->directive_start_column + (command_start - directive),
+                             "Unknown preprocessor directive: %s", command);
+    }
+}
+
 /**
  * Main preprocessor function
  * @param input: Source code to preprocess
@@ -118,6 +209,11 @@ char* preprocess
     state.in_preprocessor_directive = 0;
     state.in_config_macro = 0;
     state.bracket_depth = 0;
+    
+    /* Initialize directive buffer */
+    state.directive_pos = 0;
+    state.directive_start_line = 0;
+    state.directive_start_column = 0;
     
     if (!state.output) {
         if (error) *error = 1;
@@ -199,18 +295,23 @@ char* preprocess
         /* Handle preprocessor directive */
         if (state.in_preprocessor_directive) {
             if (current == '\n') {
-                size_t check_pos = state.input_pos;
-                while (state.input[check_pos + 1] == ' ' || 
-                       state.input[check_pos + 1] == '\t') {
-                    check_pos++;
-                }
-                if (state.input[check_pos + 1] != '#')
-                    state.in_preprocessor_directive = 0;
+                /* End of directive line */
+                process_directive(&state);
+                state.in_preprocessor_directive = 0;
+                clear_directive_buffer(&state);
+                
                 add_to_output(&state, '\n');
                 state.input_pos++;
                 state.line++;
                 state.column = 1;
+            } else if (current == '\\' && next == '\n') {
+                /* Continuation line */
+                state.input_pos += 2; /* Skip backslash and newline */
+                state.line++;
+                state.column = 1;
             } else {
+                /* Add to directive buffer */
+                add_to_directive_buffer(&state, current);
                 state.input_pos++;
                 state.column++;
             }
@@ -252,7 +353,14 @@ char* preprocess
             state.input_pos++;
             state.column++;
         } else if (current == '#') {
+            /* Start of preprocessor directive */
             state.in_preprocessor_directive = 1;
+            clear_directive_buffer(&state);
+            state.directive_start_line = state.line;
+            state.directive_start_column = state.column;
+            
+            /* Add '#' to directive buffer */
+            add_to_directive_buffer(&state, '#');
             state.input_pos++;
             state.column++;
         } else if (is_config_macro_start(&state)) {
@@ -267,6 +375,11 @@ char* preprocess
             } else state.column++;
             state.input_pos++;
         }
+    }
+    
+    /* Process any remaining directive */
+    if (state.in_preprocessor_directive) {
+        process_directive(&state);
     }
     
     /* Null-terminate the output */
