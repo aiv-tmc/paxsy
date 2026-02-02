@@ -18,7 +18,7 @@ func start(none) {
     sys::exit(0);
 }
 
-func calc(var num : Float/*, ...*/) : static Float {
+func calc(var num : Float, ...) : static Float {
     var result : Float = zero;
     var factor : VLS = zero;
     
