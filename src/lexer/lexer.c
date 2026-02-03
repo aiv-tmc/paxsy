@@ -84,7 +84,6 @@ static void init_symbol_table(void) {
         /* State keywords */
         {"func",        TOKEN_STATE             },
         {"var",         TOKEN_STATE             },
-        {"let",         TOKEN_STATE             },
         {"obj",         TOKEN_STATE             },
         {"struct",      TOKEN_STATE             },
         {"class",       TOKEN_STATE             },
