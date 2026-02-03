@@ -25,7 +25,7 @@ To add syntax highlighting in **vim**:
 
 3. Make sure that in the file `~/.vimrc` has the **industry style installed**
 
-P.S. To activate custom highlighting in the file `~/.vim/syntax/paxsy.vim` comment out **67-80** lines (optionally **27**, **33** and **18-20** more lines)
+P.S. To activate custom highlighting in the file `~/.vim/syntax/paxsy.vim` comment out **68-81** lines (optionally **27**, **33** and **18-20** more lines)
  
 <!--Documentation-->
 ## Documentation
