@@ -5,8 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-Token parse_number_literal(Lexer* lexer);
-Token parse_char_literal(Lexer* lexer);
-Token parse_string_literal(Lexer* lexer);
+Token literal__parse_number(Lexer* lexer);
+Token literal__parse_char(Lexer* lexer);
+Token literal__parse_string(Lexer* lexer);
 
 #endif
