@@ -1,5 +1,5 @@
 #inclib "_zero"
-#inclib "sys"
+#inclib "simac"
 #inclib "inout"
 #inclib "bool"
 #inclib "type"
@@ -29,5 +29,5 @@ func start(none) {
     i++;}
     io::print('\n');
 
-    sys::exit(0);
+    exit;
 }
