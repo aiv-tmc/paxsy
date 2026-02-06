@@ -1,5 +1,5 @@
 #include "literals.h"
-#include "../errman/errman.h"
+#include "../errhandler/errhandler.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -103,9 +103,10 @@ static bool parse_period_part(Lexer* lexer, uint8_t base) {
     if (!parse_integer_part(lexer, base, false)) {
         char error_msg[100];
         snprintf(error_msg, sizeof(error_msg), "Empty period in number literal");
-        errman__report_error
+        errhandler__report_error
             ( lexer->line
             , lexer->column
+            , "syntax"
             , error_msg
         );
         return false;
@@ -114,9 +115,10 @@ static bool parse_period_part(Lexer* lexer, uint8_t base) {
     if (lexer->position >= lexer->source_length || input[lexer->position] != ')') {
         char error_msg[100];
         snprintf(error_msg, sizeof(error_msg), "Unclosed period in number literal");
-        errman__report_error
+        errhandler__report_error
             ( lexer->line
             , lexer->column
+            , "syntax"
             , error_msg
         );
         return false;
@@ -209,9 +211,10 @@ Token parse_number_literal(Lexer* lexer) {
                     char error_msg[100];
                     snprintf(error_msg, sizeof(error_msg), 
                              "Invalid number after base prefix, expected valid digit for base %d", base);
-                    errman__report_error
+                    errhandler__report_error
                         ( lexer->line
                         , lexer->column
+                        , "syntax"
                         , error_msg
                     );
                     error = true;
@@ -227,9 +230,10 @@ Token parse_number_literal(Lexer* lexer) {
         if (!has_integer) {
             char error_msg[100];
             snprintf(error_msg, sizeof(error_msg), "Number must start with at least one digit");
-            errman__report_error
+            errhandler__report_error
                 ( lexer->line
                 , lexer->column
+                , "syntax"
                 , error_msg
             );
             error = true;
@@ -247,9 +251,10 @@ Token parse_number_literal(Lexer* lexer) {
                 char error_msg[100];
                 snprintf(error_msg, sizeof(error_msg), 
                          "Floating-point numbers are only allowed in base 10");
-                errman__report_error
+                errhandler__report_error
                     ( lexer->line
                     , lexer->column
+                    , "syntax"
                     , error_msg
                 );
                 error = true;
@@ -283,9 +288,10 @@ Token parse_number_literal(Lexer* lexer) {
                 if (!has_content && !error) {
                     char error_msg[100];
                     snprintf(error_msg, sizeof(error_msg), "Empty fractional part");
-                    errman__report_error
+                    errhandler__report_error
                         ( lexer->line
                         , lexer->column
+                        , "syntax"
                         , error_msg
                     );
                     error = true;
@@ -308,9 +314,10 @@ Token parse_number_literal(Lexer* lexer) {
                     char error_msg[100];
                     snprintf(error_msg, sizeof(error_msg), 
                              "Exponent notation is only allowed for base 10 floating-point numbers");
-                    errman__report_error
+                    errhandler__report_error
                         ( lexer->line
                         , lexer->column
+                        , "syntax"
                         , error_msg
                     );
                     error = true;
@@ -362,7 +369,12 @@ static inline char parse_escape_sequence(Lexer* lexer) {
     if (lexer->position >= lexer->source_length) {
         char error_msg[100];
         snprintf(error_msg, sizeof(error_msg), "Incomplete escape sequence");
-        errman__report_error(lexer->line, lexer->column, error_msg);
+        errhandler__report_error
+            ( lexer->line
+            , lexer->column
+            , "syntax"
+            , error_msg
+        );
         return 0;
     }
     
@@ -385,7 +397,12 @@ static inline char parse_escape_sequence(Lexer* lexer) {
         default:
             char error_msg[100];
             snprintf(error_msg, sizeof(error_msg), "Unknown escape sequence: \\%c", escaped);
-            errman__report_error(lexer->line, lexer->column, error_msg);
+            errhandler__report_error
+                ( lexer->line
+                , lexer->column 
+                , "syntax"
+                , error_msg
+            );
             return escaped;
     }
 }
@@ -411,7 +428,12 @@ Token parse_char_literal(Lexer* lexer) {
         input[lexer->position] != '\'') {
         char error_msg[100];
         snprintf(error_msg, sizeof(error_msg), "Expected character literal");
-        errman__report_error(lexer->line, lexer->column, error_msg);
+        errhandler__report_error
+            ( lexer->line
+            , lexer->column
+            , "syntax"
+            , error_msg
+        );
         return token;
     }
     
@@ -426,7 +448,12 @@ Token parse_char_literal(Lexer* lexer) {
     if (!buffer) {
         char error_msg[100];
         snprintf(error_msg, sizeof(error_msg), "Memory allocation failed");
-        errman__report_error(lexer->line, lexer->column, error_msg);
+        errhandler__report_error
+            ( lexer->line
+            , lexer->column
+            , "syntax"
+            , error_msg
+        );
         return token;
     }
     
@@ -444,7 +471,12 @@ Token parse_char_literal(Lexer* lexer) {
             if (!new_buffer) {
                 char error_msg[100];
                 snprintf(error_msg, sizeof(error_msg), "Memory reallocation failed");
-                errman__report_error(lexer->line, lexer->column, error_msg);
+                errhandler__report_error
+                    ( lexer->line
+                    , lexer->column
+                    , "syntax"
+                    , error_msg
+                );
                 free(buffer);
                 return token;
             }
@@ -474,7 +506,12 @@ Token parse_char_literal(Lexer* lexer) {
         } else {
             char error_msg[100];
             snprintf(error_msg, sizeof(error_msg), "Unclosed character literal");
-            errman__report_error(lexer->line, lexer->column, error_msg);
+            errhandler__report_error
+                ( lexer->line
+                , lexer->column
+                , "syntax"
+                , error_msg
+            );
             free(buffer);
             return token;
         }
@@ -488,7 +525,12 @@ Token parse_char_literal(Lexer* lexer) {
         if (buf_index == 0) {
             char error_msg[100];
             snprintf(error_msg, sizeof(error_msg), "Empty character literal");
-            errman__report_error(lexer->line, lexer->column, error_msg);
+            errhandler__report_error
+                ( lexer->line
+                , lexer->column
+                , "syntax"
+                , error_msg
+            );
             free(buffer);
             return token;
         } else if (buffer[0] == '\\' && buf_index == 2) {
@@ -497,7 +539,12 @@ Token parse_char_literal(Lexer* lexer) {
         } else {
             char error_msg[100];
             snprintf(error_msg, sizeof(error_msg), "Character literal must contain exactly one character");
-            errman__report_error(lexer->line, lexer->column, error_msg);
+            errhandler__report_error
+                ( lexer->line
+                , lexer->column
+                , "syntax"
+                , error_msg
+            );
             free(buffer);
             return token;
         }
@@ -536,7 +583,12 @@ Token parse_string_literal(Lexer* lexer) {
         input[lexer->position] != '"') {
         char error_msg[100];
         snprintf(error_msg, sizeof(error_msg), "Expected string literal");
-        errman__report_error(lexer->line, lexer->column, error_msg);
+        errhandler__report_error
+            ( lexer->line
+            , lexer->column
+            , "syntax"
+            , error_msg
+        );
         return token;
     }
     
@@ -551,7 +603,12 @@ Token parse_string_literal(Lexer* lexer) {
     if (!buffer) {
         char error_msg[100];
         snprintf(error_msg, sizeof(error_msg), "Memory allocation failed");
-        errman__report_error(lexer->line, lexer->column, error_msg);
+        errhandler__report_error
+            ( lexer->line
+            , lexer->column
+            , "syntax"
+            , error_msg
+        );
         return token;
     }
     
@@ -569,7 +626,12 @@ Token parse_string_literal(Lexer* lexer) {
             if (!new_buffer) {
                 char error_msg[100];
                 snprintf(error_msg, sizeof(error_msg), "Memory reallocation failed");
-                errman__report_error(lexer->line, lexer->column, error_msg);
+                errhandler__report_error
+                    ( lexer->line
+                    , lexer->column
+                    , "syntax"
+                    , error_msg
+                );
                 free(buffer);
                 return token;
             }
@@ -599,7 +661,12 @@ Token parse_string_literal(Lexer* lexer) {
         } else {
             char error_msg[100];
             snprintf(error_msg, sizeof(error_msg), "Unclosed string literal");
-            errman__report_error(lexer->line, lexer->column, error_msg);
+            errhandler__report_error
+                ( lexer->line
+                , lexer->column
+                , "syntax"
+                , error_msg
+            );
             free(buffer);
             return token;
         }
