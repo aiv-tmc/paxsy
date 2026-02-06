@@ -11,8 +11,7 @@
 //#include "DPP__elif/DPPF__elif.h"
 //#include "DPP__else/DPPF__else.h"
 //#include "DPP__endif/DPPF__endif.h"
-#include "../errman/errman.h"
-
+#include "../errhandler/errhandler.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -126,8 +125,8 @@ static void process_directive(PreprocessorState* state) {
     
     char command[32];
     if (command_len >= sizeof(command)) {
-        errman__report_error(state->directive_start_line, 
-                             state->directive_start_column + (command_start - directive),
+        errhandler__report_error(state->directive_start_line, 
+                             state->directive_start_column + (command_start - directive), "syntax",
                              "Preprocessor directive command too long");
         return;
     }
@@ -171,9 +170,60 @@ static void process_directive(PreprocessorState* state) {
     
     /* Report error for unknown directive */
     if (!known_directive) {
-        errman__report_error(state->directive_start_line, 
-                             state->directive_start_column + (command_start - directive),
+        errhandler__report_error(state->directive_start_line, 
+                             state->directive_start_column + (command_start - directive), "syntax",
                              "Unknown preprocessor directive: %s", command);
+    }
+}
+
+/**
+ * Check if line continuation with backslash
+ * @param state: PreprocessorState to check
+ * @return: 1 if line continuation, 0 otherwise
+ */
+static int is_line_continuation(PreprocessorState* state) {
+    const char* input = state->input;
+    size_t pos = state->input_pos;
+    
+    // Check for backslash followed by newline
+    if (input[pos] == '\\' && (input[pos + 1] == '\n' || input[pos + 1] == '\r')) {
+        // Handle \r\n sequence
+        if (input[pos + 1] == '\r' && input[pos + 2] == '\n') {
+            return 1;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Handle line continuation - skip backslash and newline
+ * @param state: PreprocessorState to update
+ */
+static void handle_line_continuation(PreprocessorState* state) {
+    char current = state->input[state->input_pos];
+    char next = state->input[state->input_pos + 1];
+    
+    // Skip backslash
+    state->input_pos++;
+    state->column++;
+    
+    // Handle different newline sequences
+    if (next == '\r' && state->input[state->input_pos + 1] == '\n') {
+        // \r\n sequence
+        state->input_pos += 2;
+        state->line++;
+        state->column = 1;
+    } else if (next == '\n') {
+        // \n sequence
+        state->input_pos++;
+        state->line++;
+        state->column = 1;
+    } else if (next == '\r') {
+        // \r sequence (old Mac)
+        state->input_pos++;
+        state->line++;
+        state->column = 1;
     }
 }
 
@@ -225,6 +275,12 @@ char* preprocess
         char current = state.input[state.input_pos];
         char next = state.input[state.input_pos + 1];
         
+        /* Check for line continuation */
+        if (is_line_continuation(&state)) {
+            handle_line_continuation(&state);
+            continue;
+        }
+        
         /* Handle string literal */
         if (state.in_string) {
             add_to_output(&state, current);
@@ -263,6 +319,13 @@ char* preprocess
         
         /* Handle single-line comment */
         if (state.in_single_line_comment) {
+            // Check for line continuation at the end of comment
+            if (is_line_continuation(&state)) {
+                handle_line_continuation(&state);
+                // Stay in single-line comment state for continuation
+                continue;
+            }
+            
             if (current == '\n') {
                 add_to_output(&state, '\n');
                 state.input_pos++;
@@ -278,6 +341,12 @@ char* preprocess
         
         /* Handle multi-line comment */
         if (state.in_multi_line_comment) {
+            // Check for line continuation in multi-line comment
+            if (is_line_continuation(&state)) {
+                handle_line_continuation(&state);
+                continue;
+            }
+            
             if (current == '*' && next == '/') {
                 state.in_multi_line_comment = 0;
                 state.input_pos += 2;
@@ -295,17 +364,31 @@ char* preprocess
         /* Handle preprocessor directive */
         if (state.in_preprocessor_directive) {
             if (current == '\n') {
-                /* End of directive line */
-                process_directive(&state);
-                state.in_preprocessor_directive = 0;
-                clear_directive_buffer(&state);
-                
-                add_to_output(&state, '\n');
-                state.input_pos++;
-                state.line++;
-                state.column = 1;
+                /* Check for line continuation before newline */
+                if (state.directive_pos > 0 && 
+                    state.directive_buffer[state.directive_pos - 1] == '\\') {
+                    // Remove the backslash from directive buffer
+                    state.directive_pos--;
+                    state.directive_buffer[state.directive_pos] = '\0';
+                    
+                    // Skip the newline and continue directive on next line
+                    state.input_pos++;
+                    state.line++;
+                    state.column = 1;
+                } else {
+                    /* End of directive line */
+                    process_directive(&state);
+                    state.in_preprocessor_directive = 0;
+                    clear_directive_buffer(&state);
+                    
+                    add_to_output(&state, '\n');
+                    state.input_pos++;
+                    state.line++;
+                    state.column = 1;
+                }
             } else if (current == '\\' && next == '\n') {
-                /* Continuation line */
+                /* Continuation line - add backslash to directive buffer */
+                add_to_directive_buffer(&state, current);
                 state.input_pos += 2; /* Skip backslash and newline */
                 state.line++;
                 state.column = 1;
