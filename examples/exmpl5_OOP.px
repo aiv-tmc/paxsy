@@ -1,7 +1,7 @@
 #inclib "inout"
 #inclib "string"
 #inclib "type"
-#inclib "sys"
+#inclib "simac"
 #go .start
 
 class Person;
@@ -22,7 +22,7 @@ func start(none) {
     
     io::print("calc print:", calc(24, 10), '\n');
     
-    sys::exit(0);
+    exit;
 }
 
 func calc( var num1 : Int<2>
