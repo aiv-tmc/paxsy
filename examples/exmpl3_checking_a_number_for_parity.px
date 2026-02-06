@@ -1,5 +1,5 @@
 #inclib "_zero"
-#inclib "sys"
+#inclib "simac"
 #inclib "inout"
 #go .start
 
@@ -15,5 +15,5 @@ func start(none) {
     else =>
         io::print(number, " odd number");
     
-    sys::exit(0);
+    exit;
 }
