@@ -1,8 +1,8 @@
-#inclib "sys"
+#inclib "simac"
 #inclib "inout"
 #go .start
 
 func start(none) {
     io::print("Hello, World!");
-    sys::exit(0);
+    exit;
 }
