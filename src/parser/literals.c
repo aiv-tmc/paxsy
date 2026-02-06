@@ -168,7 +168,7 @@ static bool parse_exponent_part(Lexer* lexer) {
  * @param lexer: lexer instance
  * @return: token representing the number literal
  */
-Token parse_number_literal(Lexer* lexer) {
+Token literal__parse_number(Lexer* lexer) {
     const char* input = lexer->source;
     const uint32_t start_pos = lexer->position;
     const uint16_t start_line = lexer->line;
@@ -412,7 +412,7 @@ static inline char parse_escape_sequence(Lexer* lexer) {
  * @param lexer: lexer instance
  * @return: token representing the character literal
  */
-Token parse_char_literal(Lexer* lexer) {
+Token literal__parse_char(Lexer* lexer) {
     const char* input = lexer->source;
     const uint32_t start_pos = lexer->position;
     const uint16_t start_line = lexer->line;
@@ -567,7 +567,7 @@ Token parse_char_literal(Lexer* lexer) {
  * @param lexer: lexer instance
  * @return: token representing the string literal
  */
-Token parse_string_literal(Lexer* lexer) {
+Token literal__parse_string(Lexer* lexer) {
     const char* input = lexer->source;
     const uint32_t start_pos = lexer->position;
     const uint16_t start_line = lexer->line;
