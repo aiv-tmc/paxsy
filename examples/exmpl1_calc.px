@@ -1,5 +1,5 @@
 #inclib "_zero"
-#inclib "sys"
+#inclib "simac"
 #inclib "inout"
 #inclib "mathf"
 #inclib "type"
@@ -15,10 +15,10 @@ func start(none) {
             , mth::PI(2)
         )
     );
-    sys::exit(0);
+    exit;
 }
 
-func calc(var num : Float, ...) : static Float {
+func calc(var num : Float/*, ...*/) : static Float {
     var result : Float = zero;
     var factor : VLS = zero;
     
