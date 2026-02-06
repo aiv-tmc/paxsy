@@ -2,14 +2,6 @@
 
 The **paxsy** project is freely available under the MIT license. You can read it at [this link](https://github.com/aiv-tmc/Paxsi/blob/main/LICENSE).
 
-<!--Version status-->
-## Version status
-Newest: [Beta version 4 BlackBerry - v0.4.1](https://github.com/aiv-tmc/Paxsy/tree/beta-4.1_2A-Rowan)
-
-Current: [Beta version 4 BlackBerry - v0.4.1](https://github.com/aiv-tmc/Paxsy/tree/beta-4.1_2A-Rowan)
-
-Stable: [Beta version 4 BlackBerry - v0.4.1](https://github.com/aiv-tmc/Paxsy/tree/beta-4.1_2A-Rowan)
-
 <!--Install-->
 ## Install (Linux)
 You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#dependencies )
