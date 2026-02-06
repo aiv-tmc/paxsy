@@ -1,6 +1,14 @@
 # Paxsy
 
-The **paxsy** project is freely available under the MIT license. You can read it at [this link](https://github.com/aiv-tmc/Paxsy/blob/main/LICENSE).
+The **paxsy** project is freely available under the MIT license. You can read it at [this link](https://github.com/aiv-tmc/Paxsi/blob/main/LICENSE).
+
+<!--Version status-->
+## Version status
+Newest: [Beta version 4 BlackBerry - v0.4.1](https://github.com/aiv-tmc/Paxsy/tree/beta-4.1_2A-Rowan)
+
+Current: [Beta version 4 BlackBerry - v0.4.1](https://github.com/aiv-tmc/Paxsy/tree/beta-4.1_2A-Rowan)
+
+Stable: [Beta version 4 BlackBerry - v0.4.1](https://github.com/aiv-tmc/Paxsy/tree/beta-4.1_2A-Rowan)
 
 <!--Install-->
 ## Install (Linux)
@@ -25,7 +33,7 @@ To add syntax highlighting in **vim**:
 
 3. Make sure that in the file `~/.vimrc` has the **industry style installed**
 
-P.S. To activate custom highlighting in the file `~/.vim/syntax/paxsy.vim` comment out **68-81** lines (optionally **27**, **33** and **18-20** more lines)
+P.S. To activate custom highlighting in the file `~/.vim/syntax/paxsy.vim` comment out **67-80** lines (optionally **27**, **33** and **18-20** more lines)
  
 <!--Documentation-->
 ## Documentation
@@ -35,3 +43,6 @@ At the moment, there is no documentation yet.
 <!--Dependencies-->
 ## Dependencies 
 This program depends on the version of the interpreter **gcc** **3.2** or later.
+
+<!--Other localizations-->
+## Other localizations
