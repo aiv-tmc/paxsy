@@ -555,7 +555,7 @@ void lexer__tokenize(Lexer* lexer) {
         char current_char = source[lexer->position];
         
         if (current_char == '\'') { // Character literal
-            Token character_token = parse_char_literal(lexer);
+            Token character_token = literal__parse_char(lexer);
             add_token_to_lexer
                 ( lexer
                 , character_token.type
@@ -566,7 +566,7 @@ void lexer__tokenize(Lexer* lexer) {
             if (character_token.value != NULL) free(character_token.value);
             continue;
         } else if (current_char == '"') { // String literal
-            Token string_token = parse_string_literal(lexer);
+            Token string_token = literal__parse_string(lexer);
             add_token_to_lexer
                 ( lexer
                 , string_token.type
@@ -646,7 +646,7 @@ void lexer__tokenize(Lexer* lexer) {
                 && source[lexer->position + 1] <= '9')
             )
         ) {
-            Token number_token = parse_number_literal(lexer);
+            Token number_token = literal__parse_number(lexer);
             add_token_to_lexer
                 ( lexer
                 , number_token.type
