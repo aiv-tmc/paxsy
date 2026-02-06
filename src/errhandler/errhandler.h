@@ -185,6 +185,12 @@ bool errhandler__parse_error_code
 #define ERROR_CODE_SEM_INVALID_CAST         "A402"
 #define ERROR_CODE_SEM_UNDEFINED_VAR        "A403"
 #define ERROR_CODE_SEM_INVALID_OPERATION    "A404"
+#define ERROR_CODE_SEM_REDECLARATION        "A405"
+#define ERROR_CODE_SEM_UNDECLARED_SYMBOL    "A406"
+#define ERROR_CODE_SEM_UNINITIALIZED        "A407"
+#define ERROR_CODE_SEM_ASSIGN_TO_CONST      "A408"
+#define ERROR_CODE_SEM_TYPE_ERROR           "A409"
+#define ERROR_CODE_SEM_UNUSED_VARIABLE      "A40A"
 
 /* Memory errors */
 #define ERROR_CODE_MEMORY_ALLOCATION        "6B01"
@@ -202,7 +208,7 @@ bool errhandler__parse_error_code
 #define ERROR_CODE_IO_READ_ERROR            "8203"
 #define ERROR_CODE_IO_WRITE_ERROR           "8204"
 
-/* Backward compatibility functions (default length = 1, default code = 2E0000) */
+/* Backward compatibility functions (default length = 1, default code = 7A00) */
 
 /**
  * @brief Report an error with default length and code (backward compatibility)
