@@ -1,7 +1,6 @@
 #include "lexer.h"
 #include "../parser/literals.h"
-#include "../errman/errman.h"
-
+#include "../errhandler/errhandler.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -371,11 +370,12 @@ static void add_token_to_lexer
         return;
     }
     
-    if (lexer->token_count >= UINT16_MAX) {
-        errman__report_error
+    if (lexer->token_count >= UINT64_MAX) {
+        errhandler__report_error
             ( lexer->line
             , lexer->column
-            , "Too many tokens, maximum is 65535"
+            , "inside"
+            , "Too many tokens, maximum is 18446744073709551615"
         );
         return;
     }
@@ -385,9 +385,10 @@ static void add_token_to_lexer
         const uint16_t new_capacity = lexer->token_capacity * 2;
         
         if (new_capacity <= lexer->token_capacity || new_capacity >= UINT16_MAX) {
-            errman__report_error
+            errhandler__report_error
                 ( lexer->line
                 , lexer->column
+                , "inside"
                 , "Token array capacity overflow"
             );
             return;
@@ -399,9 +400,10 @@ static void add_token_to_lexer
         );
         
         if (new_token_array == NULL) {
-            errman__report_error
+            errhandler__report_error
                 ( lexer->line
                 , lexer->column
+                , "inside"
                 , "Memory allocation failed for token array"
             );
             return;
@@ -430,9 +432,10 @@ static void add_token_to_lexer
         current_token->value = malloc(value_length + 1);
         
         if (current_token->value == NULL) {
-            errman__report_error
+            errhandler__report_error
                 ( lexer->line
                 , lexer->column
+                , "inside"
                 , "Memory allocation failed for token value"
             );
             lexer->token_count--;
@@ -653,9 +656,10 @@ void lexer__tokenize(Lexer* lexer) {
             
             if (number_token.value != NULL) free(number_token.value);
         } else { // Invalid character
-            errman__report_error
+            errhandler__report_error
                 ( lexer->line
                 , lexer->column
+                , "syntax"
                 , "Unexpected character in source code"
             );
             
