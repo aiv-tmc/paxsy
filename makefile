@@ -19,6 +19,7 @@ SRC = src/preprocessor/preprocessor.c \
       src/lexer/lexer.c \
       src/parser/literals.c \
       src/parser/parser.c \
+	  src/semantic/semantic.c \
       src/output/output.c \
       src/errman/errman.c \
       src/main.c
