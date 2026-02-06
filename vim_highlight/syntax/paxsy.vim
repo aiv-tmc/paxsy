@@ -11,7 +11,7 @@ syn keyword pxLogOper   or and some
 
 " Keywords
 syn keyword pxKeyword   if else alias nop halt jump free sizeof parseof typeof alloc inter signal realloc push pop return
-syn keyword pxKeyword   while do break continue
+" syn keyword pxKeyword   exit write read
 
 " Collection
 syn match   pxFunction  "\<[a-zA-Z_][a-zA-Z0-9_]*\s*(\@="
@@ -43,7 +43,7 @@ syn region  pxComment start="/\*" end="\*/"               contains=pxTodo,@Spell
 syn keyword pxTodo                                      contained TODO FIXME NOTE XXX HACK
 
 " Preprocessor Directives
-syn match   pxPreProc "#.*$"                            contains=pxString,pxNumber,pxOperator,pxLogOper,pxType,pxKeyword,pxComment,pxTodo
+syn match   pxPreProc "#.*$"                            contains=pxString,pxNumber,pxOperator,pxLogOper,pxType,pxComment,pxTodo
 
 " Markup
 hi def link pxComment       Comment
