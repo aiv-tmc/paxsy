@@ -7,7 +7,6 @@
 #include <ctype.h>
 
 /* Configuration constants */
-#define ERROR_ID_BUFFER_SIZE 9          /* 8 hex digits + null terminator */
 #define ERROR_MESSAGE_BUFFER_SIZE 1024  /* Max length of formatted error message */
 #define CONTEXT_BUFFER_SIZE 8           /* Max length of context identifier */
 #define INITIAL_CAPACITY 8              /* Initial capacity of error entries array */
@@ -33,7 +32,7 @@ typedef struct {
     ErrorLevel level;       /* Severity level of the error */
     char context[CONTEXT_BUFFER_SIZE];  /* Context identifier */
     uint32_t timestamp;     /* Relative timestamp in seconds since first error */
-    char error_code[ERROR_CODE_SIZE];  /* 6-character error code + null terminator */
+    uint16_t error_code;    /* 16-bit hexadecimal error code */
     char* source_line;      /* Copy of source line where error occurred */
 } ErrorEntry;
 
@@ -81,8 +80,8 @@ static uint32_t generate_error_id(void);
 static bool ensure_capacity(void);
 static void add_error_entry(uint16_t line, uint8_t column, uint8_t length,
                            ErrorLevel level, const char* context, 
-                           const char* error_code, const char* message);
-static void report_error_va(ErrorLevel level, const char* error_code,
+                           uint16_t error_code, const char* message);
+static void report_error_va(ErrorLevel level, uint16_t error_code,
                            uint16_t line, uint8_t column, uint8_t length,
                            const char* context, const char* format, va_list args);
 static uint16_t calculate_visual_column(const char* line, uint16_t target_column);
@@ -93,7 +92,7 @@ static void print_error_source_line(const char* source_line, uint16_t line,
                                    uint8_t column, uint8_t length, 
                                    bool is_warning);
 static void print_error_entry(const ErrorEntry* entry, bool is_warning);
-static bool validate_error_code(const char* error_code);
+static bool validate_error_code(uint16_t error_code);
 static int count_digits(uint16_t number);
 static char* duplicate_string(const char* str);
 
@@ -133,27 +132,15 @@ static int count_digits(uint16_t number) {
 }
 
 /**
- * @brief Validate error code format
+ * @brief Validate error code (now just a range check)
  * 
- * @param error_code 6-character error code to validate
- * @return true if code is valid (exactly 6 alphanumeric characters)
- * @return false if code is invalid
+ * @param error_code 16-bit error code to validate
+ * @return true if code is valid (non-zero)
+ * @return false if code is invalid (zero)
  */
-static bool validate_error_code(const char* error_code) {
-    if (!error_code) return false;
-    
-    /* Check length */
-    size_t len = strlen(error_code);
-    if (len != 4) return false;
-    
-    /* Check that all characters are alphanumeric */
-    for (int i = 0; i < 4; i++) {
-        if (!isalnum((unsigned char)error_code[i])) {
-            return false;
-        }
-    }
-    
-    return true;
+static bool validate_error_code(uint16_t error_code) {
+    /* Zero is not a valid error code */
+    return error_code != 0;
 }
 
 /**
@@ -242,12 +229,12 @@ static bool ensure_capacity(void) {
  * @param length Length of problematic token/segment
  * @param level Error severity level
  * @param context Context identifier
- * @param error_code 6-character error code
+ * @param error_code 16-bit error code
  * @param message Formatted error message (will be copied)
  */
 static void add_error_entry(uint16_t line, uint8_t column, uint8_t length,
                            ErrorLevel level, const char* context, 
-                           const char* error_code, const char* message) {
+                           uint16_t error_code, const char* message) {
     /* Initialize start time on first error (for relative timestamps) */
     if (error_manager.start_time == 0) {
         error_manager.start_time = time(NULL);
@@ -255,9 +242,8 @@ static void add_error_entry(uint16_t line, uint8_t column, uint8_t length,
     
     /* Validate error code */
     if (!validate_error_code(error_code)) {
-        fprintf(stderr, "\033[33mWARNING\033[0m: Invalid error code format: %s\n", 
-                error_code ? error_code : "(null)");
-        error_code = "7A00";  /* Use default error code */
+        fprintf(stderr, "\033[33mWARNING\033[0m: Invalid error code: 0x%04X\n", error_code);
+        error_code = 0x7A00;  /* Use default error code */
     }
     
     /* Ensure capacity in entries array */
@@ -286,14 +272,7 @@ static void add_error_entry(uint16_t line, uint8_t column, uint8_t length,
     entry->column = column;
     entry->length = length;
     entry->level = level;
-    
-    /* Copy error code (6 characters + null terminator) */
-    if (error_code != NULL) {
-        strncpy(entry->error_code, error_code, ERROR_CODE_SIZE - 1);
-        entry->error_code[ERROR_CODE_SIZE - 1] = '\0';
-    } else {
-        strcpy(entry->error_code, "2E0000");
-    }
+    entry->error_code = error_code;
     
     /* Copy context string (safe with bounds checking) */
     if (context != NULL) {
@@ -305,8 +284,10 @@ static void add_error_entry(uint16_t line, uint8_t column, uint8_t length,
     
     /* Calculate relative timestamp (seconds since first error) */
     time_t current_time = time(NULL);
-    entry->timestamp = (uint32_t)difftime(current_time, 
-                                         error_manager.start_time);
+    entry->timestamp = (uint32_t)difftime
+        ( current_time 
+        , error_manager.start_time
+    );
     
     /* Copy source line if available for contextual display */
     if (line > 0 && error_manager.source_lines != NULL && 
@@ -333,7 +314,7 @@ static void add_error_entry(uint16_t line, uint8_t column, uint8_t length,
  * Formats the error message using vsnprintf and adds it to the error manager.
  * 
  * @param level Error severity level
- * @param error_code 6-character error code
+ * @param error_code 16-bit error code
  * @param line Line number where error occurred
  * @param column Column number where error started
  * @param length Length of problematic token/segment
@@ -341,7 +322,7 @@ static void add_error_entry(uint16_t line, uint8_t column, uint8_t length,
  * @param format printf-style format string
  * @param args Variable arguments list
  */
-static void report_error_va(ErrorLevel level, const char* error_code,
+static void report_error_va(ErrorLevel level, uint16_t error_code,
                            uint16_t line, uint8_t column, uint8_t length,
                            const char* context, const char* format, va_list args) {
     char buffer[ERROR_MESSAGE_BUFFER_SIZE];
@@ -589,8 +570,8 @@ static void print_error_entry(const ErrorEntry* entry, bool is_warning) {
         }
     }
     
-    /* Print error code */
-    printf("[%s]: ", entry->error_code);
+    /* Print error code in hexadecimal format (4 digits with leading zeros) */
+    printf("[%04X]: ", entry->error_code);
     
     /* Print context if available */
     if (entry->context[0] != '\0') {
@@ -615,15 +596,13 @@ static void print_error_entry(const ErrorEntry* entry, bool is_warning) {
     printf("\n");
 }
 
-/* Public API implementations */
-
 /**
  * @brief Extended error reporting with severity level, context, token length, and error code
  * 
  * Public interface for reporting errors with full context information.
  * See function documentation in header for parameters.
  */
-void errhandler__report_error_ex(ErrorLevel level, const char* error_code,
+void errhandler__report_error_ex(ErrorLevel level, uint16_t error_code,
                             uint16_t line, uint8_t column, uint8_t length,
                             const char* context, const char* format, ...) {
     va_list args;
@@ -703,7 +682,7 @@ void errhandler__report_error
 ) {
     va_list args;
     va_start(args, format);
-    report_error_va(ERROR_LEVEL_ERROR, ERROR_CODE_SYNTAX_GENERIC, 
+    report_error_va(ERROR_LEVEL_ERROR, 0x7A00, 
                    line, column, 1, context, format, args);
     va_end(args);
 }
@@ -718,7 +697,7 @@ void errhandler__report_warning(uint16_t line, uint8_t column,
                            const char* format, ...) {
     va_list args;
     va_start(args, format);
-    report_error_va(ERROR_LEVEL_WARNING, ERROR_CODE_SYNTAX_GENERIC,
+    report_error_va(ERROR_LEVEL_WARNING, 0x7A00,
                    line, column, 1, "syntax", format, args);
     va_end(args);
 }
@@ -779,34 +758,49 @@ const char* errhandler__get_error_level_string(ErrorLevel level) {
 }
 
 /**
- * @brief Parse error code components
+ * @brief Parse error code string components
  * 
  * Public interface for parsing error code into components.
  * See function documentation in header for parameters and return value.
  */
-bool errhandler__parse_error_code(const char* error_code,
+bool errhandler__parse_error_code(const char* error_code_str,
                                  char type[3], char group[3], char number[3]) {
-    if (!error_code || !validate_error_code(error_code)) {
+    if (!error_code_str || strlen(error_code_str) != 4) {
         return false;
     }
     
-    /* Extract components */
+    /* Check that all characters are hex digits */
+    for (int i = 0; i < 4; i++) {
+        if (!isxdigit((unsigned char)error_code_str[i])) {
+            return false;
+        }
+    }
+    
+    /* Convert hex string to uint16_t */
+    char hex_str[5];
+    hex_str[0] = error_code_str[0];
+    hex_str[1] = error_code_str[1];
+    hex_str[2] = error_code_str[2];
+    hex_str[3] = error_code_str[3];
+    hex_str[4] = '\0';
+    
+    uint16_t error_code = (uint16_t)strtoul(hex_str, NULL, 16);
+    
+    /* Extract components from 16-bit code */
+    /* Format: TTGNNN where T=type(4 bits), G=group(4 bits), N=number(8 bits) */
     if (type) {
-        type[0] = error_code[0];
-        type[1] = error_code[1];
-        type[2] = '\0';
+        uint8_t type_val = (error_code >> 12) & 0x0F;
+        snprintf(type, 3, "%01X", type_val);
     }
     
     if (group) {
-        group[0] = error_code[2];
-        group[1] = error_code[3];
-        group[2] = '\0';
+        uint8_t group_val = (error_code >> 8) & 0x0F;
+        snprintf(group, 3, "%01X", group_val);
     }
     
     if (number) {
-        number[0] = error_code[4];
-        number[1] = error_code[5];
-        number[2] = '\0';
+        uint8_t number_val = error_code & 0xFF;
+        snprintf(number, 3, "%02X", number_val);
     }
     
     return true;
