@@ -1,5 +1,5 @@
 #include "output.h"
-
+#include "../errhandler/errhandler.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -236,8 +236,138 @@ static void count_nodes( ASTNode* node
     count_nodes(node->default_value, total_nodes, type_counts);
 }
 
+/* Вывод таблицы символов */
+void print_semantic_symbol_table(SemanticContext* context, FILE* out) {
+    if (!context || !out) {
+        fputs("No semantic context to display\n", out);
+        return;
+    }
+    
+    SymbolTable* table = semantic_get_global_table(context);
+    if (!table) {
+        fputs("No symbol table available\n", out);
+        return;
+    }
+    
+    size_t total_symbols = 0;
+    
+    for (size_t i = 0; i < table->capacity; i++) {
+        SymbolEntry* entry = table->entries[i];
+        
+        while (entry) {
+            fprintf(out, "%-20s : %-10s", entry->name, 
+                    semantic_type_to_string(entry->type));
+            
+            fprintf(out, " [%s%s%s]", 
+                    entry->is_constant ? "const " : "",
+                    entry->is_initialized ? "init " : "",
+                    entry->is_used ? "used" : "");
+            
+            if (entry->type_info && entry->type_info->name) {
+                fprintf(out, " (%s)", entry->type_info->name);
+            }
+            
+            fprintf(out, "\n");
+            
+            total_symbols++;
+            entry = entry->next;
+        }
+    }
+    
+    fprintf(out, "\nTotal symbols: %zu\n", total_symbols);
+}
+
+/* Вывод информации о типах */
+void print_semantic_type_info(SemanticContext* context, FILE* out) {
+    if (!context || !out) return;
+    
+    SymbolTable* table = semantic_get_global_table(context);
+    if (!table) return;
+    
+    /* Статистика по типам */
+    size_t type_counts[TYPE_COMPOUND + 1] = {0};
+    size_t total_symbols = 0;
+    
+    for (size_t i = 0; i < table->capacity; i++) {
+        SymbolEntry* entry = table->entries[i];
+        while (entry) {
+            if (entry->type <= TYPE_COMPOUND) {
+                type_counts[entry->type]++;
+            }
+            total_symbols++;
+            entry = entry->next;
+        }
+    }
+    
+    if (total_symbols == 0) {
+        fprintf(out, "No symbols to analyze\n");
+        return;
+    }
+    
+    fprintf(out, "Type distribution:\n");
+    for (int i = TYPE_UNKNOWN; i <= TYPE_COMPOUND; i++) {
+        if (type_counts[i] > 0) {
+            fprintf(out, "  %-12s: %zu (%.1f%%)\n",
+                    semantic_type_to_string(i),
+                    type_counts[i],
+                    (float)type_counts[i] / total_symbols * 100.0f);
+        }
+    }
+    
+    /* Дополнительная информация */
+    fprintf(out, "\nType compatibility:\n");
+    fprintf(out, "  Int <-> Real: compatible\n");
+    fprintf(out, "  none <-> pointer/reference: compatible\n");
+    fprintf(out, "  Identical types: always compatible\n");
+}
+
+/* Вывод ошибок и предупреждений семантического анализа */
+void print_semantic_errors_warnings(FILE* out) {
+    if (!out) return;
+    
+    /* Ошибки и предупреждения уже выводятся через errhandler,
+       но мы можем вывести сводку */
+    
+    /* Здесь можно было бы вывести статистику из errhandler,
+       но так как у нас нет доступа к внутренним данным errhandler,
+       просто сообщим, что ошибки выводятся через стандартный механизм */
+    fprintf(out, "Errors and warnings are reported through the error handler.\n");
+    fprintf(out, "Use --log or --verbose flags to see detailed messages.\n");
+}
+
+/* Вывод сводки семантического анализа */
+void print_semantic_summary(SemanticContext* context, FILE* out) {
+    if (!context || !out) return;
+    
+    fprintf(out, "Status: %s\n", 
+            semantic_has_errors(context) ? "FAILED" : "PASSED");
+    fprintf(out, "Warnings enabled: %s\n",
+            semantic_warnings_enabled(context) ? "yes" : "no");
+    fprintf(out, "Total symbols: %zu\n",
+            semantic_get_symbol_count(context));
+}
+
+/* Вывод полного семантического анализа */
+void print_semantic_analysis(SemanticContext* context, FILE* out) {
+    if (!context || !out) {
+        fputs("No semantic context to display\n", out);
+        return;
+    }
+    
+    /* Таблица символов */
+    print_semantic_symbol_table(context, out);
+    
+    /* Информация о типах */
+    fputc('\n', out);
+    print_semantic_type_info(context, out);
+    
+    /* Сводка */
+    fputc('\n', out);
+    print_semantic_summary(context, out);
+}
+
 /*
- * Public function implementations
+ * Public function implementations (остальные функции остаются без изменений)
  */
 
 /* Get AST node type name as string */
@@ -315,8 +445,6 @@ void print_all_tokens(Lexer* lexer, FILE* out) {
         fputs("No tokens to display\n", out);
         return;
     }
-
-    fprintf(out, "=== TOKENS (%u total) ===\n\n", lexer->token_count);
     
     for (uint16_t i = 0; i < lexer->token_count; i++) {
         Token* token = &lexer->tokens[i];
@@ -335,8 +463,6 @@ void print_tokens_by_line(Lexer* lexer, FILE* out) {
         fputs("No tokens to display\n", out);
         return;
     }
-
-    fprintf(out, "=== TOKENS BY LINE ===\n\n");
     
     uint16_t current_line = 0;
     
@@ -375,7 +501,6 @@ void print_token_statistics(Lexer* lexer, FILE* out) {
         if ((type & (TOKEN_TYPE_COUNT - 1)) == type) counts[type]++;
     }
 
-    fprintf(out, "=== TOKEN STATISTICS ===\n\n");
     fprintf(out, "Total: %u\n", lexer->token_count);
     fprintf(out, "Non-EOF: %u\n\n", lexer->token_count - counts[TOKEN_EOF]);
     
@@ -394,7 +519,6 @@ void print_detailed_token_info(Lexer* lexer, FILE* out) {
         return;
     }
 
-    fprintf(out, "=== DETAILED TOKEN INFO ===\n\n");
     
     for (uint16_t i = 0; i < lexer->token_count; i++) {
         Token* token = &lexer->tokens[i];
@@ -443,8 +567,6 @@ void print_ast_detailed(AST* ast, FILE* out) {
         return;
     }
 
-    fprintf(out, "=== AST (%u statements) ===\n\n", ast->count);
-    
     for (uint16_t i = 0; i < ast->count; i++) {
         if (!ast->nodes[i]) continue;
         
@@ -467,7 +589,6 @@ void print_ast_by_type(AST* ast, FILE* out) {
     for (uint16_t i = 0; i < ast->count; i++)
         if (ast->nodes[i]) type_counts[ast->nodes[i]->type]++;
 
-    fprintf(out, "=== AST BY TYPE ===\n\n");
     fprintf(out, "Total: %u\n\n", ast->count);
     
     for (int i = 0; i < AST_NODE_TYPE_COUNT; i++) {
@@ -493,7 +614,6 @@ void print_ast_statistics(AST* ast, FILE* out) {
     for (uint16_t i = 0; i < ast->count; i++)
         count_nodes(ast->nodes[i], &total_nodes, type_counts);
 
-    fprintf(out, "=== AST STATISTICS ===\n\n");
     fprintf(out, "Statements: %u\n", ast->count);
     fprintf(out, "Total nodes: %u\n\n", total_nodes);
     
@@ -515,8 +635,6 @@ void print_ast_with_types(AST* ast, FILE* out) {
         return;
     }
 
-    fprintf(out, "=== AST WITH TYPES ===\n\n");
-    
     for (uint16_t i = 0; i < ast->count; i++) {
         ASTNode* node = ast->nodes[i];
         
@@ -604,7 +722,6 @@ void print_parser_trace(ParserState* parser, FILE* out) {
         return;
     }
 
-    fprintf(out, "=== PARSER TRACE ===\n\n");
     fprintf(out, "Position: %u/%u\n", parser->current_token_position, 
             parser->total_tokens);
     fprintf(out, "In declaration context: %s\n", 
@@ -622,8 +739,9 @@ void print_parser_trace(ParserState* parser, FILE* out) {
     }
 }
 
-/* Print complete analysis based on mode */
-void print_complete_analysis(Lexer* lexer, AST* ast, PrintMode mode, FILE* out) {
+/* Обновленная функция для полного анализа */
+void print_complete_analysis(Lexer* lexer, AST* ast, 
+                            SemanticContext* semantic, PrintMode mode, FILE* out) {
     switch (mode) {
         case PRINT_TOKENS_ONLY:
             print_all_tokens(lexer, out);
@@ -635,10 +753,32 @@ void print_complete_analysis(Lexer* lexer, AST* ast, PrintMode mode, FILE* out) 
             print_ast_statistics(ast, out);
             break;
             
+        case PRINT_SEMANTIC_ONLY:
+            if (semantic) {
+                print_semantic_analysis(semantic, out);
+            } else {
+                fputs("No semantic context available\n", out);
+            }
+            break;
+            
+        case PRINT_SEMANTIC_FULL:
+            if (semantic) {
+                print_semantic_symbol_table(semantic, out);
+                fputc('\n', out);
+                print_semantic_type_info(semantic, out);
+                fputc('\n', out);
+                print_semantic_summary(semantic, out);
+            }
+            break;
+            
         case PRINT_ALL:
             print_all_tokens(lexer, out);
             fputc('\n', out);
             print_ast_detailed(ast, out);
+            if (semantic) {
+                fputc('\n', out);
+                print_semantic_analysis(semantic, out);
+            }
             break;
             
         case PRINT_VERBOSE:
@@ -647,6 +787,30 @@ void print_complete_analysis(Lexer* lexer, AST* ast, PrintMode mode, FILE* out) 
             print_ast_by_type(ast, out);
             fputc('\n', out);
             print_ast_with_types(ast, out);
+            if (semantic) {
+                fputc('\n', out);
+                print_semantic_analysis(semantic, out);
+            }
+            break;
+            
+        case PRINT_COMPLETE_ANALYSIS:
+            print_tokens_in_lines(lexer, out);
+            fputc('\n', out);
+            
+            print_ast_compact(ast, out);
+            fputc('\n', out);
+            
+            /* Семантический анализ */
+            if (semantic) {
+                print_semantic_analysis(semantic, out);
+            }
+            
+            /* Статистика */
+            ParseStatistics* stats = collect_parse_statistics(lexer, ast, semantic);
+            if (stats) {
+                print_statistics_report(stats, out);
+                free(stats);
+            }
             break;
             
         case PRINT_PARSER_TRACE:
@@ -655,8 +819,9 @@ void print_complete_analysis(Lexer* lexer, AST* ast, PrintMode mode, FILE* out) 
     }
 }
 
-/* Print parsing summary */
-void print_parse_summary(Lexer* lexer, AST* ast, FILE* out) {
+/* Обновленная функция сводки */
+void print_parse_summary(Lexer* lexer, AST* ast, 
+                        SemanticContext* semantic, FILE* out) {
     if (!lexer || !ast) {
         fputs("Invalid input\n", out);
         return;
@@ -667,16 +832,22 @@ void print_parse_summary(Lexer* lexer, AST* ast, FILE* out) {
     for (uint16_t i = 0; i < lexer->token_count; i++)
         if (lexer->tokens[i].type != TOKEN_EOF) non_eof++;
 
-    fprintf(out, "=== PARSING SUMMARY ===\n\n");
     fprintf(out, "Tokens: %u total, %u non-EOF\n", lexer->token_count, non_eof);
     fprintf(out, "AST: %u statements\n", ast->count);
+    
+    if (semantic) {
+        fprintf(out, "Semantic analysis: %s\n", 
+                semantic_has_errors(semantic) ? "FAILED" : "PASSED");
+        fprintf(out, "Symbols: %zu\n", semantic_get_symbol_count(semantic));
+    }
     
     if (non_eof)
         fprintf(out, "Ratio: %.1f%%\n", (float)ast->count / non_eof * 100.0f);
 }
 
-/* Collect parsing statistics */
-ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast) {
+/* Обновленная функция сбора статистики */
+ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast,
+                                         SemanticContext* semantic) {
     ParseStatistics* stats = malloc(sizeof(ParseStatistics));
     
     if (!stats) return NULL;
@@ -714,21 +885,34 @@ ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast) {
         }
     }
     
+    if (semantic) {
+        stats->symbols_count = semantic_get_symbol_count(semantic);
+        stats->semantic_errors = semantic_has_errors(semantic) ? 1 : 0;
+        /* Примечание: подсчет предупреждений требует доступа к errhandler */
+    }
+    
     return stats;
 }
 
-/* Print statistics report */
+/* Обновленный вывод статистики */
 void print_statistics_report(ParseStatistics* stats, FILE* out) {
     if (!stats) {
         fputs("No statistics\n", out);
         return;
     }
 
-    fprintf(out, "=== STATISTICS REPORT ===\n\n");
     fprintf(out, "Tokens: %u\n", stats->total_tokens);
-    fprintf(out, "AST Nodes: %u\n\n", stats->total_nodes);
+    fprintf(out, "AST Nodes: %u\n", stats->total_nodes);
     
-    fputs("Token types:\n", out);
+    if (stats->symbols_count > 0) {
+        fprintf(out, "Symbols: %u\n", stats->symbols_count);
+    }
+    
+    if (stats->semantic_errors > 0) {
+        fprintf(out, "Semantic errors: %u\n", stats->semantic_errors);
+    }
+    
+    fputs("\nToken types:\n", out);
     
     for (int i = 0; i < 256; i++) {
         if (stats->token_types[i]) {
