@@ -146,28 +146,17 @@ const char* ast_node_names[] = {
     [AST_TERNARY_OPERATION]      = "TERNARY_OPERATION"
 };
 
-/**
+/*
  * Print section header with title
  * @param title Section title
  * @param out Output file stream
  */
 void print_section_header(const char* title, FILE* out) {
     fprintf(out, "\n");
-    fprintf(out, "========================================\n");
-    fprintf(out, "%s\n", title);
-    fprintf(out, "========================================\n");
+    fprintf(out, "\033[34m%s\033[0m\n", title);
 }
 
-/**
- * Print section footer
- * @param out Output file stream
- */
-void print_section_footer(FILE* out) {
-    fprintf(out, "========================================\n");
-    fprintf(out, "\n");
-}
-
-/**
+/*
  * Print indentation for tree display
  * @param level Indentation level
  * @param out Output file stream
@@ -176,7 +165,7 @@ static inline void print_indent(uint8_t level, FILE* out) {
     for (uint8_t i = 0; i < level; i++) fputc(' ', out);
 }
 
-/**
+/*
  * Recursively print AST node with indentation
  * @param node AST node to print
  * @param depth Current depth for indentation
@@ -244,7 +233,7 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
     }
 }
 
-/**
+/*
  * Recursive helper for counting AST nodes
  * @param node Current node to count
  * @param total_nodes Pointer to total nodes counter
@@ -264,7 +253,7 @@ static void count_nodes(ASTNode* node, uint32_t* total_nodes, uint32_t* type_cou
     count_nodes(node->default_value, total_nodes, type_counts);
 }
 
-/**
+/*
  * Print symbol table from semantic context
  * @param context Semantic context containing symbol table
  * @param out Output file stream
@@ -308,7 +297,7 @@ void print_semantic_symbol_table(SemanticContext* context, FILE* out) {
     fprintf(out, "\nTotal symbols: %zu\n", total_symbols);
 }
 
-/**
+/*
  * Print type information from semantic context
  * @param context Semantic context containing type information
  * @param out Output file stream
@@ -359,7 +348,7 @@ void print_semantic_type_info(SemanticContext* context, FILE* out) {
     fprintf(out, "  Identical types: always compatible\n");
 }
 
-/**
+/*
  * Print semantic analysis errors and warnings
  * @param out Output file stream
  */
@@ -372,7 +361,7 @@ void print_semantic_errors_warnings(FILE* out) {
     fprintf(out, "Use --log or --verbose flags to see detailed messages.\n");
 }
 
-/**
+/*
  * Print semantic analysis summary
  * @param context Semantic context to summarize
  * @param out Output file stream
@@ -390,7 +379,7 @@ void print_semantic_summary(SemanticContext* context, FILE* out) {
     fprintf(out, "  Scope depth: %d\n", 0); /* TODO: Add scope depth tracking */
 }
 
-/**
+/*
  * Print complete semantic analysis
  * @param context Semantic context to analyze
  * @param out Output file stream
@@ -413,7 +402,7 @@ void print_semantic_analysis(SemanticContext* context, FILE* out) {
     print_semantic_type_info(context, out);
 }
 
-/**
+/*
  * Get AST node type name as string
  * @param type AST node type
  * @return String representation of node type
@@ -423,7 +412,7 @@ const char* get_ast_node_type_name(ASTNodeType type) {
            ast_node_names[type] : "UNKNOWN";
 }
 
-/**
+/*
  * Get token type name as string
  * @param type Token type
  * @return String representation of token type
@@ -433,7 +422,7 @@ const char* get_token_type_name(TokenType type) {
            token_names[type] : "UNKNOWN";
 }
 
-/**
+/*
  * Print AST node inline (without newline)
  * @param node AST node to print
  * @param out Output file stream
@@ -448,7 +437,7 @@ void print_ast_node_inline(ASTNode* node, FILE* out) {
                   fputs(get_ast_node_type_name(node->type), out);
 }
 
-/**
+/*
  * Print type information
  * @param type Type structure to print
  * @param out Output file stream
@@ -498,7 +487,7 @@ void print_type_info(Type* type, FILE* out) {
     fputc('\n', out);
 }
 
-/**
+/*
  * Print all tokens in lexer
  * @param lexer Lexer containing tokens
  * @param out Output file stream
@@ -520,7 +509,7 @@ void print_all_tokens(Lexer* lexer, FILE* out) {
     }
 }
 
-/**
+/*
  * Print tokens grouped by line
  * @param lexer Lexer containing tokens
  * @param out Output file stream
@@ -553,7 +542,7 @@ void print_tokens_by_line(Lexer* lexer, FILE* out) {
     fputc('\n', out);
 }
 
-/**
+/*
  * Print token statistics
  * @param lexer Lexer containing tokens
  * @param out Output file stream
@@ -583,7 +572,7 @@ void print_token_statistics(Lexer* lexer, FILE* out) {
     }
 }
 
-/**
+/*
  * Print detailed token information
  * @param lexer Lexer containing tokens
  * @param out Output file stream
@@ -606,7 +595,7 @@ void print_detailed_token_info(Lexer* lexer, FILE* out) {
     }
 }
 
-/**
+/*
  * Print tokens with line markers
  * @param lexer Lexer containing tokens
  * @param out Output file stream
@@ -639,7 +628,7 @@ void print_tokens_in_lines(Lexer* lexer, FILE* out) {
     if (current_line) fputs("]\n", out);
 }
 
-/**
+/*
  * Print AST in detailed tree format
  * @param ast AST to print
  * @param out Output file stream
@@ -660,7 +649,7 @@ void print_ast_detailed(AST* ast, FILE* out) {
     }
 }
 
-/**
+/*
  * Print AST nodes grouped by type
  * @param ast AST to analyze
  * @param out Output file stream
@@ -688,7 +677,7 @@ void print_ast_by_type(AST* ast, FILE* out) {
     }
 }
 
-/**
+/*
  * Print AST statistics
  * @param ast AST to analyze
  * @param out Output file stream
@@ -719,7 +708,7 @@ void print_ast_statistics(AST* ast, FILE* out) {
     }
 }
 
-/**
+/*
  * Print AST with type information
  * @param ast AST to print
  * @param out Output file stream
@@ -761,7 +750,7 @@ void print_ast_with_types(AST* ast, FILE* out) {
     }
 }
 
-/**
+/*
  * Print AST in compact format
  * @param ast AST to print
  * @param out Output file stream
@@ -785,7 +774,7 @@ void print_ast_compact(AST* ast, FILE* out) {
     }
 }
 
-/**
+/*
  * Enable or disable parser trace
  * @param enabled True to enable, false to disable
  */
@@ -793,7 +782,7 @@ void enable_parser_trace(bool enabled) {
     parser_trace_enabled = enabled;
 }
 
-/**
+/*
  * Log parser step for debugging
  * @param parser Parser state
  * @param action Description of current action
@@ -822,7 +811,7 @@ void log_parser_step(ParserState* parser, const char* action, ASTNode* node) {
     fputc('\n', out);
 }
 
-/**
+/*
  * Print parser trace information
  * @param parser Parser state to trace
  * @param out Output file stream
@@ -850,7 +839,7 @@ void print_parser_trace(ParserState* parser, FILE* out) {
     }
 }
 
-/**
+/*
  * Print complete analysis with specified mode
  * @param lexer Lexer data
  * @param ast AST data
@@ -865,21 +854,21 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
             print_section_header("LEXER TOKENS", out);
             print_all_tokens(lexer, out);
             print_token_statistics(lexer, out);
-            print_section_footer(out);
+            fprintf(out, "\n");
             break;
             
         case PRINT_AST_ONLY:
             print_section_header("PARSER AST", out);
             print_ast_detailed(ast, out);
             print_ast_statistics(ast, out);
-            print_section_footer(out);
+            fprintf(out, "\n");
             break;
             
         case PRINT_SEMANTIC_ONLY:
             if (semantic) {
                 print_section_header("SEMANTIC ANALYSIS", out);
                 print_semantic_analysis(semantic, out);
-                print_section_footer(out);
+                fprintf(out, "\n");
             } else {
                 fputs("No semantic context available\n", out);
             }
@@ -893,60 +882,60 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
                 print_semantic_type_info(semantic, out);
                 fputc('\n', out);
                 print_semantic_summary(semantic, out);
-                print_section_footer(out);
+                fprintf(out, "\n");
             }
             break;
             
         case PRINT_ALL:
             print_section_header("LEXER TOKENS", out);
             print_all_tokens(lexer, out);
-            print_section_footer(out);
+            fprintf(out, "\n");
             
             print_section_header("PARSER AST", out);
             print_ast_detailed(ast, out);
-            print_section_footer(out);
+            fprintf(out, "\n");
             
             if (semantic) {
                 print_section_header("SEMANTIC ANALYSIS", out);
                 print_semantic_analysis(semantic, out);
-                print_section_footer(out);
+                fprintf(out, "\n");
             }
             break;
             
         case PRINT_VERBOSE:
             print_section_header("LEXER TOKENS (DETAILED)", out);
             print_detailed_token_info(lexer, out);
-            print_section_footer(out);
+            fprintf(out, "\n");
             
             print_section_header("PARSER AST BY TYPE", out);
             print_ast_by_type(ast, out);
-            print_section_footer(out);
+            fprintf(out, "\n");
             
             print_section_header("PARSER AST WITH TYPES", out);
             print_ast_with_types(ast, out);
-            print_section_footer(out);
+            fprintf(out, "\n");
             
             if (semantic) {
                 print_section_header("SEMANTIC ANALYSIS", out);
                 print_semantic_analysis(semantic, out);
-                print_section_footer(out);
+                fprintf(out, "\n");
             }
             break;
             
         case PRINT_COMPLETE_ANALYSIS:
             print_section_header("LEXER TOKENS", out);
             print_tokens_in_lines(lexer, out);
-            print_section_footer(out);
+            fprintf(out, "\n");
             
             print_section_header("PARSER AST", out);
             print_ast_compact(ast, out);
-            print_section_footer(out);
+            fprintf(out, "\n");
             
             /* Semantic analysis */
             if (semantic) {
                 print_section_header("SEMANTIC ANALYSIS", out);
                 print_semantic_analysis(semantic, out);
-                print_section_footer(out);
+                fprintf(out, "\n");
             }
             
             /* Statistics */
@@ -954,7 +943,7 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
             if (stats) {
                 print_section_header("STATISTICS", out);
                 print_statistics_report(stats, out);
-                print_section_footer(out);
+                fprintf(out, "\n");
                 free(stats);
             }
             break;
@@ -965,7 +954,7 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
     }
 }
 
-/**
+/*
  * Collect parse statistics
  * @param lexer Lexer data
  * @param ast AST data
@@ -1020,7 +1009,7 @@ ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast,
     return stats;
 }
 
-/**
+/*
  * Print statistics report
  * @param stats Statistics to print
  * @param out Output file stream
