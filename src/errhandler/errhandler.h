@@ -27,26 +27,23 @@ typedef enum {
     ERROR_LEVEL_FATAL       /* Severe errors that force immediate termination */
 } ErrorLevel;
 
-/* Error code system */
-#define ERROR_CODE_SIZE 5  /* 4 characters + null terminator */
+/* Error code system - 16-bit hexadecimal values */
 
 /**
  * @brief Report an error with extended information and error code
  * 
  * @param level Error severity level (WARNING, ERROR, FATAL)
- * @param error_code 4-character error code
+ * @param error_code 16-bit hexadecimal error code
  * @param line Line number where error occurred (1-based)
  * @param column Column number where error started (1-based)
  * @param length Length of the problematic token/segment
  * @param context Context identifier
  * @param format printf-style format string for error message
  * @param ... Variable arguments for format string
- * 
- * @note Error code must be exactly 4 characters
  */
 void errhandler__report_error_ex
     ( ErrorLevel level
-    , const char* error_code
+    , uint16_t error_code
     , uint16_t line
     , uint8_t column
     , uint8_t length
@@ -146,9 +143,9 @@ uint16_t errhandler__get_warning_count(void);
 const char* errhandler__get_error_level_string(ErrorLevel level);
 
 /**
- * @brief Parse error code components
+ * @brief Parse error code string components
  * 
- * @param error_code 6-character error code
+ * @param error_code_str 4-character hex error code string
  * @param type Output buffer for 2-character type code
  * @param group Output buffer for 2-character group code
  * @param number Output buffer for 2-character number code
@@ -156,59 +153,59 @@ const char* errhandler__get_error_level_string(ErrorLevel level);
  * @return false if code is invalid
  */
 bool errhandler__parse_error_code
-    ( const char* error_code
+    ( const char* error_code_str
     , char type[3]
     , char group[3]
     , char number[3]
 );
 
-/* Common error codes */
+/* Common error codes - 16-bit hexadecimal values */
 
 /* Syntax errors */
-#define ERROR_CODE_SYNTAX_GENERIC           "7A00"
-#define ERROR_CODE_SYNTAX_UNEXPECTED_TOKEN  "7A01"
-#define ERROR_CODE_SYNTAX_UNEXPECTED_EOF    "7A02"
-#define ERROR_CODE_SYNTAX_INVALID_CHAR      "7A03"
-#define ERROR_CODE_SYNTAX_MISSING_SEMICOLON "7A04"
-#define ERROR_CODE_SYNTAX_INVALID_STATEMENT "7A05"
-#define ERROR_CODE_SYNTAX_UNCLOSED_QUOTE    "7A06"
-#define ERROR_CODE_SYNTAX_MISMATCHED_PAREN  "7A07"
+#define ERROR_CODE_SYNTAX_GENERIC           0x7A00
+#define ERROR_CODE_SYNTAX_UNEXPECTED_TOKEN  0x7A01
+#define ERROR_CODE_SYNTAX_UNEXPECTED_EOF    0x7A02
+#define ERROR_CODE_SYNTAX_INVALID_CHAR      0x7A03
+#define ERROR_CODE_SYNTAX_MISSING_SEMICOLON 0x7A04
+#define ERROR_CODE_SYNTAX_INVALID_STATEMENT 0x7A05
+#define ERROR_CODE_SYNTAX_UNCLOSED_QUOTE    0x7A06
+#define ERROR_CODE_SYNTAX_MISMATCHED_PAREN  0x7A07
 
 /* Lexical errors */
-#define ERROR_CODE_LEXER_INVALID_NUMBER     "E001"
-#define ERROR_CODE_LEXER_INVALID_ESCAPE     "E002"
-#define ERROR_CODE_LEXER_UNCLOSED_STRING    "E003"
-#define ERROR_CODE_LEXER_UNKNOWN_CHAR       "E004"
+#define ERROR_CODE_LEXER_INVALID_NUMBER     0xE001
+#define ERROR_CODE_LEXER_INVALID_ESCAPE     0xE002
+#define ERROR_CODE_LEXER_UNCLOSED_STRING    0xE003
+#define ERROR_CODE_LEXER_UNKNOWN_CHAR       0xE004
 
 /* Semantic errors */
-#define ERROR_CODE_SEM_MISMATCH             "A401"
-#define ERROR_CODE_SEM_INVALID_CAST         "A402"
-#define ERROR_CODE_SEM_UNDEFINED_VAR        "A403"
-#define ERROR_CODE_SEM_INVALID_OPERATION    "A404"
-#define ERROR_CODE_SEM_REDECLARATION        "A405"
-#define ERROR_CODE_SEM_UNDECLARED_SYMBOL    "A406"
-#define ERROR_CODE_SEM_UNINITIALIZED        "A407"
-#define ERROR_CODE_SEM_ASSIGN_TO_CONST      "A408"
-#define ERROR_CODE_SEM_TYPE_ERROR           "A409"
-#define ERROR_CODE_SEM_UNUSED_VARIABLE      "A40A"
+#define ERROR_CODE_SEM_MISMATCH             0xA401
+#define ERROR_CODE_SEM_INVALID_CAST         0xA402
+#define ERROR_CODE_SEM_UNDEFINED_VAR        0xA403
+#define ERROR_CODE_SEM_INVALID_OPERATION    0xA404
+#define ERROR_CODE_SEM_REDECLARATION        0xA405
+#define ERROR_CODE_SEM_UNDECLARED_SYMBOL    0xA406
+#define ERROR_CODE_SEM_UNINITIALIZED        0xA407
+#define ERROR_CODE_SEM_ASSIGN_TO_CONST      0xA408
+#define ERROR_CODE_SEM_TYPE_ERROR           0xA409
+#define ERROR_CODE_SEM_UNUSED_VARIABLE      0xA40A
 
 /* Memory errors */
-#define ERROR_CODE_MEMORY_ALLOCATION        "6B01"
-#define ERROR_CODE_MEMORY_OVERFLOW          "6B02"
-#define ERROR_CODE_MEMORY_INVALID_FREE      "6B03"
+#define ERROR_CODE_MEMORY_ALLOCATION        0x6B01
+#define ERROR_CODE_MEMORY_OVERFLOW          0x6B02
+#define ERROR_CODE_MEMORY_INVALID_FREE      0x6B03
 
 /* Runtime errors */
-#define ERROR_CODE_RUNTIME_DIV_BY_ZERO      "2301"
-#define ERROR_CODE_RUNTIME_OUT_OF_BOUNDS    "2302"
-#define ERROR_CODE_RUNTIME_OVERFLOW         "2303"
+#define ERROR_CODE_RUNTIME_DIV_BY_ZERO      0x2301
+#define ERROR_CODE_RUNTIME_OUT_OF_BOUNDS    0x2302
+#define ERROR_CODE_RUNTIME_OVERFLOW         0x2303
 
 /* I/O errors */
-#define ERROR_CODE_IO_FILE_NOT_FOUND        "8201"
-#define ERROR_CODE_IO_PERMISSION_DENIED     "8202"
-#define ERROR_CODE_IO_READ_ERROR            "8203"
-#define ERROR_CODE_IO_WRITE_ERROR           "8204"
+#define ERROR_CODE_IO_FILE_NOT_FOUND        0x8201
+#define ERROR_CODE_IO_PERMISSION_DENIED     0x8202
+#define ERROR_CODE_IO_READ_ERROR            0x8203
+#define ERROR_CODE_IO_WRITE_ERROR           0x8204
 
-/* Backward compatibility functions (default length = 1, default code = 7A00) */
+/* Backward compatibility functions (default length = 1, default code = 0x7A00) */
 
 /**
  * @brief Report an error with default length and code (backward compatibility)
