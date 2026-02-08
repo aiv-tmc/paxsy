@@ -29,7 +29,7 @@ P.S. To activate custom highlighting in the file `~/.vim/syntax/paxsy.vim` comme
 
 <!--Documentation-->
 ## Documentation
-The documentation can be obtained at [this link](./docs/doc-en.md)
+The documentation can be obtained at [this link](https://github.com/aiv-tmc/paxsy/wiki/Paxsy-Documentation)
 
 <!--Dependencies-->
 ## Dependencies 
