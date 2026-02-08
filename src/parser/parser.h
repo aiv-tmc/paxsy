@@ -2,7 +2,7 @@
 #define PARSER_H
 
 #include "../lexer/lexer.h"
-#include "../errman/errman.h"
+#include "../errhandler/errhandler.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
