@@ -22,7 +22,7 @@ func start(none) {
     
     io::print("calc print:", calc(24, 10), '\n');
     
-    exit;
+    sig::exit(0);
 }
 
 func calc( var num1 : Int<2>
