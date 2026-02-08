@@ -34,6 +34,3 @@ The documentation can be obtained at [this link](https://github.com/aiv-tmc/paxs
 <!--Dependencies-->
 ## Dependencies 
 This program depends on the version of the interpreter **gcc** **3.2** or later.
-
-<!--Other localizations-->
-## Other localizations
