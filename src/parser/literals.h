@@ -2,6 +2,7 @@
 #define LITERALS_H
 
 #include "../lexer/lexer.h"
+#include "../errhandler/errhandler.h"
 #include <stdint.h>
 #include <stdbool.h>
 
