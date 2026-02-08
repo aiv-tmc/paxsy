@@ -7,14 +7,14 @@
 #include <ctype.h>
 
 /* Configuration constants */
-#define ERROR_MESSAGE_BUFFER_SIZE 1024  /* Max length of formatted error message */
-#define CONTEXT_BUFFER_SIZE 8           /* Max length of context identifier */
-#define INITIAL_CAPACITY 8              /* Initial capacity of error entries array */
-#define MAX_CAPACITY_BEFORE_INCREMENT 1024  /* Switch to linear growth after this */
-#define CAPACITY_INCREMENT 256          /* Linear growth increment */
-#define TAB_SIZE 8                      /* Number of spaces per tab character */
-#define MAX_LINE_DIGITS 4               /* Maximum digits for line number */
-#define MAX_COL_DIGITS 3                /* Maximum digits for column number */
+#define ERROR_MESSAGE_BUFFER_SIZE 1024      // Max length of formatted error message
+#define CONTEXT_BUFFER_SIZE 8               // Max length of context identifier
+#define INITIAL_CAPACITY 8                  // Initial capacity of error entries array
+#define MAX_CAPACITY_BEFORE_INCREMENT 1024  // Switch to linear growth after this
+#define CAPACITY_INCREMENT 256              // Linear growth increment
+#define TAB_SIZE 8                          // Number of spaces per tab character
+#define MAX_LINE_DIGITS 4                   // Maximum digits for line number
+#define MAX_COL_DIGITS 3                    // Maximum digits for column number
 
 /* Structure definitions */
 
@@ -78,20 +78,46 @@ static ErrorManager error_manager = {
 static uint32_t get_timestamp(void);
 static uint32_t generate_error_id(void);
 static bool ensure_capacity(void);
-static void add_error_entry(uint16_t line, uint8_t column, uint8_t length,
-                           ErrorLevel level, const char* context, 
-                           uint16_t error_code, const char* message);
-static void report_error_va(ErrorLevel level, uint16_t error_code,
-                           uint16_t line, uint8_t column, uint8_t length,
-                           const char* context, const char* format, va_list args);
-static uint16_t calculate_visual_column(const char* line, uint16_t target_column);
-static uint16_t calculate_visual_length(const char* segment, uint8_t segment_len, 
-                                       uint16_t start_visual_col);
+static void add_error_entry
+    ( uint16_t line
+    , uint8_t column
+    , uint8_t length
+    , ErrorLevel level
+    , const char* context
+    , uint16_t error_code
+    , const char* message
+);
+static void report_error_va
+    ( ErrorLevel level
+    , uint16_t error_code
+    , uint16_t line
+    , uint8_t column
+    , uint8_t length
+    , const char* context
+    , const char* format
+    , va_list args
+);
+static uint16_t calculate_visual_column
+    ( const char* line
+    , uint16_t target_column
+);
+static uint16_t calculate_visual_length
+    ( const char* segment
+    , uint8_t segment_len
+    , uint16_t start_visual_col
+);
 static uint16_t calculate_visual_line_length(const char* line);
-static void print_error_source_line(const char* source_line, uint16_t line, 
-                                   uint8_t column, uint8_t length, 
-                                   bool is_warning);
-static void print_error_entry(const ErrorEntry* entry, bool is_warning);
+static void print_error_source_line
+    ( const char* source_line
+    , uint16_t line
+    , uint8_t column
+    , uint8_t length
+    , bool is_warning
+);
+static void print_error_entry
+    ( const ErrorEntry* entry
+    , bool is_warning
+);
 static bool validate_error_code(uint16_t error_code);
 static int count_digits(uint16_t number);
 static char* duplicate_string(const char* str);
@@ -192,10 +218,11 @@ static bool ensure_capacity(void) {
     /* Determine new capacity based on current size */
     if (error_manager.capacity == 0) {
         new_capacity = INITIAL_CAPACITY;
-    } else if (error_manager.capacity < MAX_CAPACITY_BEFORE_INCREMENT) {
-        new_capacity = error_manager.capacity * 2;  /* Exponential growth */
+    } else if ( error_manager.capacity
+              < MAX_CAPACITY_BEFORE_INCREMENT) {
+        new_capacity = error_manager.capacity * 2;  // Exponential growth
     } else {
-        new_capacity = error_manager.capacity + CAPACITY_INCREMENT;  /* Linear growth */
+        new_capacity = error_manager.capacity + CAPACITY_INCREMENT;  // Linear growth
     }
     
     /* Check for integer overflow */
@@ -322,9 +349,16 @@ static void add_error_entry(uint16_t line, uint8_t column, uint8_t length,
  * @param format printf-style format string
  * @param args Variable arguments list
  */
-static void report_error_va(ErrorLevel level, uint16_t error_code,
-                           uint16_t line, uint8_t column, uint8_t length,
-                           const char* context, const char* format, va_list args) {
+static void report_error_va
+    ( ErrorLevel level
+    , uint16_t error_code
+    , uint16_t line
+    , uint8_t column
+    , uint8_t length
+    , const char* context
+    , const char* format
+    , va_list args
+) {
     char buffer[ERROR_MESSAGE_BUFFER_SIZE];
     
     /* Format error message with variable arguments */
@@ -383,8 +417,11 @@ static uint16_t calculate_visual_column(const char* line, uint16_t target_column
  * @param start_visual_col Visual column at segment start
  * @return uint16_t Visual length of segment (with tabs expanded)
  */
-static uint16_t calculate_visual_length(const char* segment, uint8_t segment_len, 
-                                       uint16_t start_visual_col) {
+static uint16_t calculate_visual_length
+    ( const char* segment
+    , uint8_t segment_len
+    , uint16_t start_visual_col
+) {
     uint16_t visual_length = 0;
     uint16_t current_col = start_visual_col;
     
@@ -398,7 +435,7 @@ static uint16_t calculate_visual_length(const char* segment, uint8_t segment_len
             /* Tab expands to spaces until next tab stop */
             uint16_t tab_spaces = TAB_SIZE - (current_col % TAB_SIZE);
             if (tab_spaces == 0) {
-                tab_spaces = TAB_SIZE;  /* Tab at exact tab stop */
+                tab_spaces = TAB_SIZE;  // Tab at exact tab stop
             }
             visual_length += tab_spaces;
             current_col += tab_spaces;
@@ -431,9 +468,8 @@ static uint16_t calculate_visual_line_length(const char* line) {
         if (*p == '\t') {
             /* Tab expands to spaces until next tab stop */
             uint16_t tab_spaces = TAB_SIZE - (visual_length % TAB_SIZE);
-            if (tab_spaces == 0) {
-                tab_spaces = TAB_SIZE;  /* Tab at exact tab stop */
-            }
+            if (tab_spaces == 0)
+                tab_spaces = TAB_SIZE;  // Tab at exact tab stop
             visual_length += tab_spaces;
         } else {
             visual_length++;
@@ -455,16 +491,17 @@ static uint16_t calculate_visual_line_length(const char* line) {
  * @param length Error token length (in characters)
  * @param is_warning True if warning, false if error/fatal
  */
-static void print_error_source_line(const char* source_line, uint16_t line, 
-                                   uint8_t column, uint8_t length, bool is_warning) {
-    if (source_line == NULL) {
-        return;
-    }
+static void print_error_source_line
+    ( const char* source_line
+    , uint16_t line
+    , uint8_t column
+    , uint8_t length
+    , bool is_warning
+) {
+    if (source_line == NULL) return;
     
     size_t line_len = strlen(source_line);
-    if (line_len == 0) {
-        return;
-    }
+    if (line_len == 0) return;
     
     /* Calculate visual line length */
     uint16_t visual_line_length = calculate_visual_line_length(source_line);
@@ -574,12 +611,11 @@ static void print_error_entry(const ErrorEntry* entry, bool is_warning) {
     printf("[%04X]: ", entry->error_code);
     
     /* Print context if available */
-    if (entry->context[0] != '\0') {
-        printf("(%s) ", entry->context);
-    }
+    if (entry->context[0] != '\0')
+        printf("(%s): ", entry->context);
     
     /* Print error message */
-    printf("%s\n", entry->message ? entry->message : "(no message)");
+    printf("%s\n", entry->message ? entry->message : "(no message): ");
     
     /* Print location information if available */
     if (entry->line > 0) {
@@ -589,8 +625,13 @@ static void print_error_entry(const ErrorEntry* entry, bool is_warning) {
         printf("\n");
         
         /* Print source line with highlighting */
-        print_error_source_line(entry->source_line, entry->line, 
-                               entry->column, entry->length, is_warning);
+        print_error_source_line
+            ( entry->source_line
+            , entry->line
+            , entry->column
+            , entry->length
+            , is_warning
+        );
     }
     
     printf("\n");
@@ -602,12 +643,28 @@ static void print_error_entry(const ErrorEntry* entry, bool is_warning) {
  * Public interface for reporting errors with full context information.
  * See function documentation in header for parameters.
  */
-void errhandler__report_error_ex(ErrorLevel level, uint16_t error_code,
-                            uint16_t line, uint8_t column, uint8_t length,
-                            const char* context, const char* format, ...) {
+void errhandler__report_error_ex
+    ( ErrorLevel level
+    , uint16_t error_code
+    , uint16_t line
+    , uint8_t column
+    , uint8_t length
+    , const char* context
+    , const char* format
+    , ...
+) {
     va_list args;
     va_start(args, format);
-    report_error_va(level, error_code, line, column, length, context, format, args);
+    report_error_va
+        ( level
+        , error_code
+        , line
+        , column
+        , length
+        , context
+        , format
+        , args
+    );
     va_end(args);
 }
 
@@ -674,7 +731,8 @@ void errhandler__print_warnings(void) {
  * See function documentation in header for parameters.
  */
 void errhandler__report_error
-    ( uint16_t line
+    ( uint16_t error_code
+    , uint16_t line
     , uint8_t column
     , const char* context
     , const char* format
@@ -682,8 +740,16 @@ void errhandler__report_error
 ) {
     va_list args;
     va_start(args, format);
-    report_error_va(ERROR_LEVEL_ERROR, 0x7A00, 
-                   line, column, 1, context, format, args);
+    report_error_va
+        ( ERROR_LEVEL_ERROR
+        , error_code
+        , line
+        , column
+        , 1
+        , context
+        , format
+        , args
+    );
     va_end(args);
 }
 
@@ -693,12 +759,24 @@ void errhandler__report_error
  * Public interface for reporting warnings with default values.
  * See function documentation in header for parameters.
  */
-void errhandler__report_warning(uint16_t line, uint8_t column,
-                           const char* format, ...) {
+void errhandler__report_warning
+    ( uint16_t line
+    , uint8_t column
+    , const char* format
+    , ...
+) {
     va_list args;
     va_start(args, format);
-    report_error_va(ERROR_LEVEL_WARNING, 0x7A00,
-                   line, column, 1, "syntax", format, args);
+    report_error_va
+        ( ERROR_LEVEL_WARNING
+        , ERROR_CODE_SYNTAX_GENERIC
+        , line
+        , column
+        , 1
+        , "syntax"
+        , format
+        , args
+    );
     va_end(args);
 }
 
