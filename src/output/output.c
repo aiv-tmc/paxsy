@@ -350,10 +350,11 @@ void print_semantic_type_info(SemanticContext* context, FILE* out) {
 
 /*
  * Print semantic analysis errors and warnings
+ * @param context Semantic context
  * @param out Output file stream
  */
-void print_semantic_errors_warnings(FILE* out) {
-    if (!out) return;
+void print_semantic_errors_warnings(SemanticContext* context, FILE* out) {
+    if (!context || !out) return;
     
     /* Errors and warnings are already reported through errhandler,
        but we can output a summary */
@@ -376,7 +377,53 @@ void print_semantic_summary(SemanticContext* context, FILE* out) {
             semantic_warnings_enabled(context) ? "yes" : "no");
     fprintf(out, "  Total symbols: %zu\n",
             semantic_get_symbol_count(context));
+    fprintf(out, "  Exit on error: %s\n",
+            context->exit_on_error ? "yes" : "no");
     fprintf(out, "  Scope depth: %d\n", 0); /* TODO: Add scope depth tracking */
+}
+
+/*
+ * Print semantic analysis log
+ * @param context Semantic context to analyze
+ * @param out Output file stream
+ */
+void print_semantic_log(SemanticContext* context, FILE* out) {
+    if (!context || !out) {
+        fputs("No semantic context to display\n", out);
+        return;
+    }
+    
+    fprintf(out, "SEMANTIC ANALYSIS LOG\n");
+    fprintf(out, "====================\n\n");
+    
+    if (semantic_has_errors(context)) {
+        fprintf(out, "❌ Semantic analysis FAILED with errors\n\n");
+    } else {
+        fprintf(out, "✅ Semantic analysis PASSED\n\n");
+    }
+    
+    print_semantic_summary(context, out);
+    fprintf(out, "\n");
+    
+    /* Print symbol table */
+    print_semantic_symbol_table(context, out);
+    fprintf(out, "\n");
+    
+    /* Print type information */
+    print_semantic_type_info(context, out);
+    fprintf(out, "\n");
+    
+    /* Print scope information */
+    fprintf(out, "SCOPE INFORMATION:\n");
+    fprintf(out, "  Global symbols: %zu\n", semantic_get_symbol_count(context));
+    fprintf(out, "  Current scope: %s\n", 
+            context->current_scope == context->global_scope ? "global" : "local");
+    fprintf(out, "\n");
+    
+    /* Print analysis flags */
+    fprintf(out, "ANALYSIS SETTINGS:\n");
+    fprintf(out, "  Exit on error: %s\n", context->exit_on_error ? "enabled" : "disabled");
+    fprintf(out, "  Warnings: %s\n", context->warnings_enabled ? "enabled" : "disabled");
 }
 
 /*
@@ -886,6 +933,15 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
             }
             break;
             
+        case PRINT_SEMANTIC_LOG:
+            if (semantic) {
+                print_semantic_log(semantic, out);
+                fprintf(out, "\n");
+            } else {
+                fputs("No semantic context available\n", out);
+            }
+            break;
+            
         case PRINT_ALL:
             print_section_header("LEXER TOKENS", out);
             print_all_tokens(lexer, out);
@@ -1003,7 +1059,7 @@ ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast,
     if (semantic) {
         stats->symbols_count = semantic_get_symbol_count(semantic);
         stats->semantic_errors = semantic_has_errors(semantic) ? 1 : 0;
-        /* Note: warning count requires access to errhandler */
+        stats->semantic_warnings = semantic_warnings_enabled(semantic) ? 1 : 0;
     }
     
     return stats;
@@ -1030,6 +1086,10 @@ void print_statistics_report(ParseStatistics* stats, FILE* out) {
     
     if (stats->semantic_errors > 0) {
         fprintf(out, "  Semantic errors: %u\n", stats->semantic_errors);
+    }
+    
+    if (stats->semantic_warnings > 0) {
+        fprintf(out, "  Semantic warnings: %u\n", stats->semantic_warnings);
     }
     
     fputs("\nToken types:\n", out);
