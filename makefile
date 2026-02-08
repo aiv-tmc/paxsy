@@ -5,8 +5,8 @@ INSTALL_PATH = /usr/local/bin
 # Version information
 GENERATION = "beta 4"
 NAME = "Rowan"
-VERSION = "v0.4.1_6a"
-DATE = "2026JAN20"
+VERSION = "v0.4.1_8a"
+DATE = "2026FEB08"
 
 # Compiler flags with version definitions
 CFLAGS = -std=c99 \
@@ -16,12 +16,13 @@ CFLAGS = -std=c99 \
          -DDATE=\"$(DATE)\" \
 
 SRC = src/preprocessor/preprocessor.c \
+      src/preprocessor/DPP__include/DPPF__include.c \
       src/lexer/lexer.c \
       src/parser/literals.c \
       src/parser/parser.c \
-	  src/semantic/semantic.c \
+      src/semantic/semantic.c \
       src/output/output.c \
-      src/errman/errman.c \
+      src/errhandler/errhandler.c \
       src/main.c
 
 all: build install
