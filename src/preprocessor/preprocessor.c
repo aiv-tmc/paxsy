@@ -1,16 +1,6 @@
 #include "preprocessor.h"
 #include "preprocessor_state.h"
-//#include "DPP__go/DPPF__go.h"
-//#include "DPP__program/DPPF__program.h"
-//#include "DPP__inclib/DPPF__inclib.h"
-//#include "DPP__incfile/DPPF__incfile.h"
-//#include "DPP__define/DPPF__define.h"
-//#include "DPP__if/DPPF__if.h"
-//#include "DPP__ifdef/DPPF__ifdef.h"
-//#include "DPP__ifndef/DPPF__ifndef.h"
-//#include "DPP__elif/DPPF__elif.h"
-//#include "DPP__else/DPPF__else.h"
-//#include "DPP__endif/DPPF__endif.h"
+#include "DPP__include/DPPF__include.h"
 #include "../errhandler/errhandler.h"
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +34,29 @@ static int ensure_output_capacity(PreprocessorState* state, size_t needed) {
 static void add_to_output(PreprocessorState* state, char c) {
     if (ensure_output_capacity(state, 1))
         state->output[state->output_pos++] = c;
+}
+
+/**
+ * Add string to output buffer
+ * @param state: PreprocessorState containing output buffer
+ * @param str: String to add
+ */
+static void add_string_to_output(PreprocessorState* state, const char* str) {
+    size_t len = strlen(str);
+    if (ensure_output_capacity(state, len)) {
+        memcpy(state->output + state->output_pos, str, len);
+        state->output_pos += len;
+        
+        /* Update line and column counters */
+        for (size_t i = 0; i < len; i++) {
+            if (str[i] == '\n') {
+                state->line++;
+                state->column = 1;
+            } else {
+                state->column++;
+            }
+        }
+    }
 }
 
 /**
@@ -125,9 +138,14 @@ static void process_directive(PreprocessorState* state) {
     
     char command[32];
     if (command_len >= sizeof(command)) {
-        errhandler__report_error(state->directive_start_line, 
-                             state->directive_start_column + (command_start - directive), "syntax",
-                             "Preprocessor directive command too long");
+        errhandler__report_error
+            ( ERROR_CODE_PP_DIR_TOO_LONG
+            , state->directive_start_line
+            , state->directive_start_column
+            + (command_start - directive)
+            , "preproc"
+            , "Preprocessor directive command too long"
+        );
         return;
     }
     
@@ -137,42 +155,29 @@ static void process_directive(PreprocessorState* state) {
     /* Skip whitespace before arguments */
     while (*ptr && is_whitespace(*ptr)) ptr++;
     
-    // char* args = ptr;
+    char* args = ptr;
     
-    /* Process known directives - строго определенные команды */
-    int known_directive = 1;
+    int known_directive = 0;
     
-    //if (strcmp(command, "go") == 0) {
-    //    DPPF__go(state, args);
-    //} else if (strcmp(command, "program") == 0) {
-    //    DPPF__program(state, args);
-    //} else if (strcmp(command, "inclib") == 0) {
-    //    DPPF__inclib(state, args);
-    //} else if (strcmp(command, "incfile") == 0) {
-    //    DPPF__incfile(state, args);
-    //} else if (strcmp(command, "define") == 0) {
-    //    DPPF__define(state, args);
-    //} else if (strcmp(command, "if") == 0) {
-    //    DPPF__if(state, args);
-    //} else if (strcmp(command, "ifdef") == 0) {
-    //    DPPF__ifdef(state, args);
-    //} else if (strcmp(command, "ifndef") == 0) {
-    //    DPPF__ifndef(state, args);
-    //} else if (strcmp(command, "elif") == 0) {
-    //    DPPF__elif(state, args);
-    //} else if (strcmp(command, "else") == 0) {
-    //    DPPF__else(state, args);
-    //} else if (strcmp(command, "endif") == 0) {
-    //    DPPF__endif(state, args);
-    //} else {
-    //    known_directive = 0;
-    //}
+    if (strcmp(command, "inclib") == 0) {
+        DPPF__inclib(state, args);
+        known_directive = 1;
+    } else if (strcmp(command, "incfile") == 0) {
+        DPPF__incfile(state, args);
+        known_directive = 1;
+    }
     
     /* Report error for unknown directive */
     if (!known_directive) {
-        errhandler__report_error(state->directive_start_line, 
-                             state->directive_start_column + (command_start - directive), "syntax",
-                             "Unknown preprocessor directive: %s", command);
+        errhandler__report_error
+            ( ERROR_CODE_PP_UNKNOW_DIR
+            , state->directive_start_line
+            , state->directive_start_column
+            + (command_start - directive)
+            , "preproc"
+            , "Unknown preprocessor directive: %s"
+            , command
+        );
     }
 }
 
@@ -185,9 +190,9 @@ static int is_line_continuation(PreprocessorState* state) {
     const char* input = state->input;
     size_t pos = state->input_pos;
     
-    // Check for backslash followed by newline
+    /* Check for backslash followed by newline */
     if (input[pos] == '\\' && (input[pos + 1] == '\n' || input[pos + 1] == '\r')) {
-        // Handle \r\n sequence
+        /* Handle \r\n sequence */
         if (input[pos + 1] == '\r' && input[pos + 2] == '\n') {
             return 1;
         }
@@ -204,23 +209,23 @@ static void handle_line_continuation(PreprocessorState* state) {
     char current = state->input[state->input_pos];
     char next = state->input[state->input_pos + 1];
     
-    // Skip backslash
+    /* Skip backslash */
     state->input_pos++;
     state->column++;
     
-    // Handle different newline sequences
+    /* Handle different newline sequences */
     if (next == '\r' && state->input[state->input_pos + 1] == '\n') {
-        // \r\n sequence
+        /* \r\n sequence */
         state->input_pos += 2;
         state->line++;
         state->column = 1;
     } else if (next == '\n') {
-        // \n sequence
+        /* \n sequence */
         state->input_pos++;
         state->line++;
         state->column = 1;
     } else if (next == '\r') {
-        // \r sequence (old Mac)
+        /* \r sequence (old Mac) */
         state->input_pos++;
         state->line++;
         state->column = 1;
@@ -239,8 +244,6 @@ char* preprocess
     , const char* filename
     , int* error
     ) {
-    /* Mark filename as unused to avoid compiler warning */
-    (void)filename;
     
     /* Initialize state structure */
     size_t input_len = strlen(input);
@@ -259,6 +262,7 @@ char* preprocess
     state.in_preprocessor_directive = 0;
     state.in_config_macro = 0;
     state.bracket_depth = 0;
+    state.current_file = filename;
     
     /* Initialize directive buffer */
     state.directive_pos = 0;
@@ -319,10 +323,10 @@ char* preprocess
         
         /* Handle single-line comment */
         if (state.in_single_line_comment) {
-            // Check for line continuation at the end of comment
+            /* Check for line continuation at the end of comment */
             if (is_line_continuation(&state)) {
                 handle_line_continuation(&state);
-                // Stay in single-line comment state for continuation
+                /* Stay in single-line comment state for continuation */
                 continue;
             }
             
@@ -341,7 +345,7 @@ char* preprocess
         
         /* Handle multi-line comment */
         if (state.in_multi_line_comment) {
-            // Check for line continuation in multi-line comment
+            /* Check for line continuation in multi-line comment */
             if (is_line_continuation(&state)) {
                 handle_line_continuation(&state);
                 continue;
@@ -367,11 +371,11 @@ char* preprocess
                 /* Check for line continuation before newline */
                 if (state.directive_pos > 0 && 
                     state.directive_buffer[state.directive_pos - 1] == '\\') {
-                    // Remove the backslash from directive buffer
+                    /* Remove the backslash from directive buffer */
                     state.directive_pos--;
                     state.directive_buffer[state.directive_pos] = '\0';
                     
-                    // Skip the newline and continue directive on next line
+                    /* Skip the newline and continue directive on next line */
                     state.input_pos++;
                     state.line++;
                     state.column = 1;
