@@ -372,9 +372,10 @@ static void add_token_to_lexer
     
     if (lexer->token_count >= UINT64_MAX) {
         errhandler__report_error
-            ( lexer->line
+            ( ERROR_CODE_MEMORY_OVERFLOW
+            , lexer->line
             , lexer->column
-            , "inside"
+            , "memory"
             , "Too many tokens, maximum is 18446744073709551615"
         );
         return;
@@ -386,7 +387,8 @@ static void add_token_to_lexer
         
         if (new_capacity <= lexer->token_capacity || new_capacity >= UINT16_MAX) {
             errhandler__report_error
-                ( lexer->line
+                ( ERROR_CODE_MEMORY_OVERFLOW
+                , lexer->line
                 , lexer->column
                 , "inside"
                 , "Token array capacity overflow"
@@ -401,7 +403,8 @@ static void add_token_to_lexer
         
         if (new_token_array == NULL) {
             errhandler__report_error
-                ( lexer->line
+                ( ERROR_CODE_MEMORY_ALLOCATION
+                , lexer->line
                 , lexer->column
                 , "inside"
                 , "Memory allocation failed for token array"
@@ -433,7 +436,8 @@ static void add_token_to_lexer
         
         if (current_token->value == NULL) {
             errhandler__report_error
-                ( lexer->line
+                ( ERROR_CODE_MEMORY_ALLOCATION
+                , lexer->line
                 , lexer->column
                 , "inside"
                 , "Memory allocation failed for token value"
@@ -655,9 +659,10 @@ void lexer__tokenize(Lexer* lexer) {
             );
             
             if (number_token.value != NULL) free(number_token.value);
-        } else { // Invalid character
+        } else {
             errhandler__report_error
-                ( lexer->line
+                ( ERROR_CODE_LEXER_UNKNOWN_CHAR
+                , lexer->line
                 , lexer->column
                 , "syntax"
                 , "Unexpected character in source code"
