@@ -27,6 +27,10 @@ To add syntax highlighting in **vim**:
 
 P.S. To activate custom highlighting in the file `~/.vim/syntax/paxsy.vim` comment out **67-80** lines (optionally **14**, **27**, **33** and **18-20** more lines)
 
+<!--Documentation-->
+## Documentation
+The documentation can be obtained at [this link](./docs/doc-en.md)
+
 <!--Dependencies-->
 ## Dependencies 
 This program depends on the version of the interpreter **gcc** **3.2** or later.
