@@ -1,5 +1,5 @@
 #inclib "_zero"
-#inclib "simac"
+#inclib "sigf"
 #inclib "inout"
 #inclib "mathf"
 #inclib "type"
@@ -15,7 +15,7 @@ func start(none) {
             , mth::PI(2)
         )
     );
-    exit;
+    sig::exit(0);
 }
 
 func calc(var num : Float/*, ...*/) : static Float {
