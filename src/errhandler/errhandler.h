@@ -172,38 +172,51 @@ bool errhandler__parse_error_code
 #define ERROR_CODE_SYNTAX_MISMATCHED_PAREN  0x7A07
 
 /* Lexical errors */
-#define ERROR_CODE_LEXER_INVALID_NUMBER     0xE001
-#define ERROR_CODE_LEXER_INVALID_ESCAPE     0xE002
-#define ERROR_CODE_LEXER_UNCLOSED_STRING    0xE003
-#define ERROR_CODE_LEXER_UNKNOWN_CHAR       0xE004
+#define ERROR_CODE_LEXER_INVALID_NUMBER     0xE000
+#define ERROR_CODE_LEXER_INVALID_ESCAPE     0xE001
+#define ERROR_CODE_LEXER_UNCLOSED_STRING    0xE002
+#define ERROR_CODE_LEXER_UNKNOWN_CHAR       0xE003
 
 /* Semantic errors */
-#define ERROR_CODE_SEM_MISMATCH             0xA401
-#define ERROR_CODE_SEM_INVALID_CAST         0xA402
-#define ERROR_CODE_SEM_UNDEFINED_VAR        0xA403
-#define ERROR_CODE_SEM_INVALID_OPERATION    0xA404
-#define ERROR_CODE_SEM_REDECLARATION        0xA405
-#define ERROR_CODE_SEM_UNDECLARED_SYMBOL    0xA406
-#define ERROR_CODE_SEM_UNINITIALIZED        0xA407
-#define ERROR_CODE_SEM_ASSIGN_TO_CONST      0xA408
-#define ERROR_CODE_SEM_TYPE_ERROR           0xA409
-#define ERROR_CODE_SEM_UNUSED_VARIABLE      0xA40A
+#define ERROR_CODE_SEM_MISMATCH             0xA400
+#define ERROR_CODE_SEM_INVALID_CAST         0xA401
+#define ERROR_CODE_SEM_UNDEFINED_VAR        0xA402
+#define ERROR_CODE_SEM_INVALID_OPERATION    0xA403
+#define ERROR_CODE_SEM_REDECLARATION        0xA404
+#define ERROR_CODE_SEM_UNDECLARED_SYMBOL    0xA405
+#define ERROR_CODE_SEM_UNINITIALIZED        0xA406
+#define ERROR_CODE_SEM_ASSIGN_TO_CONST      0xA407
+#define ERROR_CODE_SEM_TYPE_ERROR           0xA408
+#define ERROR_CODE_SEM_UNUSED_VARIABLE      0xA409
+
+/* Semantic errors */
+#define ERROR_CODE_PP_UNKNOW_DIR            0x4C00
+#define ERROR_CODE_PP_DIR_TOO_LONG          0x4C01
+
+/* Compile errors */
+#define ERROR_CODE_COM_FAILCREATE           0xFF00
 
 /* Memory errors */
-#define ERROR_CODE_MEMORY_ALLOCATION        0x6B01
-#define ERROR_CODE_MEMORY_OVERFLOW          0x6B02
-#define ERROR_CODE_MEMORY_INVALID_FREE      0x6B03
+#define ERROR_CODE_MEMORY_ALLOCATION        0x6B00
+#define ERROR_CODE_MEMORY_OVERFLOW          0x6B01
+#define ERROR_CODE_MEMORY_INVALID_FREE      0x6B02
 
 /* Runtime errors */
-#define ERROR_CODE_RUNTIME_DIV_BY_ZERO      0x2301
-#define ERROR_CODE_RUNTIME_OUT_OF_BOUNDS    0x2302
-#define ERROR_CODE_RUNTIME_OVERFLOW         0x2303
+#define ERROR_CODE_RUNTIME_DIV_BY_ZERO      0x2300
+#define ERROR_CODE_RUNTIME_OUT_OF_BOUNDS    0x2301
+#define ERROR_CODE_RUNTIME_OVERFLOW         0x2302
 
 /* I/O errors */
-#define ERROR_CODE_IO_FILE_NOT_FOUND        0x8201
+#define ERROR_CODE_IO_FILE_NOT_FOUND        0x8200
+#define ERROR_CODE_IO_DOUBLE_FILE           0x8201
 #define ERROR_CODE_IO_PERMISSION_DENIED     0x8202
-#define ERROR_CODE_IO_READ_ERROR            0x8203
-#define ERROR_CODE_IO_WRITE_ERROR           0x8204
+#define ERROR_CODE_IO_READ                  0x8203
+#define ERROR_CODE_IO_WRITE                 0x8204
+
+/* Input flags errors */
+#define ERROR_CODE_INPUT_MULTI_MOD_FLAGS    0x8900
+#define ERROR_CODE_INPUT_INVALID_FLAG       0x8901
+#define ERROR_CODE_INPUT_NO_SOURCE          0x8902
 
 /* Backward compatibility functions (default length = 1, default code = 0x7A00) */
 
@@ -218,7 +231,8 @@ bool errhandler__parse_error_code
  * @note Uses default length of 1, context "syntax", and code ERROR_CODE_SYNTAX_GENERIC
  */
 void errhandler__report_error
-    ( uint16_t line
+    ( uint16_t error_code 
+    , uint16_t line
     , uint8_t column
     , const char* context
     , const char* format
