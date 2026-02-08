@@ -182,7 +182,24 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
     if (get_current_token_type(state) == TOKEN_SEMICOLON) { \
         advance_token(state); \
     } else { \
-        REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_MISSING_SEMICOLON, "Expected ';'"); \
+        Token *current = get_current_token(state); \
+        if (current) { \
+            errhandler__report_error( \
+                ERROR_CODE_SYNTAX_MISSING_SEMICOLON, \
+                current->line, \
+                current->column, \
+                "syntax", \
+                "Expected ';'" \
+            ); \
+        } else { \
+            errhandler__report_error( \
+                ERROR_CODE_SYNTAX_MISSING_SEMICOLON, \
+                0, \
+                0, \
+                "syntax", \
+                "Expected ';' at end of file" \
+            ); \
+        } \
     } \
 } while(0)
 
@@ -2622,12 +2639,10 @@ static ASTNode *parse_statement(ParserState *state) {
         /* Try to recover by consuming until semicolon if possible */
         Token *current = get_current_token(state);
         if (current) {
-            errhandler__report_error_ex(
-                ERROR_LEVEL_ERROR,
+            errhandler__report_error(
                 ERROR_CODE_SYNTAX_MISSING_SEMICOLON,
                 current->line,
                 current->column,
-                (uint8_t)strlen(current->value),
                 "syntax",
                 "Expected ';' after expression"
             );
@@ -2680,12 +2695,10 @@ AST *parse(Token *tokens, uint16_t token_count) {
         } else {
             Token *current = get_current_token(&state);
             if (current) {
-                errhandler__report_error_ex(
-                    ERROR_LEVEL_ERROR,
+                errhandler__report_error(
                     ERROR_CODE_SYNTAX_GENERIC,
                     current->line,
                     current->column,
-                    (uint8_t)strlen(current->value),
                     "syntax",
                     "Syntax error, skipping token"
                 );
