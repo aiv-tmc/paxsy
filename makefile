@@ -32,11 +32,11 @@ build: $(SRC)
 
 install: $(TARGET)
 	@if [ -w $(INSTALL_PATH) ]; then \
-		cp $(TARGET) $(INSTALL_PATH); \
+		mv $(TARGET) $(INSTALL_PATH); \
 		echo "Installation is complete"; \
 	else \
 		echo "Root permissions are required to install from the $(INSTALL_PATH)"; \
-		sudo cp $(TARGET) $(INSTALL_PATH); \
+		sudo mv $(TARGET) $(INSTALL_PATH); \
 	fi
 
 uninstall:
