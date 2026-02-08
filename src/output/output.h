@@ -19,7 +19,8 @@ typedef enum {
     PRINT_PARSER_TRACE,      ///< Display parser trace information
     PRINT_SEMANTIC_ONLY,     ///< Display only semantic analysis results
     PRINT_SEMANTIC_FULL,     ///< Display full semantic analysis details
-    PRINT_COMPLETE_ANALYSIS  ///< Display complete analysis with statistics
+    PRINT_COMPLETE_ANALYSIS, ///< Display complete analysis with statistics
+    PRINT_SEMANTIC_LOG       ///< Display semantic analysis log
 } PrintMode;
 
 /*
@@ -141,9 +142,10 @@ void print_semantic_type_info(SemanticContext* context, FILE* out);
 
 /*
  * Print semantic analysis errors and warnings
+ * @param context Semantic context
  * @param out Output file stream
  */
-void print_semantic_errors_warnings(FILE* out);
+void print_semantic_errors_warnings(SemanticContext* context, FILE* out);
 
 /*
  * Print semantic analysis summary
@@ -158,6 +160,13 @@ void print_semantic_summary(SemanticContext* context, FILE* out);
  * @param out Output file stream
  */
 void print_semantic_analysis(SemanticContext* context, FILE* out);
+
+/*
+ * Print semantic analysis log
+ * @param context Semantic context to analyze
+ * @param out Output file stream
+ */
+void print_semantic_log(SemanticContext* context, FILE* out);
 
 /*
  * Get AST node type name as string
