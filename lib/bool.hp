@@ -1,0 +1,8 @@
+#ifndef BOOL__LIB
+#define BOOL__LIB
+
+#define Bool    Int<1>
+#define true    0xFF
+#define false   0x00
+
+#endif

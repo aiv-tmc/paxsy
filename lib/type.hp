@@ -1,0 +1,18 @@
+#ifndef TYPE_HP
+#define TYPE_HP
+
+#define Byte    Int < 1>    /* 8b   */
+#define Short   Int < 2>    /* 16b  */
+#define Rune    Int < 4>    /* 32b  */
+#define Word    Int < 8>    /* 64b  */
+#define Long    Int <16>    /* 128b */
+
+#define Float   Real< 2>    /* 16b  */
+#define Double  Real< 4>    /* 32b  */
+#define Noi80   Real<10>    /* 80b  */
+#define Decimal Real<16>    /* 128b */
+
+#define Nil     Void<0>     /* no   */
+#define Size    Void<64>    /* 512b */
+
+#endif
