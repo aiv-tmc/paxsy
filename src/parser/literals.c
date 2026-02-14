@@ -1,8 +1,52 @@
 #include "literals.h"
 #include "../errhandler/errhandler.h"
+#include "../lexer/lexer.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+/*
+ * Skip whitespace characters in input stream
+ * Copy of the function from lexer.c for use in literals.c
+ */
+static inline void skip_whitespace(Lexer* lexer) {
+    const char* source = lexer->source;
+    uint32_t pos = lexer->position;
+    uint16_t line = lexer->line;
+    uint16_t col = lexer->column;
+    
+    while (pos < lexer->source_length) {
+        char current_char = source[pos];
+        
+        if (current_char == ' ' || current_char == '\t') {
+            pos++;
+            col++;
+        } else if (current_char == '\n') {
+            pos++;
+            line++;
+            col = 1;
+        } else break;
+    }
+    
+    lexer->position = pos;
+    lexer->line = line;
+    lexer->column = col;
+}
+
+/*
+ * Check if the next character after the current position is a string or char literal
+ * Used for concatenating adjacent literals
+ */
+static inline int is_next_string_or_char(Lexer* lexer) {
+    Lexer temp_lexer = *lexer;
+    skip_whitespace(&temp_lexer);
+    
+    if (temp_lexer.position >= temp_lexer.source_length)
+        return 0;
+    
+    char next_char = temp_lexer.source[temp_lexer.position];
+    return (next_char == '"' || next_char == '\'');
+}
 
 /*
  * Check if character is uppercase hexadecimal digit
@@ -666,4 +710,130 @@ Token literal__parse_string(Lexer* lexer) {
     
     free(buffer);
     return token;
+}
+
+/*
+ * Parse and concatenate adjacent string and character literals
+ * @param lexer: Lexer instance
+ * @return: Combined token
+ */
+Token literal__parse_concatenated(Lexer* lexer) {
+    const char* source = lexer->source;
+    uint32_t start_pos = lexer->position;
+    uint16_t start_line = lexer->line;
+    uint16_t start_col = lexer->column;
+    
+    /* Buffer to store concatenated string */
+    uint32_t buffer_size = 128;
+    char* buffer = (char*)malloc(buffer_size);
+    uint32_t buffer_index = 0;
+    
+    if (!buffer) {
+        Token error_token;
+        error_token.type = TOKEN_ERROR;
+        error_token.value = NULL;
+        error_token.line = start_line;
+        error_token.column = start_col;
+        error_token.length = 0;
+        return error_token;
+    }
+    
+    while (lexer->position < lexer->source_length) {
+        char current_char = source[lexer->position];
+        
+        if (current_char == '\'') {
+            Token char_token = literal__parse_char(lexer);
+            
+            if (char_token.type == TOKEN_ERROR) {
+                free(buffer);
+                return char_token;
+            }
+            
+            /* Add character to buffer */
+            if (char_token.value) {
+                uint32_t needed_size = buffer_index + 1;
+                if (needed_size >= buffer_size) {
+                    buffer_size *= 2;
+                    char* new_buffer = (char*)realloc(buffer, buffer_size);
+                    if (!new_buffer) {
+                        free(buffer);
+                        free(char_token.value);
+                        Token error_token;
+                        error_token.type = TOKEN_ERROR;
+                        error_token.value = NULL;
+                        error_token.line = start_line;
+                        error_token.column = start_col;
+                        error_token.length = 0;
+                        return error_token;
+                    }
+                    buffer = new_buffer;
+                }
+                
+                buffer[buffer_index++] = char_token.value[0];
+                free(char_token.value);
+            }
+        } else if (current_char == '"') {
+            Token string_token = literal__parse_string(lexer);
+            
+            if (string_token.type == TOKEN_ERROR) {
+                free(buffer);
+                return string_token;
+            }
+            
+            /* Add string to buffer */
+            if (string_token.value) {
+                uint32_t str_len = string_token.length;
+                uint32_t needed_size = buffer_index + str_len;
+                if (needed_size >= buffer_size) {
+                    while (needed_size >= buffer_size) {
+                        buffer_size *= 2;
+                    }
+                    char* new_buffer = (char*)realloc(buffer, buffer_size);
+                    if (!new_buffer) {
+                        free(buffer);
+                        free(string_token.value);
+                        Token error_token;
+                        error_token.type = TOKEN_ERROR;
+                        error_token.value = NULL;
+                        error_token.line = start_line;
+                        error_token.column = start_col;
+                        error_token.length = 0;
+                        return error_token;
+                    }
+                    buffer = new_buffer;
+                }
+                
+                memcpy(buffer + buffer_index, string_token.value, str_len);
+                buffer_index += str_len;
+                free(string_token.value);
+            }
+        } else {
+            break;
+        }
+        
+        /* Check if there's another literal immediately after */
+        if (!is_next_string_or_char(lexer)) {
+            break;
+        }
+    }
+    
+    /* Create the combined token */
+    buffer[buffer_index] = '\0';
+    
+    Token combined_token;
+    combined_token.type = TOKEN_STRING;
+    combined_token.value = (char*)malloc(buffer_index + 1);
+    
+    if (combined_token.value) {
+        memcpy(combined_token.value, buffer, buffer_index + 1);
+    } else {
+        combined_token.type = TOKEN_ERROR;
+    }
+    
+    combined_token.line = start_line;
+    combined_token.column = start_col;
+    combined_token.length = buffer_index;
+    
+    free(buffer);
+    return combined_token;
 }
