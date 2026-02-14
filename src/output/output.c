@@ -25,7 +25,6 @@ const char* token_names[] = {
     [TOKEN_PARSEOF]             = "PARSEOF",
     [TOKEN_REALLOC]             = "REALLOC",
     [TOKEN_ALLOC]               = "ALLOC",
-    [TOKEN_INTER]               = "INTER",
     [TOKEN_SIGNAL]              = "SIGNAL",
     [TOKEN_PUSH]                = "PUSH",
     [TOKEN_POP]                 = "POP",
@@ -121,7 +120,6 @@ const char* ast_node_names[] = {
     [AST_POP]                    = "POP",
     [AST_CAST]                   = "CAST",
     [AST_SIGNAL]                 = "SIGNAL",
-    [AST_INTER]                  = "INTER",
     [AST_MULTI_INITIALIZER]      = "MULTI_INITIALIZER",
     [AST_LABEL_DECLARATION]      = "LABEL_DECLARATION",
     [AST_JUMP]                   = "JUMP",
@@ -147,9 +145,35 @@ const char* ast_node_names[] = {
 };
 
 /*
+ * Get initialization state string
+ */
+static const char* get_init_state_string(InitState state) {
+    switch (state) {
+        case INIT_UNINITIALIZED: return "no";
+        case INIT_PARTIAL: return "partial";
+        case INIT_FULL: return "yes";
+        case INIT_CONSTANT: return "const";
+        case INIT_DEFAULT: return "default";
+        default: return "unknown";
+    }
+}
+
+/*
+ * Get scope level string
+ */
+static const char* get_scope_level_string(ScopeLevel level) {
+    switch (level) {
+        case SCOPE_GLOBAL: return "global";
+        case SCOPE_FUNCTION: return "function";
+        case SCOPE_BLOCK: return "block";
+        case SCOPE_LOOP: return "loop";
+        case SCOPE_COMPOUND: return "compound";
+        default: return "unknown";
+    }
+}
+
+/*
  * Print section header with title
- * @param title Section title
- * @param out Output file stream
  */
 void print_section_header(const char* title, FILE* out) {
     fprintf(out, "\n");
@@ -158,8 +182,6 @@ void print_section_header(const char* title, FILE* out) {
 
 /*
  * Print indentation for tree display
- * @param level Indentation level
- * @param out Output file stream
  */
 static inline void print_indent(uint8_t level, FILE* out) {
     for (uint8_t i = 0; i < level; i++) fputc(' ', out);
@@ -167,9 +189,6 @@ static inline void print_indent(uint8_t level, FILE* out) {
 
 /*
  * Recursively print AST node with indentation
- * @param node AST node to print
- * @param depth Current depth for indentation
- * @param out Output file stream
  */
 static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
     if (!node) return;
@@ -235,9 +254,6 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
 
 /*
  * Recursive helper for counting AST nodes
- * @param node Current node to count
- * @param total_nodes Pointer to total nodes counter
- * @param type_counts Array of type-specific counters
  */
 static void count_nodes(ASTNode* node, uint32_t* total_nodes, uint32_t* type_counts) {
     if (!node) return;
@@ -255,8 +271,6 @@ static void count_nodes(ASTNode* node, uint32_t* total_nodes, uint32_t* type_cou
 
 /*
  * Print symbol table from semantic context
- * @param context Semantic context containing symbol table
- * @param out Output file stream
  */
 void print_semantic_symbol_table(SemanticContext* context, FILE* out) {
     if (!context || !out) {
@@ -271,36 +285,55 @@ void print_semantic_symbol_table(SemanticContext* context, FILE* out) {
     }
     
     fprintf(out, "SYMBOL TABLE:\n");
-    fprintf(out, "%-20s %-12s %-10s %-10s %-10s\n", 
-            "Name", "Type", "Const", "Init", "Used");
-    fprintf(out, "%-20s %-12s %-10s %-10s %-10s\n",
-            "--------------------", "------------", "----------", "----------", "----------");
+    fprintf(out, "%-20s %-12s %-10s %-12s %-10s %-10s %-10s\n", 
+            "Name", "Type", "Const", "Init State", "Used", "Mutable", "Scope");
+    fprintf(out, "%-20s %-12s %-10s %-12s %-10s %-10s %-10s\n",
+            "--------------------", "------------", "----------", "------------", 
+            "----------", "----------", "----------");
     
     size_t total_symbols = 0;
     
-    for (size_t i = 0; i < table->capacity; i++) {
-        SymbolEntry* entry = table->entries[i];
+    /* Helper function to print table recursively */
+    void print_table(SymbolTable* tbl, int indent) {
+        char indent_str[32];
+        memset(indent_str, ' ', indent * 2);
+        indent_str[indent * 2] = '\0';
         
-        while (entry) {
-            fprintf(out, "%-20s %-12s %-10s %-10s %-10s\n",
-                    entry->name, 
-                    semantic_type_to_string(entry->type),
-                    entry->is_constant ? "yes" : "no",
-                    entry->is_initialized ? "yes" : "no",
-                    entry->is_used ? "yes" : "no");
+        for (size_t i = 0; i < tbl->capacity; i++) {
+            SymbolEntry* entry = tbl->entries[i];
             
-            total_symbols++;
-            entry = entry->next;
+            while (entry) {
+                fprintf(out, "%s%-20s %-12s %-10s %-12s %-10s %-10s %-10s\n",
+                        indent_str,
+                        entry->name, 
+                        semantic_type_to_string(entry->type),
+                        entry->is_constant ? "yes" : "no",
+                        get_init_state_string(entry->init_state),
+                        entry->is_used ? "yes" : "no",
+                        entry->is_mutable ? "yes" : "no",
+                        get_scope_level_string(entry->declared_scope));
+                
+                total_symbols++;
+                entry = entry->next;
+            }
+        }
+        
+        /* Print child scopes */
+        SymbolTable* child = tbl->children;
+        while (child) {
+            fprintf(out, "\n%sScope: %s (child)\n", indent_str, 
+                    get_scope_level_string(child->level));
+            print_table(child, indent + 1);
+            child = child->next_child;
         }
     }
     
+    print_table(table, 0);
     fprintf(out, "\nTotal symbols: %zu\n", total_symbols);
 }
 
 /*
  * Print type information from semantic context
- * @param context Semantic context containing type information
- * @param out Output file stream
  */
 void print_semantic_type_info(SemanticContext* context, FILE* out) {
     if (!context || !out) return;
@@ -310,6 +343,7 @@ void print_semantic_type_info(SemanticContext* context, FILE* out) {
     
     /* Type statistics */
     size_t type_counts[TYPE_COMPOUND + 1] = {0};
+    size_t init_counts[INIT_DEFAULT + 1] = {0};
     size_t total_symbols = 0;
     
     for (size_t i = 0; i < table->capacity; i++) {
@@ -317,6 +351,9 @@ void print_semantic_type_info(SemanticContext* context, FILE* out) {
         while (entry) {
             if (entry->type <= TYPE_COMPOUND) {
                 type_counts[entry->type]++;
+            }
+            if (entry->init_state <= INIT_DEFAULT) {
+                init_counts[entry->init_state]++;
             }
             total_symbols++;
             entry = entry->next;
@@ -341,6 +378,23 @@ void print_semantic_type_info(SemanticContext* context, FILE* out) {
         }
     }
     
+    fprintf(out, "\nINITIALIZATION STATE:\n");
+    fprintf(out, "%-20s %-8s %-10s\n", "State", "Count", "Percentage");
+    fprintf(out, "%-20s %-8s %-10s\n", "--------------------", "--------", "----------");
+    
+    const char* init_state_names[] = {
+        "Uninitialized", "Partial", "Full", "Constant", "Default"
+    };
+    
+    for (int i = 0; i <= INIT_DEFAULT; i++) {
+        if (init_counts[i] > 0) {
+            fprintf(out, "%-20s %-8zu %-9.1f%%\n",
+                    init_state_names[i],
+                    init_counts[i],
+                    (float)init_counts[i] / total_symbols * 100.0f);
+        }
+    }
+    
     /* Additional type compatibility information */
     fprintf(out, "\nTYPE COMPATIBILITY:\n");
     fprintf(out, "  Int <-> Real: compatible\n");
@@ -350,8 +404,6 @@ void print_semantic_type_info(SemanticContext* context, FILE* out) {
 
 /*
  * Print semantic analysis errors and warnings
- * @param context Semantic context
- * @param out Output file stream
  */
 void print_semantic_errors_warnings(SemanticContext* context, FILE* out) {
     if (!context || !out) return;
@@ -364,8 +416,6 @@ void print_semantic_errors_warnings(SemanticContext* context, FILE* out) {
 
 /*
  * Print semantic analysis summary
- * @param context Semantic context to summarize
- * @param out Output file stream
  */
 void print_semantic_summary(SemanticContext* context, FILE* out) {
     if (!context || !out) return;
@@ -379,13 +429,23 @@ void print_semantic_summary(SemanticContext* context, FILE* out) {
             semantic_get_symbol_count(context));
     fprintf(out, "  Exit on error: %s\n",
             context->exit_on_error ? "yes" : "no");
-    fprintf(out, "  Scope depth: %d\n", 0); /* TODO: Add scope depth tracking */
+    
+    /* Scope depth tracking */
+    int depth = 0;
+    SymbolTable* scope = context->current_scope;
+    while (scope) {
+        depth++;
+        scope = scope->parent;
+    }
+    fprintf(out, "  Scope depth: %d\n", depth);
+    fprintf(out, "  In function: %s\n", context->in_function ? "yes" : "no");
+    fprintf(out, "  In loop: %s\n", context->in_loop ? "yes" : "no");
+    fprintf(out, "  Current function: %s\n", 
+            context->current_function ? context->current_function : "none");
 }
 
 /*
  * Print semantic analysis log
- * @param context Semantic context to analyze
- * @param out Output file stream
  */
 void print_semantic_log(SemanticContext* context, FILE* out) {
     if (!context || !out) {
@@ -417,7 +477,9 @@ void print_semantic_log(SemanticContext* context, FILE* out) {
     fprintf(out, "SCOPE INFORMATION:\n");
     fprintf(out, "  Global symbols: %zu\n", semantic_get_symbol_count(context));
     fprintf(out, "  Current scope: %s\n", 
-            context->current_scope == context->global_scope ? "global" : "local");
+            get_scope_level_string(context->current_scope->level));
+    fprintf(out, "  In function: %s\n", context->in_function ? "yes" : "no");
+    fprintf(out, "  In loop: %s\n", context->in_loop ? "yes" : "no");
     fprintf(out, "\n");
     
     /* Print analysis flags */
@@ -428,8 +490,6 @@ void print_semantic_log(SemanticContext* context, FILE* out) {
 
 /*
  * Print complete semantic analysis
- * @param context Semantic context to analyze
- * @param out Output file stream
  */
 void print_semantic_analysis(SemanticContext* context, FILE* out) {
     if (!context || !out) {
@@ -451,8 +511,6 @@ void print_semantic_analysis(SemanticContext* context, FILE* out) {
 
 /*
  * Get AST node type name as string
- * @param type AST node type
- * @return String representation of node type
  */
 const char* get_ast_node_type_name(ASTNodeType type) {
     return (type & (AST_NODE_TYPE_COUNT - 1)) == type ? 
@@ -461,8 +519,6 @@ const char* get_ast_node_type_name(ASTNodeType type) {
 
 /*
  * Get token type name as string
- * @param type Token type
- * @return String representation of token type
  */
 const char* get_token_type_name(TokenType type) {
     return (type & (TOKEN_TYPE_COUNT - 1)) == type ? 
@@ -471,8 +527,6 @@ const char* get_token_type_name(TokenType type) {
 
 /*
  * Print AST node inline (without newline)
- * @param node AST node to print
- * @param out Output file stream
  */
 void print_ast_node_inline(ASTNode* node, FILE* out) {
     if (!node) {
@@ -486,8 +540,6 @@ void print_ast_node_inline(ASTNode* node, FILE* out) {
 
 /*
  * Print type information
- * @param type Type structure to print
- * @param out Output file stream
  */
 void print_type_info(Type* type, FILE* out) {
     if (!type) return;
@@ -520,8 +572,7 @@ void print_type_info(Type* type, FILE* out) {
         }
         
         fputc(')', out);
-    } else
-        fprintf(out, "%s", type->name ? type->name : "unknown");
+    }
     
     if (type->angle_expression) {
         fputc('<', out);
@@ -536,8 +587,6 @@ void print_type_info(Type* type, FILE* out) {
 
 /*
  * Print all tokens in lexer
- * @param lexer Lexer containing tokens
- * @param out Output file stream
  */
 void print_all_tokens(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
@@ -558,8 +607,6 @@ void print_all_tokens(Lexer* lexer, FILE* out) {
 
 /*
  * Print tokens grouped by line
- * @param lexer Lexer containing tokens
- * @param out Output file stream
  */
 void print_tokens_by_line(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
@@ -591,8 +638,6 @@ void print_tokens_by_line(Lexer* lexer, FILE* out) {
 
 /*
  * Print token statistics
- * @param lexer Lexer containing tokens
- * @param out Output file stream
  */
 void print_token_statistics(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
@@ -621,8 +666,6 @@ void print_token_statistics(Lexer* lexer, FILE* out) {
 
 /*
  * Print detailed token information
- * @param lexer Lexer containing tokens
- * @param out Output file stream
  */
 void print_detailed_token_info(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
@@ -644,8 +687,6 @@ void print_detailed_token_info(Lexer* lexer, FILE* out) {
 
 /*
  * Print tokens with line markers
- * @param lexer Lexer containing tokens
- * @param out Output file stream
  */
 void print_tokens_in_lines(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
@@ -677,8 +718,6 @@ void print_tokens_in_lines(Lexer* lexer, FILE* out) {
 
 /*
  * Print AST in detailed tree format
- * @param ast AST to print
- * @param out Output file stream
  */
 void print_ast_detailed(AST* ast, FILE* out) {
     if (!ast || !ast->nodes || !ast->count) {
@@ -698,8 +737,6 @@ void print_ast_detailed(AST* ast, FILE* out) {
 
 /*
  * Print AST nodes grouped by type
- * @param ast AST to analyze
- * @param out Output file stream
  */
 void print_ast_by_type(AST* ast, FILE* out) {
     if (!ast || !ast->nodes) {
@@ -726,8 +763,6 @@ void print_ast_by_type(AST* ast, FILE* out) {
 
 /*
  * Print AST statistics
- * @param ast AST to analyze
- * @param out Output file stream
  */
 void print_ast_statistics(AST* ast, FILE* out) {
     if (!ast || !ast->nodes) {
@@ -757,8 +792,6 @@ void print_ast_statistics(AST* ast, FILE* out) {
 
 /*
  * Print AST with type information
- * @param ast AST to print
- * @param out Output file stream
  */
 void print_ast_with_types(AST* ast, FILE* out) {
     if (!ast || !ast->nodes) {
@@ -799,8 +832,6 @@ void print_ast_with_types(AST* ast, FILE* out) {
 
 /*
  * Print AST in compact format
- * @param ast AST to print
- * @param out Output file stream
  */
 void print_ast_compact(AST* ast, FILE* out) {
     if (!ast || !ast->nodes) {
@@ -823,7 +854,6 @@ void print_ast_compact(AST* ast, FILE* out) {
 
 /*
  * Enable or disable parser trace
- * @param enabled True to enable, false to disable
  */
 void enable_parser_trace(bool enabled) {
     parser_trace_enabled = enabled;
@@ -831,9 +861,6 @@ void enable_parser_trace(bool enabled) {
 
 /*
  * Log parser step for debugging
- * @param parser Parser state
- * @param action Description of current action
- * @param node Current AST node being processed
  */
 void log_parser_step(ParserState* parser, const char* action, ASTNode* node) {
     if (!parser_trace_enabled || !parser) return;
@@ -860,8 +887,6 @@ void log_parser_step(ParserState* parser, const char* action, ASTNode* node) {
 
 /*
  * Print parser trace information
- * @param parser Parser state to trace
- * @param out Output file stream
  */
 void print_parser_trace(ParserState* parser, FILE* out) {
     if (!parser) {
@@ -888,11 +913,6 @@ void print_parser_trace(ParserState* parser, FILE* out) {
 
 /*
  * Print complete analysis with specified mode
- * @param lexer Lexer data
- * @param ast AST data
- * @param semantic Semantic context (can be NULL)
- * @param mode Print mode
- * @param out Output file stream
  */
 void print_complete_analysis(Lexer* lexer, AST* ast, 
                             SemanticContext* semantic, PrintMode mode, FILE* out) {
@@ -1012,10 +1032,6 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
 
 /*
  * Collect parse statistics
- * @param lexer Lexer data
- * @param ast AST data
- * @param semantic Semantic context (can be NULL)
- * @return ParseStatistics structure with collected data
  */
 ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast,
                                          SemanticContext* semantic) {
@@ -1067,8 +1083,6 @@ ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast,
 
 /*
  * Print statistics report
- * @param stats Statistics to print
- * @param out Output file stream
  */
 void print_statistics_report(ParseStatistics* stats, FILE* out) {
     if (!stats) {
