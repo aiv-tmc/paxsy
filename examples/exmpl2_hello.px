@@ -1,8 +1,9 @@
-#inclib "sigf"
-#inclib "inout"
-#go .start
+#using "simac"
+#using "inout"
+#entry .start
 
 func start(none) {
     io::print("Hello, World!");
-    sig::exit(0);
+    exit(0);
+    return;
 }
