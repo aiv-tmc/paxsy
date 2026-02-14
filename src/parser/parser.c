@@ -64,7 +64,6 @@ static ASTNode *parse_block_statement(ParserState *state);
 static ASTNode *parse_multi_initializer(ParserState *state);
 static ASTNode *parse_if_statement(ParserState *state);
 static ASTNode *parse_signal(ParserState *state);
-static ASTNode *parse_inter(ParserState *state);
 static ASTNode *parse_label_declaration(ParserState *state);
 static ASTNode *parse_jump_statement(ParserState *state);
 static ASTNode *parse_return_statement(ParserState *state);
@@ -688,12 +687,6 @@ static Type *parse_type_specifier_silent
     if (parse_prefixes) {
         parse_type_prefixes(state, &pointer_level, &is_reference, &is_register);
         apply_prefixes_to_type(type, pointer_level, is_reference, is_register);
-    }
-    
-    if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_NUMBER)) {
-        Token *number_token = get_current_token(state);
-        type->prefix_number = (uint8_t)atoi(number_token->value);
-        advance_token(state);
     }
 
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN)) {
@@ -1862,47 +1855,6 @@ static ASTNode *parse_signal(ParserState *state) {
     );
 }
 
-static ASTNode *parse_inter(ParserState *state) {
-    CONSUME_TOKEN(state, TOKEN_INTER);
-    
-    AST *arguments = NULL;
-    
-    if (ATTEMPT_CONSUME_TOKEN(state, TOKEN_LPAREN)) {
-        arguments = parse_universal_list
-            ( state
-            , parse_expression
-            , NULL
-            , TOKEN_COMMA
-            , TOKEN_RPAREN
-        );
-        if (!arguments) return NULL;
-    } else {
-        arguments = safe_malloc(state, sizeof(AST));
-        if (!arguments) return NULL;
-        arguments->nodes = NULL;
-        arguments->count = 0;
-        arguments->capacity = 0;
-    }
-    
-    CONSUME_TOKEN(state, TOKEN_COLON);
-    ASTNode *inter_expression = parse_expression(state);
-    if (!inter_expression) {
-        parser__free_ast(arguments);
-        return NULL;
-    }
-    
-    EXPECT_SEMICOLON(state);
-    return create_ast_node
-        ( state
-        , AST_INTER
-        , 0
-        , NULL
-        , (ASTNode*)arguments
-        , inter_expression
-        , NULL
-    );
-}
-
 static ASTNode *parse_label_declaration(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_DOT);
     
@@ -2502,12 +2454,6 @@ static ASTNode *parse_statement(ParserState *state) {
         case TOKEN_JUMP: {
             ASTNode *jump_stmt = parse_jump_statement(state);
             if (jump_stmt) return jump_stmt;
-            break;
-        }
-        
-        case TOKEN_INTER: {
-            ASTNode *inter_stmt = parse_inter(state);
-            if (inter_stmt) return inter_stmt;
             break;
         }
         
