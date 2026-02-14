@@ -9,8 +9,11 @@
 
 /* Maximum supported modifiers in type declarations */
 #define MAX_MODIFIERS 8
+/* Initial capacity for AST statement list */
 #define AST_INITIAL_CAPACITY 8
+/* Initial capacity for node pool */
 #define AST_POOL_INITIAL_CAPACITY 256
+/* Maximum number of types in a compound type */
 #define MAX_COMPOUND_TYPES 8
 
 /*
@@ -92,9 +95,11 @@ static bool is_valid_statement_expression(ASTNode *node);
 static ASTNode *parse_object_declaration(ParserState *state, bool allow_expression);
 
 /*
- * Error reporting macros with proper error codes
+ * Error reporting macros with proper error codes.
+ * These macros encapsulate calls to errhandler and handle parser state cleanup.
  */
 
+// Report a parse error with explicit error level, code, and context
 #define REPORT_PARSE_ERROR_EX(state, level, error_code, context, ...) do { \
     Token *current = get_current_token(state); \
     if (current) { \
@@ -122,12 +127,15 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
     return NULL; \
 } while(0)
 
+// Report a normal error (level ERROR) in syntax context
 #define REPORT_PARSE_ERROR(state, error_code, ...) \
     REPORT_PARSE_ERROR_EX(state, ERROR_LEVEL_ERROR, error_code, "syntax", __VA_ARGS__)
 
+// Report a fatal error (level FATAL) in syntax context
 #define REPORT_PARSE_FATAL(state, error_code, ...) \
     REPORT_PARSE_ERROR_EX(state, ERROR_LEVEL_FATAL, error_code, "syntax", __VA_ARGS__)
 
+// Report an unexpected token error with details about expected and actual tokens
 #define REPORT_UNEXPECTED_TOKEN(state, expected, actual) do { \
     Token *current = get_current_token(state); \
     if (current) { \
@@ -159,15 +167,19 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
     return NULL; \
 } while(0)
 
+// Report unexpected EOF
 #define REPORT_UNEXPECTED_EOF(state) \
     REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_UNEXPECTED_EOF, "Unexpected end of file")
 
+// Report invalid character
 #define REPORT_INVALID_CHARACTER(state, ch) \
     REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_INVALID_CHAR, "Invalid character: '%c'", ch)
 
+// Report memory allocation failure
 #define REPORT_MEMORY_ALLOCATION_ERROR(state) \
     REPORT_PARSE_FATAL(state, ERROR_CODE_MEMORY_ALLOCATION, "Memory allocation failed")
 
+// Report an invalid statement (expression with no effect) and optionally free the expression node
 #define REPORT_INVALID_STATEMENT(state, expr_node) do { \
     if (expr_node) { \
         parser__ast_node_pool_free(state->pool, expr_node); \
@@ -213,11 +225,13 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
 #define ATTEMPT_CONSUME_TOKEN(state, token) \
     (CURRENT_TOKEN_TYPE_MATCHES(state, token) ? (advance_token(state), 1) : 0)
 
+// Check if a token type is a prefix modifier for types (pointer, reference, register)
 #define IS_PREFIX_TOKEN(type) \
     ((type) == TOKEN_AT || (type) == TOKEN_DOUBLE_AT || \
      (type) == TOKEN_AMPERSAND || (type) == TOKEN_DOUBLE_AMPERSAND || \
      (type) == TOKEN_PERCENT)
 
+// Check if a token type is a double prefix modifier (e.g., @@, &&)
 #define IS_DOUBLE_PREFIX_TOKEN(type) \
     ((type) == TOKEN_DOUBLE_AT || (type) == TOKEN_DOUBLE_AMPERSAND)
 
@@ -225,6 +239,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
  * Token stream management functions
  */
 
+// Get type of current token, or TOKEN_EOF if at end
 static TokenType get_current_token_type(ParserState *state)
 {
     return (state->current_token_position < state->total_tokens)
@@ -232,17 +247,20 @@ static TokenType get_current_token_type(ParserState *state)
            : TOKEN_EOF;
 }
 
+// Advance to next token, if not already at EOF
 static void advance_token(ParserState *state) {
     if (state->current_token_position < state->total_tokens - 1)
         state->current_token_position++;
 }
 
+// Get pointer to current token, or NULL if at EOF
 static Token *get_current_token(ParserState *state) {
     return (state->current_token_position < state->total_tokens)
            ? &state->token_stream[state->current_token_position]
            : NULL;
 }
 
+// Expect a specific token type; if found, advance and return true; otherwise report error and return false
 static bool expect_token(ParserState *state, TokenType expected_type) {
     if (CURRENT_TOKEN_TYPE_MATCHES(state, expected_type)) {
         advance_token(state);
@@ -255,18 +273,21 @@ static bool expect_token(ParserState *state, TokenType expected_type) {
     REPORT_UNEXPECTED_TOKEN(state, expected_name, actual_name);
 }
 
+// Safe malloc: if allocation fails, report fatal error and return NULL
 static void *safe_malloc(ParserState *state, size_t size) {
     void *ptr = malloc(size);
     if (!ptr && size > 0) REPORT_MEMORY_ALLOCATION_ERROR(state);
     return ptr;
 }
 
+// Safe realloc: if allocation fails, report fatal error and return NULL
 static void *safe_realloc(ParserState *state, void *ptr, size_t size) {
     void *new_ptr = realloc(ptr, size);
     if (!new_ptr && size > 0) REPORT_MEMORY_ALLOCATION_ERROR(state);
     return new_ptr;
 }
 
+// Safe strdup: duplicate string; on failure report fatal error and return NULL
 static char *safe_strdup(ParserState *state, const char *str) {
     if (!str) return NULL;
     
@@ -279,11 +300,14 @@ static char *safe_strdup(ParserState *state, const char *str) {
     return dup;
 }
 
+// Determine if an expression node can legally appear as a standalone statement.
+// Returns true for nodes that have side effects (calls, assignments, increments, etc.)
 static bool is_valid_statement_expression(ASTNode *node) {
     if (!node) return false;
     
     switch (node->type) {
         case AST_LITERAL_VALUE:
+            // Literals without side effects are not valid statements
             if (node->operation_type == TOKEN_NUMBER ||
                 node->operation_type == TOKEN_STRING ||
                 node->operation_type == TOKEN_CHAR ||
@@ -299,6 +323,7 @@ static bool is_valid_statement_expression(ASTNode *node) {
             return true;
             
         case AST_BINARY_OPERATION:
+            // Arithmetic binary ops have no side effects
             if (node->operation_type == TOKEN_PLUS ||
                 node->operation_type == TOKEN_MINUS ||
                 node->operation_type == TOKEN_STAR ||
@@ -312,6 +337,7 @@ static bool is_valid_statement_expression(ASTNode *node) {
             break;
             
         case AST_UNARY_OPERATION:
+            // Arithmetic unary ops have no side effects
             if (node->operation_type == TOKEN_PLUS ||
                 node->operation_type == TOKEN_MINUS ||
                 node->operation_type == TOKEN_TILDE ||
@@ -321,14 +347,22 @@ static bool is_valid_statement_expression(ASTNode *node) {
             break;
             
         case AST_MULTI_INITIALIZER:
+            // Multi-initializer alone has no effect
             return false;
             
         default: break;
     }
     
+    // Assume all other node types are side‑effecting
     return true;
 }
 
+/*
+ * Pool management functions.
+ */
+
+// Create a new AST node pool with given capacity.
+// Returns NULL on allocation failure.
 ASTNodePool *parser__ast_node_pool_create(uint16_t initial_capacity) {
     ASTNodePool *pool = malloc(sizeof(ASTNodePool));
     if (!pool) return NULL;
@@ -347,12 +381,14 @@ ASTNodePool *parser__ast_node_pool_create(uint16_t initial_capacity) {
     pool->size = 0;
     pool->free_top = 0;
     
+    // Initialize free list with all indices
     for (uint16_t i = 0; i < initial_capacity; i++)
         pool->free_list[pool->free_top++] = i;
     
     return pool;
 }
 
+// Destroy a node pool, freeing all associated memory.
 void parser__ast_node_pool_destroy(ASTNodePool *pool) {
     if (!pool) return;
     
@@ -361,6 +397,7 @@ void parser__ast_node_pool_destroy(ASTNodePool *pool) {
     free(pool);
 }
 
+// Allocate a node from the pool. Returns pointer to zeroed node, or NULL if pool is full.
 ASTNode *parser__ast_node_pool_alloc(ASTNodePool *pool) {
     if (!pool || pool->free_top == 0) return NULL;
     
@@ -371,6 +408,7 @@ ASTNode *parser__ast_node_pool_alloc(ASTNodePool *pool) {
     return node;
 }
 
+// Return a node to the pool. Does not free any child nodes; caller must manage children separately.
 void parser__ast_node_pool_free(ASTNodePool *pool, ASTNode *node) {
     if (!pool || !node) return;
     
@@ -379,6 +417,9 @@ void parser__ast_node_pool_free(ASTNodePool *pool, ASTNode *node) {
         pool->free_list[pool->free_top++] = index;
 }
 
+/*
+ * Core AST creation helper.
+ */
 static ASTNode *create_ast_node
     ( ParserState *state, ASTNodeType node_type
     , TokenType operation_type, char *node_value
@@ -402,6 +443,8 @@ static ASTNode *create_ast_node
     return node;
 }
 
+// Add a node to an AST's statement list, resizing if necessary.
+// Returns true on success, false on failure (out of memory).
 bool add_ast_node_to_list(AST *ast, ASTNode *node) {
     if (ast->count >= ast->capacity) {
         uint16_t new_capacity = ast->capacity ? ast->capacity * 2 
@@ -420,6 +463,15 @@ bool add_ast_node_to_list(AST *ast, ASTNode *node) {
     return true;
 }
 
+/*
+ * Universal list parser.
+ * Parses a list of elements separated by a separator, ending with end_token.
+ * parse_element: function to parse a single element
+ * is_element_start: optional predicate to check if next token starts an element
+ * separator: token that separates elements
+ * end_token: token that terminates the list
+ * Returns an AST containing the list elements (as nodes), or NULL on error.
+ */
 static AST *parse_universal_list
     ( ParserState *state
     , ASTNode *(*parse_element)(ParserState *)
@@ -432,6 +484,7 @@ static AST *parse_universal_list
     list->count = 0;
     list->capacity = 0;
     
+    // Empty list: just end token
     if (CURRENT_TOKEN_TYPE_MATCHES(state, end_token)) {
         advance_token(state);
         return list;
@@ -439,6 +492,7 @@ static AST *parse_universal_list
     
     while (!CURRENT_TOKEN_TYPE_MATCHES(state, end_token) &&
            !CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_EOF)) {
+        // If we have a predicate and it fails, break (maybe stray separator)
         if (is_element_start && !is_element_start(state)) {
             if (CURRENT_TOKEN_TYPE_MATCHES(state, separator)) {
                 advance_token(state);
@@ -483,6 +537,14 @@ static AST *parse_universal_list
     return list;
 }
 
+/*
+ * Universal binary operation parser.
+ * Parses left‑associative binary operators from a set.
+ * parse_operand: function to parse a single operand (higher precedence)
+ * operators: array of operator token types
+ * num_operators: number of operators in the array
+ * Returns an AST node for the binary operation chain.
+ */
 static ASTNode *parse_binary_operation_universal
     ( ParserState *state
     , ASTNode *(*parse_operand)(ParserState *)
@@ -535,6 +597,10 @@ static ASTNode *parse_binary_operation_universal
     return node;
 }
 
+/*
+ * Parse type prefixes (@, @@, &, &&, %) and set the corresponding flags.
+ * Returns true if any prefix was consumed, false otherwise.
+ */
 static bool parse_type_prefixes
     ( ParserState *state
     , uint8_t *pointer_level
@@ -572,6 +638,10 @@ static bool parse_type_prefixes
     return true;
 }
 
+/*
+ * Apply previously parsed prefixes to a type structure.
+ * Note that pointer, reference and register are mutually exclusive.
+ */
 static void apply_prefixes_to_type
     ( Type *type
     , uint8_t pointer_level
@@ -595,6 +665,10 @@ static void apply_prefixes_to_type
     }
 }
 
+/*
+ * Parse a compound type, e.g., (Int, String).
+ * Returns a Type structure with compound_count and compound_types set.
+ */
 static Type *parse_compound_type(ParserState *state, bool parse_prefixes) {
     if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN))
         return NULL;
@@ -646,6 +720,11 @@ static Type *parse_compound_type(ParserState *state, bool parse_prefixes) {
     return compound_type;
 }
 
+/*
+ * Parse a type specifier, optionally in silent mode (no error on failure).
+ * parse_prefixes: whether to allow prefix modifiers (@, &, %).
+ * Returns a Type structure, or NULL on failure.
+ */
 static Type *parse_type_specifier_silent
     ( ParserState *state
     , bool silent
@@ -656,6 +735,7 @@ static Type *parse_type_specifier_silent
     
     memset(type, 0, sizeof(Type));
     
+    // Special built‑in type names: none, TYPE
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_NONE) ||
         CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_TYPE)) {
         Token *type_token = get_current_token(state);
@@ -664,6 +744,7 @@ static Type *parse_type_specifier_silent
         goto check_angle_brackets;
     }
     
+    // Parse leading modifiers (e.g., const, volatile)
     while (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_MODIFIER)
           && type->modifier_count < MAX_MODIFIERS) {
         Token *modifier_token = get_current_token(state);
@@ -689,9 +770,11 @@ static Type *parse_type_specifier_silent
         apply_prefixes_to_type(type, pointer_level, is_reference, is_register);
     }
 
+    // Compound type (parenthesized list)
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN)) {
         Type *compound_type = parse_compound_type(state, parse_prefixes);
         if (compound_type) {
+            // Transfer modifiers and prefixes to each component
             for (uint8_t i = 0; i < compound_type->compound_count; i++) {
                 if (compound_type->compound_types[i]) {
                     if (type->modifiers && type->modifier_count > 0) {
@@ -717,6 +800,7 @@ static Type *parse_type_specifier_silent
         }
     }
 
+    // Base type name (identifier or keyword type)
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_TYPE) ||
         CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_ID)) {
         Token *type_token = get_current_token(state);
@@ -735,6 +819,7 @@ static Type *parse_type_specifier_silent
     }
     
 check_angle_brackets:
+    // Optional angle brackets for generic arguments or size
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LT)) {
         advance_token(state);
         
@@ -746,7 +831,7 @@ check_angle_brackets:
             return NULL;
         }
         
-        /* For type size (e.g., Int<1>), parse a numeric literal */
+        // For type size (e.g., Int<1>), parse a numeric literal
         if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_NUMBER)) {
             Token *number_token = get_current_token(state);
             long size_value = atol(number_token->value);
@@ -773,7 +858,7 @@ check_angle_brackets:
             }
             advance_token(state);
         } else {
-            /* For generic types, parse as expression */
+            // For generic types, parse as expression(s)
             ASTNode *angle_expr = parse_expression(state);
             if (!angle_expr) {
                 parser__free_type(type);
@@ -785,6 +870,7 @@ check_angle_brackets:
             }
             
             if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_COMMA)) {
+                // Multiple expressions – treat as list
                 AST *angle_list = safe_malloc(state, sizeof(AST));
                 angle_list->nodes = NULL;
                 angle_list->count = 0;
@@ -844,6 +930,7 @@ check_angle_brackets:
                 }
                 type->angle_expression = multi_init;
             } else {
+                // Single expression
                 if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_GT)) {
                     parser__ast_node_pool_free(state->pool, angle_expr);
                     parser__free_type(type);
@@ -862,10 +949,16 @@ check_angle_brackets:
     return type;
 }
 
+// Wrapper for parse_type_specifier_silent with silent = false
 static Type *parse_type_specifier(ParserState *state, bool parse_prefixes) {
     return parse_type_specifier_silent(state, false, parse_prefixes);
 }
 
+/*
+ * Expression parsing functions, from highest to lowest precedence.
+ */
+
+// Entry point for expression parsing.
 static ASTNode *parse_expression(ParserState *state) {
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_STATE)) {
         REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_INVALID_STATEMENT,
@@ -874,10 +967,12 @@ static ASTNode *parse_expression(ParserState *state) {
     return parse_assignment_expression(state);
 }
 
+// Parse assignment expressions (lowest precedence).
 static ASTNode *parse_assignment_expression(ParserState *state) {
     ASTNode *left = parse_ternary_expression(state);
     if (!left) return NULL;
     
+    // Multi‑initializer on left side -> multi‑assignment
     if (left->type == AST_MULTI_INITIALIZER) {
         if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_EQUAL))
             return left;
@@ -900,6 +995,7 @@ static ASTNode *parse_assignment_expression(ParserState *state) {
         );
     }
     
+    // All assignment operators
     static const TokenType assignment_ops[] = {
         TOKEN_EQUAL, TOKEN_PLUS_EQ, TOKEN_MINUS_EQ, TOKEN_STAR_EQ,
         TOKEN_SLASH_EQ, TOKEN_PERCENT_EQ, TOKEN_PIPE_EQ, TOKEN_AMPERSAND_EQ,
@@ -928,6 +1024,7 @@ static ASTNode *parse_assignment_expression(ParserState *state) {
     return left;
 }
 
+// Parse ternary conditional expression (cond ? true_expr : false_expr)
 static ASTNode *parse_ternary_expression(ParserState *state) {
     ASTNode *condition = parse_logical_expression(state);
     if (!condition) return NULL;
@@ -967,6 +1064,7 @@ static ASTNode *parse_ternary_expression(ParserState *state) {
     return condition;
 }
 
+// Logical OR/AND (using TOKEN_LOGICAL, which may be "||" or "&&")
 static ASTNode *parse_logical_expression(ParserState *state) {
     TokenType operators[] = {TOKEN_LOGICAL, TOKEN_ERROR};
     return parse_binary_operation_universal
@@ -977,6 +1075,7 @@ static ASTNode *parse_logical_expression(ParserState *state) {
     );
 }
 
+// Bitwise OR
 static ASTNode *parse_bitwise_or_expression(ParserState *state) {
     TokenType operators[] = {TOKEN_PIPE, TOKEN_ERROR};
     return parse_binary_operation_universal
@@ -987,6 +1086,7 @@ static ASTNode *parse_bitwise_or_expression(ParserState *state) {
     );
 }
 
+// Bitwise XOR
 static ASTNode *parse_bitwise_xor_expression(ParserState *state) {
     TokenType operators[] = {TOKEN_CARET, TOKEN_NE_TILDE};
     return parse_binary_operation_universal
@@ -997,6 +1097,7 @@ static ASTNode *parse_bitwise_xor_expression(ParserState *state) {
     );
 }
 
+// Bitwise AND
 static ASTNode *parse_bitwise_and_expression(ParserState *state) {
     TokenType operators[] = {TOKEN_AMPERSAND, TOKEN_ERROR};
     return parse_binary_operation_universal
@@ -1007,6 +1108,7 @@ static ASTNode *parse_bitwise_and_expression(ParserState *state) {
     );
 }
 
+// Equality (==, !=)
 static ASTNode *parse_equality_expression(ParserState *state) {
     TokenType operators[] = {TOKEN_DOUBLE_EQ, TOKEN_NE};
     return parse_binary_operation_universal
@@ -1017,6 +1119,7 @@ static ASTNode *parse_equality_expression(ParserState *state) {
     );
 }
 
+// Relational (<, >, <=, >=)
 static ASTNode *parse_relational_expression(ParserState *state)
 {
     TokenType operators[] = {TOKEN_LT, TOKEN_GT, TOKEN_LE, TOKEN_GE};
@@ -1028,6 +1131,7 @@ static ASTNode *parse_relational_expression(ParserState *state)
     );
 }
 
+// Shift (<<, >>, <<<, >>>, rol, ror)
 static ASTNode *parse_shift_expression(ParserState *state) {
     TokenType operators[] = {TOKEN_SHL, TOKEN_SHR, TOKEN_SAL, TOKEN_SAR, 
                             TOKEN_ROL, TOKEN_ROR};
@@ -1039,6 +1143,7 @@ static ASTNode *parse_shift_expression(ParserState *state) {
     );
 }
 
+// Additive (+, -)
 static ASTNode *parse_additive_expression(ParserState *state) {
     TokenType operators[] = {TOKEN_PLUS, TOKEN_MINUS};
     return parse_binary_operation_universal
@@ -1049,6 +1154,7 @@ static ASTNode *parse_additive_expression(ParserState *state) {
     );
 }
 
+// Multiplicative (*, /, %)
 static ASTNode *parse_multiplicative_expression(ParserState *state) {
     TokenType operators[] = {TOKEN_STAR, TOKEN_SLASH, TOKEN_PERCENT};
     return parse_binary_operation_universal
@@ -1059,13 +1165,16 @@ static ASTNode *parse_multiplicative_expression(ParserState *state) {
     );
 }
 
+// Unary expressions: prefixes, casts, increment/decrement
 static ASTNode *parse_unary_expression(ParserState *state) {
     uint8_t pointer_level = 0;
     uint8_t is_reference = 0;
     uint8_t is_register = 0;
     
+    // Parse type prefixes that may appear before an operand
     parse_type_prefixes(state, &pointer_level, &is_reference, &is_register);
     
+    // Cast expression: (type) unary_expr
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN)) {
         int saved_pos = state->current_token_position;
         advance_token(state);
@@ -1094,11 +1203,13 @@ static ASTNode *parse_unary_expression(ParserState *state) {
             return node;
         }
         
+        // Not a cast, rollback and continue as primary
         if (cast_type)
             parser__free_type(cast_type);
         state->current_token_position = saved_pos;
     }
     
+    // Prefix increment/decrement
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_DOUBLE_PLUS) ||
         CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_DOUBLE_MINUS)) {
         TokenType operation = get_current_token_type(state);
@@ -1119,6 +1230,7 @@ static ASTNode *parse_unary_expression(ParserState *state) {
             , NULL
         );
         
+        // Attach a synthetic type if prefixes were present (for later semantic analysis)
         if (pointer_level > 0 || is_reference || is_register) {
             Type *temp_type = safe_malloc(state, sizeof(Type));
             temp_type->name = safe_strdup(state, "int");
@@ -1130,6 +1242,7 @@ static ASTNode *parse_unary_expression(ParserState *state) {
         return node;
     }
 
+    // Other unary operators: ! ~ * /
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_BANG) ||
         CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_TILDE) ||
         CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_STAR) ||
@@ -1160,6 +1273,7 @@ static ASTNode *parse_unary_expression(ParserState *state) {
         return node;
     }
     
+    // Primary expression
     ASTNode *primary = parse_primary_expression(state);
     if (!primary) {
         return NULL;
@@ -1174,13 +1288,16 @@ static ASTNode *parse_unary_expression(ParserState *state) {
         primary->variable_type = temp_type;
     }
     
+    // Continue with postfix operators
     return parse_postfix_expression(state, primary);
 }
 
+// Parse primary expressions: literals, identifiers, parenthesized expressions, etc.
 static ASTNode *parse_primary_expression(ParserState *state) {
     Token *token = get_current_token(state);
     if (!token) REPORT_UNEXPECTED_EOF(state);
     
+    // Handle type prefixes that appear before an identifier (e.g., @x)
     if (IS_PREFIX_TOKEN(token->type) || IS_DOUBLE_PREFIX_TOKEN(token->type)) {
         int saved_pos = state->current_token_position;
         uint8_t pointer_level = 0;
@@ -1230,6 +1347,7 @@ static ASTNode *parse_primary_expression(ParserState *state) {
     
     switch (token->type) {
         case TOKEN_DOT:
+            // Label value: .label
             advance_token(state);
             if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_ID))
                 REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC, "Expected label name after '.'");
@@ -1245,6 +1363,7 @@ static ASTNode *parse_primary_expression(ParserState *state) {
             break;
         
         case TOKEN_PERCENT:
+            // Register: %regname
             advance_token(state);
             if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_ID))
                 REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC, "Expected register name after '%'");
@@ -1255,6 +1374,7 @@ static ASTNode *parse_primary_expression(ParserState *state) {
                                   NULL, NULL, NULL);
         
         case TOKEN_LPAREN:
+            // Parenthesized expression or cast
             advance_token(state);
             int saved_pos = state->current_token_position;
             
@@ -1281,9 +1401,11 @@ static ASTNode *parse_primary_expression(ParserState *state) {
             }
         
         case TOKEN_LCURLY:
+            // Multi‑value initializer
             return parse_multi_initializer(state);
         
         case TOKEN_SIZEOF:
+            // sizeof or typeof operator
             ASTNodeType node_type = (token->type == TOKEN_SIZEOF) 
                                    ? AST_SIZEOF 
                                    : AST_TYPEOF;
@@ -1351,6 +1473,7 @@ static ASTNode *parse_primary_expression(ParserState *state) {
     return NULL;
 }
 
+// Parse postfix operators: function call, array index, postfix ++/--, field access, postfix cast
 static ASTNode *parse_postfix_expression(ParserState *state, ASTNode *node) {
     while (1) {
         if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_DOUBLE_PLUS)) {
@@ -1376,6 +1499,7 @@ static ASTNode *parse_postfix_expression(ParserState *state, ASTNode *node) {
                 , NULL
             );
         } else if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN)) {
+            // Function call
             advance_token(state);
             
             AST *arguments = safe_malloc(state, sizeof(AST));
@@ -1435,6 +1559,7 @@ static ASTNode *parse_postfix_expression(ParserState *state, ASTNode *node) {
             func_call->extra = (ASTNode*)arguments;
             node = func_call;
         } else if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LBRACE)) {
+            // Array indexing
             advance_token(state);
             
             ASTNode *index_expr = parse_expression(state);
@@ -1456,9 +1581,11 @@ static ASTNode *parse_postfix_expression(ParserState *state, ASTNode *node) {
             );
             node = array_access;
         } else if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_INDICATOR)) {
+            // -> operator: field access or postfix cast
             advance_token(state);
             
             if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN)) {
+                // Postfix cast: expr->(type)
                 advance_token(state);
                 Type *target_type = parse_type_specifier(state, true);
                 if (!target_type) {
@@ -1470,6 +1597,7 @@ static ASTNode *parse_postfix_expression(ParserState *state, ASTNode *node) {
                                       node, NULL, NULL);
                 node->variable_type = target_type;
             } else {
+                // Field access: expr->field
                 if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_ID)) {
                     parser__ast_node_pool_free(state->pool, node);
                     REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC, "Expected field name after '->'");
@@ -1503,6 +1631,7 @@ static ASTNode *parse_postfix_expression(ParserState *state, ASTNode *node) {
     return node;
 }
 
+// Predicate: true if the current token can start a function argument expression.
 static bool is_argument_start(ParserState *state) {
     TokenType type = get_current_token_type(state);
     
@@ -1542,6 +1671,7 @@ static bool is_argument_start(ParserState *state) {
     }
 }
 
+// Parse 'push' statement: push [expr] ;
 static ASTNode *parse_push_statement(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_PUSH);
     
@@ -1555,6 +1685,7 @@ static ASTNode *parse_push_statement(ParserState *state) {
     return create_ast_node(state, AST_PUSH, 0, NULL, expr, NULL, NULL);
 }
 
+// Parse 'pop' statement: pop [expr] ;
 static ASTNode *parse_pop_statement(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_POP);
     
@@ -1567,6 +1698,7 @@ static ASTNode *parse_pop_statement(ParserState *state) {
     return create_ast_node(state, AST_POP, 0, NULL, expr, NULL, NULL);
 }
 
+// Parse a function‑like expression with a fixed number of arguments (e.g., alloc, realloc).
 static ASTNode *parse_fixed_argument_function
     ( ParserState *state
     , ASTNodeType node_type
@@ -1651,14 +1783,17 @@ static ASTNode *parse_fixed_argument_function
     return func_node;
 }
 
+// Parse alloc expression: alloc(expr, expr, expr)
 static ASTNode *parse_alloc_expression(ParserState *state) {
     return parse_fixed_argument_function(state, AST_ALLOC, 3, "alloc");
 }
 
+// Parse realloc expression: realloc(expr, expr)
 static ASTNode *parse_realloc_expression(ParserState *state) {
     return parse_fixed_argument_function(state, AST_REALLOC, 2, "realloc");
 }
 
+// Parse a block statement: either a single statement after =>, or a { ... } block.
 static ASTNode *parse_block_statement(ParserState *state) {
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_THEN)) {
         advance_token(state);
@@ -1704,6 +1839,7 @@ static ASTNode *parse_block_statement(ParserState *state) {
     REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC, "Expected '=>' or '{' for block statement");
 }
 
+// Parse multi‑value initializer: { expr , expr , ... }
 static ASTNode *parse_multi_initializer(ParserState *state) {
     if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LCURLY))
         REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC, "Expected '{' for multi-value initializer");
@@ -1766,6 +1902,7 @@ static ASTNode *parse_multi_initializer(ParserState *state) {
     );
 }
 
+// Parse if statement: if (cond) then‑block [else block]
 static ASTNode *parse_if_statement(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_IF);
     CONSUME_TOKEN(state, TOKEN_LPAREN);
@@ -1825,6 +1962,7 @@ static ASTNode *parse_if_statement(ParserState *state) {
     );
 }
 
+// Parse signal statement: signal(expr [, expr ...]) ;
 static ASTNode *parse_signal(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_SIGNAL);
     CONSUME_TOKEN(state, TOKEN_LPAREN);
@@ -1855,6 +1993,7 @@ static ASTNode *parse_signal(ParserState *state) {
     );
 }
 
+// Parse label declaration: .label:
 static ASTNode *parse_label_declaration(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_DOT);
     
@@ -1877,6 +2016,7 @@ static ASTNode *parse_label_declaration(ParserState *state) {
     );
 }
 
+// Parse jump statement: jump target ;
 static ASTNode *parse_jump_statement(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_JUMP);
     ASTNode *target = parse_expression(state);
@@ -1886,6 +2026,7 @@ static ASTNode *parse_jump_statement(ParserState *state) {
     return create_ast_node(state, AST_JUMP, 0, NULL, target, NULL, NULL);
 }
 
+// Parse return statement: return [expr [, expr ...]] ;
 static ASTNode *parse_return_statement(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_RETURN);
     
@@ -1955,19 +2096,20 @@ static ASTNode *parse_return_statement(ParserState *state) {
     }
 }
 
+// Parse free statement: free (expr) ; or free expr ;
 static ASTNode *parse_free_statement(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_FREE);
     
     ASTNode *expression = NULL;
     
-    /* Check if there are parentheses */
+    // Check if there are parentheses
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN)) {
         advance_token(state);
         expression = parse_expression(state);
         if (!expression) return NULL;
         CONSUME_TOKEN(state, TOKEN_RPAREN);
     } else {
-        /* No parentheses - parse expression directly */
+        // No parentheses - parse expression directly
         expression = parse_expression(state);
         if (!expression) return NULL;
     }
@@ -1976,18 +2118,21 @@ static ASTNode *parse_free_statement(ParserState *state) {
     return create_ast_node(state, AST_FREE, 0, NULL, expression, NULL, NULL);
 }
 
+// Parse nop statement: nop ;
 static ASTNode *parse_nop_statement(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_NOP);
     EXPECT_SEMICOLON(state);
     return create_ast_node(state, AST_NOP, 0, NULL, NULL, NULL, NULL);
 }
 
+// Parse halt statement: halt ;
 static ASTNode *parse_halt_statement(ParserState *state) {
     CONSUME_TOKEN(state, TOKEN_HALT);
     EXPECT_SEMICOLON(state);
     return create_ast_node(state, AST_HALT, 0, NULL, NULL, NULL, NULL);
 }
 
+// Parse parseof statement: parseof expr ;
 static ASTNode *parse_parseof_statement(ParserState *state) {
     advance_token(state);
     ASTNode *expr = parse_expression(state);
@@ -1996,10 +2141,14 @@ static ASTNode *parse_parseof_statement(ParserState *state) {
     return create_ast_node(state, AST_PARSEOF, 0, NULL, expr, NULL, NULL);
 }
 
+/*
+ * Parse an object declaration (variable, function, array) that starts with a state modifier (var, let, const, etc.).
+ * If allow_expression is true, the function can also parse an expression if the token stream does not match a declaration.
+ */
 static ASTNode *parse_object_declaration(ParserState *state, bool allow_expression) {
     int saved_pos = state->current_token_position;
     
-    /* Check state modifier */
+    // Check for state modifier
     if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_STATE)) {
         if (allow_expression) {
             ASTNode *expr = parse_expression(state);
@@ -2029,7 +2178,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
     AST *parameter_list = NULL;
     AST *dimension_list = NULL;
     
-    /* Parse array dimensions if present */
+    // Parse array dimensions if present (e.g., var a[10])
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LBRACE)) {
         advance_token(state);
         dimension_list = safe_malloc(state, sizeof(AST));
@@ -2068,7 +2217,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
         CONSUME_TOKEN(state, TOKEN_RBRACE);
     }
     
-    /* Check if it's a function */
+    // Check if it's a function (has parentheses)
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN)) {
         is_function = true;
         parameter_list = parse_parameter_list(state);
@@ -2085,7 +2234,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
     Type *type = NULL;
     bool has_explicit_type = false;
     
-    /* Parse optional type specifier */
+    // Parse optional type specifier (after colon)
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_COLON)) {
         advance_token(state);
         type = parse_type_specifier(state, true);
@@ -2102,7 +2251,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
         has_explicit_type = true;
     }
     
-    /* Parse optional default value */
+    // Parse optional default value (after =)
     ASTNode *default_value = NULL;
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_EQUAL)) {
         advance_token(state);
@@ -2120,7 +2269,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
         }
     }
     
-    /* Handle function without explicit type but with all parameters having default values */
+    // Special rule: function without explicit type is allowed only if all parameters have default values
     if (is_function && !has_explicit_type) {
         bool all_params_have_default = true;
         if (parameter_list) {
@@ -2149,7 +2298,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
         }
     }
     
-    /* Create node for parameters as AST_BLOCK */
+    // Create node for parameters as AST_BLOCK
     ASTNode *params_node = NULL;
     if (is_function && parameter_list) {
         params_node = create_ast_node
@@ -2173,7 +2322,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
         }
     }
     
-    /* Check for function body */
+    // Check for function body (if present)
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_THEN) ||
         CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LCURLY)) {
         
@@ -2203,7 +2352,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
         } else
             node_type = AST_VARIABLE_WITH_BODY;
         
-        /* For function: left = params_node, right = body_block */
+        // For function: left = params_node, right = body_block
         ASTNode *node = create_ast_node(state, node_type, 0, name, 
                                        params_node, body_block, NULL);
         node->variable_type = type;
@@ -2216,7 +2365,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
         return node;
     }
     
-    /* Create node without body */
+    // No body – just declaration
     ASTNodeType node_type;
     if (is_function)
         node_type = AST_FUNCTION_DECLARATION;
@@ -2228,7 +2377,7 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
         }
     } else node_type = AST_VARIABLE_DECLARATION;
     
-    /* For function without body: left = params_node */
+    // For function without body: left = params_node
     ASTNode *node = create_ast_node
         ( state
         , node_type
@@ -2260,10 +2409,11 @@ static ASTNode *parse_object_declaration(ParserState *state, bool allow_expressi
     return node;
 }
 
+// Parse a single parameter (in a function parameter list). May be a declaration or an expression.
 static ASTNode *parse_parameter(ParserState *state) {
     int saved_pos = state->current_token_position;
     
-    /* Try to parse as state modifier + identifier (var arg : Int) */
+    // Try to parse as state modifier + identifier (var arg : Int)
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_STATE)) {
         Token *state_token = get_current_token(state);
         char *state_modifier = safe_strdup(state, state_token->value);
@@ -2281,7 +2431,7 @@ static ASTNode *parse_parameter(ParserState *state) {
         
         Type *type = NULL;
         
-        /* Parse optional type annotation */
+        // Parse optional type annotation
         if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_COLON)) {
             advance_token(state);
             type = parse_type_specifier(state, true);
@@ -2293,7 +2443,7 @@ static ASTNode *parse_parameter(ParserState *state) {
             }
         }
         
-        /* Parse optional default value */
+        // Parse optional default value
         ASTNode *default_value = NULL;
         if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_EQUAL)) {
             advance_token(state);
@@ -2316,29 +2466,30 @@ static ASTNode *parse_parameter(ParserState *state) {
         return node;
     }
     
-    /* Try to parse as type literal (none, Void) without state modifier */
+    // Try to parse as type literal (none, Void) without state modifier
     Type *type_literal = parse_type_specifier_silent(state, true, true);
     if (type_literal) {
-        /* Check if this is the end of parameter list */
+        // Check if this is the end of parameter list (comma or closing paren)
         if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_COMMA) || 
             CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_RPAREN)) {
-            /* This is a type literal (e.g., none, Void) */
+            // This is a type literal (e.g., none, Void)
             ASTNode *node = create_ast_node(state, AST_LITERAL_VALUE, TOKEN_TYPE, 
                                           safe_strdup(state, type_literal->name), 
                                           NULL, NULL, NULL);
             parser__free_type(type_literal);
             return node;
         } else {
-            /* Not a type literal, rollback */
+            // Not a type literal, rollback
             parser__free_type(type_literal);
             state->current_token_position = saved_pos;
         }
     }
     
-    /* Try to parse as expression (numeric literal, identifier, etc.) */
+    // Fallback: parse as expression
     return parse_expression(state);
 }
 
+// Parse a parameter list: ( param1, param2, ... )
 static AST *parse_parameter_list(ParserState *state) {
     if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN))
         REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC, "Expected '(' for parameter list");
@@ -2381,8 +2532,12 @@ static AST *parse_parameter_list(ParserState *state) {
     return param_list;
 }
 
+/*
+ * Parse a single statement.
+ * Handles declarations, control flow, expression statements, etc.
+ */
 static ASTNode *parse_statement(ParserState *state) {
-    /* Skip empty statements */
+    // Skip empty statements
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_SEMICOLON)) {
         advance_token(state);
         return NULL;
@@ -2391,21 +2546,21 @@ static ASTNode *parse_statement(ParserState *state) {
     TokenType token_type = get_current_token_type(state);
     
     if (token_type == TOKEN_STATE) {
-        /* Save position for error reporting */
+        // Save position for error reporting
         Token *state_token = get_current_token(state);
         int saved_pos = state->current_token_position;
         
-        /* Parse object declaration - state token is mandatory here */
+        // Parse object declaration - state token is mandatory here
         ASTNode *declaration = parse_object_declaration(state, false);
         if (declaration) {
             return declaration;
         }
         
-        /* If we get here, parsing failed. Report specific error */
+        // If we get here, parsing failed. Report specific error
         state->current_token_position = saved_pos;
         
-        /* Check what went wrong */
-        advance_token(state); /* Skip state token */
+        // Check what went wrong
+        advance_token(state); // Skip state token
         
         if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_EOF)) {
             state->current_token_position = saved_pos;
@@ -2422,7 +2577,7 @@ static ASTNode *parse_statement(ParserState *state) {
                 state_token->value, actual);
         }
         
-        /* We got identifier, but declaration still failed */
+        // We got identifier, but declaration still failed
         state->current_token_position = saved_pos;
         REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC,
             "Invalid object declaration after '%s %s'",
@@ -2492,7 +2647,7 @@ static ASTNode *parse_statement(ParserState *state) {
     
     int saved_pos = state->current_token_position;
     
-    /* Check for TOKEN_STATE in expression */
+    // Check for TOKEN_STATE in expression (should not happen)
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_STATE)) {
         Token *error_token = get_current_token(state);
         REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_INVALID_STATEMENT,
@@ -2501,17 +2656,17 @@ static ASTNode *parse_statement(ParserState *state) {
             error_token->value);
     }
     
-    /* Try to parse as expression */
+    // Try to parse as expression
     ASTNode *expression = parse_expression(state);
     if (!expression) {
         state->current_token_position = saved_pos;
         
-        /* Check if this is an invalid object declaration without state */
+        // Check if this is an invalid object declaration without state
         if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_ID)) {
             Token *id_token = get_current_token(state);
             advance_token(state);
             
-            /* Check if it looks like a declaration (has colon or braces) */
+            // Check if it looks like a declaration (has colon or braces)
             if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_COLON) ||
                 CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LBRACE) ||
                 CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_LPAREN)) {
@@ -2526,7 +2681,7 @@ static ASTNode *parse_statement(ParserState *state) {
             state->current_token_position = saved_pos;
         }
         
-        /* Generic syntax error */
+        // Generic syntax error
         Token *error_token = get_current_token(state);
         if (error_token) {
             REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC,
@@ -2535,9 +2690,9 @@ static ASTNode *parse_statement(ParserState *state) {
         } else REPORT_UNEXPECTED_EOF(state);
     }
     
-    /* Validate that expression can be a statement */
+    // Validate that expression can be a statement
     if (!is_valid_statement_expression(expression)) {
-        /* Provide helpful error message based on expression type */
+        // Provide helpful error message based on expression type
         if (expression->type == AST_LITERAL_VALUE) {
             const char *literal_type = "";
             switch (expression->operation_type) {
@@ -2578,11 +2733,11 @@ static ASTNode *parse_statement(ParserState *state) {
             "Invalid statement: expression has no effect");
     }
     
-    /* Expect semicolon after expression statement */
+    // Expect semicolon after expression statement
     if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_SEMICOLON)) {
         advance_token(state);
     } else {
-        /* Try to recover by consuming until semicolon if possible */
+        // Try to recover by consuming until semicolon if possible
         Token *current = get_current_token(state);
         if (current) {
             errhandler__report_error(
@@ -2594,7 +2749,7 @@ static ASTNode *parse_statement(ParserState *state) {
             );
         }
         
-        /* Try to consume tokens until semicolon or end of block */
+        // Try to consume tokens until semicolon or end of block
         while (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_SEMICOLON)
             && !CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_RCURLY)
             && !CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_EOF)) {
@@ -2604,13 +2759,17 @@ static ASTNode *parse_statement(ParserState *state) {
         if (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_SEMICOLON))
             advance_token(state);
         
-        /* Return the expression even with missing semicolon */
+        // Return the expression even with missing semicolon
         return expression;
     }
     
     return expression;
 }
 
+/*
+ * Main parser entry point.
+ * Parses the entire token stream and builds an AST.
+ */
 AST *parse(Token *tokens, uint16_t token_count) {
     ParserState state;
     AST *ast;
@@ -2658,6 +2817,9 @@ AST *parse(Token *tokens, uint16_t token_count) {
     return ast;
 }
 
+/*
+ * Free a Type structure and all its contents.
+ */
 void parser__free_type(Type *type) {
     if (!type) return;
     
@@ -2685,6 +2847,10 @@ void parser__free_type(Type *type) {
     free(type);
 }
 
+/*
+ * Recursively free an AST node and all its children.
+ * Handles special cases where extra points to an AST structure.
+ */
 void parser__free_ast_node(ASTNode *node) {
     if (!node) return;
     
@@ -2694,6 +2860,7 @@ void parser__free_ast_node(ASTNode *node) {
     
     if (node->extra) {
         if (node->type == AST_FUNCTION_DECLARATION) {
+            // extra points to AST containing arguments
             AST *args_ast = (AST*)node->extra;
             if (args_ast->nodes) {
                 for (uint16_t i = 0; i < args_ast->count; i++)
@@ -2702,6 +2869,7 @@ void parser__free_ast_node(ASTNode *node) {
             }
             free(args_ast);
         } else if (node->type == AST_BLOCK) {
+            // For blocks that are just containers of statements
             if (node->left == NULL && node->right == NULL) {
                 AST *block_ast = (AST*)node->extra;
                 if (block_ast->nodes) {
@@ -2713,6 +2881,7 @@ void parser__free_ast_node(ASTNode *node) {
                 free(block_ast);
             } else parser__free_ast_node(node->extra);
         } else if (node->type == AST_MULTI_INITIALIZER) {
+            // extra points to AST containing the list
             AST *init_list = (AST*)node->extra;
             if (init_list->nodes) {
                 for (uint16_t i = 0; i < init_list->count; i++)
@@ -2734,6 +2903,9 @@ void parser__free_ast_node(ASTNode *node) {
         parser__free_type(node->variable_type);
 }
 
+/*
+ * Free an entire AST, including its node pool.
+ */
 void parser__free_ast(AST *ast) {
     if (!ast) return;
     
