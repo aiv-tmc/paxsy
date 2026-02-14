@@ -28,18 +28,18 @@
 typedef uint32_t FlagSet;
 
 enum {
-    F_WRITE_LEXER        = 1U << 0,   /**< Print lexer tokens to stdout */
-    F_WRITE_PARSER       = 1U << 1,   /**< Print AST to stdout */
-    F_WRITE_SEMANTIC     = 1U << 2,   /**< Print semantic analysis to stdout */
-    F_LOG_SEMANTIC_LOG   = 1U << 3,   /**< Print semantic log to stdout */
+    F_WRITE_LEXER        = 1U << 0,
+    F_WRITE_PARSER       = 1U << 1,
+    F_WRITE_SEMANTIC     = 1U << 2,
+    F_LOG_SEMANTIC_LOG   = 1U << 3,
 
-    F_LOG_LEXER          = 1U << 4,   /**< Write lexer output to _lexer.txt */
-    F_LOG_PARSER         = 1U << 5,   /**< Write parser output to _parser.txt */
-    F_LOG_SEMANTIC       = 1U << 6,   /**< Write semantic analysis to _semantic.txt */
-    F_LOG_STATE          = 1U << 7,   /**< Reserved for future state dumps */
-    F_LOG_VERBOSE        = 1U << 8,   /**< Reserved for verbose logs */
+    F_LOG_LEXER          = 1U << 4,
+    F_LOG_PARSER         = 1U << 5,
+    F_LOG_SEMANTIC       = 1U << 6,
+    F_LOG_STATE          = 1U << 7,
+    F_LOG_VERBOSE        = 1U << 8,
 
-    F_MODE_COMPILE       = 1U << 9,   /**< Full compilation; no debug output */
+    F_MODE_COMPILE       = 1U << 9,
 };
 
 /** Initial capacity for filename array (grows as needed). */
@@ -70,11 +70,11 @@ static void           semantic_output_writer(FILE* f, void* data);
 static void           semantic_log_writer(FILE* f, void* data);
 
 typedef struct {
-    FlagSet flags;          /**< Bitmask of enabled operations */
-    char**  filenames;      /**< Array of source file names (copies) */
-    size_t  file_count;     /**< Number of files collected */
-    size_t  capacity;       /**< Allocated capacity of filenames array */
-    int     exit_code;      /**< Exit code to use when immediate exit is required */
+    FlagSet flags;
+    char**  filenames;
+    size_t  file_count;
+    size_t  capacity;
+    int     exit_code;
 } Arguments;
 
 /**
@@ -607,7 +607,7 @@ static int process_one_file(const char* filename,
     }
 
     if (*semantic_ctx && ast && !errhandler__has_errors()) {
-        uint8_t semantic_ok = semantic_analyze(*semantic_ctx, ast);
+        uint8_t semantic_ok = semantic__analyze(*semantic_ctx, ast);
 
         /* Semantic analysis output (stdout) – only if not in compile mode */
         if (!(flags & F_MODE_COMPILE) && (flags & F_WRITE_SEMANTIC)) {
@@ -691,12 +691,12 @@ int main(int argc, char* argv[]) {
     SemanticContext* semantic_ctx = NULL;
     if (args.flags & (F_MODE_COMPILE | F_WRITE_SEMANTIC |
                       F_LOG_SEMANTIC | F_LOG_SEMANTIC_LOG)) {
-        semantic_ctx = semantic_create_context();
+        semantic_ctx = semantic__create_context();
         if (!semantic_ctx) {
             errhandler__report_error(ERROR_CODE_COM_FAILCREATE, 0, 0, "syntax",
                                      "Failed to create semantic analysis context");
         } else {
-            semantic_set_exit_on_error(semantic_ctx, (args.flags & F_MODE_COMPILE) != 0);
+            semantic__set_exit_on_error(semantic_ctx, (args.flags & F_MODE_COMPILE) != 0);
         }
     }
 
@@ -707,10 +707,10 @@ int main(int argc, char* argv[]) {
 
         /* For multiple files, recreate semantic context for each */
         if (semantic_ctx && i + 1 < args.file_count) {
-            semantic_destroy_context(semantic_ctx);
-            semantic_ctx = semantic_create_context();
+            semantic__destroy_context(semantic_ctx);
+            semantic_ctx = semantic__create_context();
             if (semantic_ctx) {
-                semantic_set_exit_on_error(semantic_ctx, (args.flags & F_MODE_COMPILE) != 0);
+                semantic__set_exit_on_error(semantic_ctx, (args.flags & F_MODE_COMPILE) != 0);
             } else {
                 errhandler__report_error(ERROR_CODE_COM_FAILCREATE, 0, 0, "syntax",
                                          "Failed to recreate semantic context");
@@ -722,7 +722,7 @@ int main(int argc, char* argv[]) {
     errhandler__print_errors();
     errhandler__print_warnings();
 
-    if (semantic_ctx) semantic_destroy_context(semantic_ctx);
+    if (semantic_ctx) semantic__destroy_context(semantic_ctx);
 
 cleanup_args:
     for (size_t i = 0; i < args.file_count; ++i)
