@@ -1,11 +1,10 @@
-#inclib "_zero"
-#inclib "sigf"
-#inclib "inout"
-#inclib "mathf"
-#inclib "type"
-#inclib "args"
-#inclib "cyclic"
-#go .start
+#using "base"
+#using "simac"
+#using "inout"
+#using "type"
+#using "args"
+#using "cyclic"
+#entry .start
 
 func start(none) {
     io::print
@@ -13,12 +12,13 @@ func start(none) {
             ( 1.9
             , 2
             , mth::PI(2)
-        )
-    );
-    sig::exit(0);
+            )
+        );
+    exit(0);
+    return;
 }
 
-func calc(var num : Float/*, ...*/) : static Float {
+func calc(var num : Float, ...) : static Float {
     var result : Float = zero;
     var factor : VLS = zero;
     
@@ -27,7 +27,8 @@ func calc(var num : Float/*, ...*/) : static Float {
     var count : Byte = zero;
     while (count < num) {
         result += va::arg(factor, Float);
-    count++;}
+        count++;
+    }
     va::end(factor);
     
     return result;
