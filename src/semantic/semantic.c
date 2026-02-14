@@ -173,7 +173,7 @@ static bool add_symbol_to_table(SymbolTable* table, SymbolEntry* entry) {
  * @param context Semantic context (needed for user-defined type lookup).
  * @return Corresponding DataType.
  */
-static DataType semantic_type_from_type_info(Type* type_info, SemanticContext* context) {
+static DataType semantic__type_from_type_info(Type* type_info, SemanticContext* context) {
     if (!type_info) return TYPE_UNKNOWN;
 
     /* Pointer, reference, array, compound have precedence */
@@ -193,7 +193,7 @@ static DataType semantic_type_from_type_info(Type* type_info, SemanticContext* c
     /* Basic types or user-defined structs */
     if (type_info->name) {
         /* Check if this is a user-defined struct type */
-        SymbolEntry* entry = semantic_find_symbol(context, type_info->name);
+        SymbolEntry* entry = semantic__find_symbol(context, type_info->name);
         if (entry && entry->type == TYPE_COMPOUND) {
             return TYPE_COMPOUND;
         }
@@ -211,7 +211,7 @@ static DataType semantic_type_from_type_info(Type* type_info, SemanticContext* c
     return TYPE_UNKNOWN;
 }
 
-SemanticContext* semantic_create_context(void) {
+SemanticContext* semantic__create_context(void) {
     SemanticContext* context = malloc(sizeof(SemanticContext));
     if (!context) return NULL;
 
@@ -234,19 +234,19 @@ SemanticContext* semantic_create_context(void) {
     return context;
 }
 
-void semantic_destroy_context(SemanticContext* context) {
+void semantic__destroy_context(SemanticContext* context) {
     if (!context) return;
     destroy_symbol_table(context->global_scope);
     free(context);
 }
 
-void semantic_set_exit_on_error(SemanticContext* context, bool exit_on_error) {
+void semantic__set_exit_on_error(SemanticContext* context, bool exit_on_error) {
     if (context) {
         context->exit_on_error = exit_on_error;
     }
 }
 
-void semantic_enter_scope_ex(SemanticContext* context, ScopeLevel level) {
+void semantic__enter_scope_ex(SemanticContext* context, ScopeLevel level) {
     SymbolTable* new_scope = create_symbol_table(context->current_scope, level);
     if (new_scope) {
         context->current_scope = new_scope;
@@ -256,11 +256,11 @@ void semantic_enter_scope_ex(SemanticContext* context, ScopeLevel level) {
     }
 }
 
-void semantic_enter_scope(SemanticContext* context) {
-    semantic_enter_scope_ex(context, SCOPE_BLOCK);
+void semantic__enter_scope(SemanticContext* context) {
+    semantic__enter_scope_ex(context, SCOPE_BLOCK);
 }
 
-void semantic_exit_scope(SemanticContext* context) {
+void semantic__exit_scope(SemanticContext* context) {
     if (context->current_scope && context->current_scope != context->global_scope) {
         SymbolTable* old_scope = context->current_scope;
 
@@ -280,29 +280,29 @@ void semantic_exit_scope(SemanticContext* context) {
     }
 }
 
-void semantic_enter_function_scope(SemanticContext* context,
+void semantic__enter_function_scope(SemanticContext* context,
                                    const char* function_name,
                                    DataType return_type) {
-    semantic_enter_scope_ex(context, SCOPE_FUNCTION);
+    semantic__enter_scope_ex(context, SCOPE_FUNCTION);
     context->in_function = true;
     context->current_function = function_name;
     context->current_return_type = return_type;
     context->function_scope = context->current_scope;
 }
 
-void semantic_exit_function_scope(SemanticContext* context) {
-    semantic_exit_scope(context);
+void semantic__exit_function_scope(SemanticContext* context) {
+    semantic__exit_scope(context);
 }
 
-void semantic_enter_loop_scope(SemanticContext* context) {
-    semantic_enter_scope_ex(context, SCOPE_LOOP);
+void semantic__enter_loop_scope(SemanticContext* context) {
+    semantic__enter_scope_ex(context, SCOPE_LOOP);
 }
 
-void semantic_exit_loop_scope(SemanticContext* context) {
-    semantic_exit_scope(context);
+void semantic__exit_loop_scope(SemanticContext* context) {
+    semantic__exit_scope(context);
 }
 
-bool semantic_add_variable_ex(SemanticContext* context, SymbolTable* target_scope,
+bool semantic__add_variable_ex(SemanticContext* context, SymbolTable* target_scope,
                               const char* name, DataType type, Type* type_info,
                               bool is_constant, const char* state_modifier,
                               InitState init_state, uint16_t line, uint16_t column) {
@@ -327,7 +327,7 @@ bool semantic_add_variable_ex(SemanticContext* context, SymbolTable* target_scop
 
     /* Emit shadowing warning if applicable */
     if (context->warnings_enabled && scope == context->current_scope) {
-        semantic_check_shadowing(context, name, line, column);
+        semantic__check_shadowing(context, name, line, column);
     }
 
     /* Allocate and initialize new symbol entry */
@@ -359,16 +359,16 @@ bool semantic_add_variable_ex(SemanticContext* context, SymbolTable* target_scop
     return true;
 }
 
-bool semantic_add_variable(SemanticContext* context, const char* name,
+bool semantic__add_variable(SemanticContext* context, const char* name,
                            DataType type, Type* type_info, bool is_constant,
                            uint16_t line, uint16_t column) {
     InitState init_state = is_constant ? INIT_CONSTANT : INIT_UNINITIALIZED;
-    return semantic_add_variable_ex(context, context->current_scope,
+    return semantic__add_variable_ex(context, context->current_scope,
                                     name, type, type_info,
                                     is_constant, NULL, init_state, line, column);
 }
 
-bool semantic_add_function_ex(SemanticContext* context, const char* name,
+bool semantic__add_function_ex(SemanticContext* context, const char* name,
                               DataType return_type, Type* return_type_info,
                               FunctionParam* params, size_t param_count,
                               bool is_variadic, uint16_t line, uint16_t column) {
@@ -430,11 +430,11 @@ bool semantic_add_function_ex(SemanticContext* context, const char* name,
     return true;
 }
 
-bool semantic_add_function(SemanticContext* context, const char* name,
+bool semantic__add_function(SemanticContext* context, const char* name,
                            DataType return_type, Type* return_type_info,
                            FunctionParam* params, size_t param_count,
                            uint16_t line, uint16_t column) {
-    return semantic_add_function_ex(context, name, return_type, return_type_info,
+    return semantic__add_function_ex(context, name, return_type, return_type_info,
                                     params, param_count, false, line, column);
 }
 
@@ -484,7 +484,7 @@ static bool validate_struct_member(SemanticContext* context, ASTNode* member_nod
     DataType mem_type = TYPE_UNKNOWN;
     Type* mem_type_info = member_node->variable_type;
     if (mem_type_info) {
-        mem_type = semantic_type_from_type_info(mem_type_info, context);
+        mem_type = semantic__type_from_type_info(mem_type_info, context);
     }
 
     if (mem_type == TYPE_UNKNOWN) {
@@ -502,7 +502,7 @@ static bool validate_struct_member(SemanticContext* context, ASTNode* member_nod
 
     /* If member is a struct, ensure that struct type is already declared */
     if (mem_type == TYPE_COMPOUND && mem_type_info && mem_type_info->name) {
-        SymbolEntry* type_entry = semantic_find_symbol(context, mem_type_info->name);
+        SymbolEntry* type_entry = semantic__find_symbol(context, mem_type_info->name);
         if (!type_entry || type_entry->type != TYPE_COMPOUND) {
             errhandler__report_error_ex(
                 ERROR_LEVEL_ERROR,
@@ -520,7 +520,7 @@ static bool validate_struct_member(SemanticContext* context, ASTNode* member_nod
     return true;
 }
 
-bool semantic_add_compound_type(SemanticContext* context, const char* name,
+bool semantic__add_compound_type(SemanticContext* context, const char* name,
                                 ASTNode* members_ast,
                                 uint16_t line, uint16_t column) {
     if (!context || !name) return false;
@@ -600,13 +600,13 @@ bool semantic_add_compound_type(SemanticContext* context, const char* name,
 
         /* Extract member information */
         const char* mod = member_node->state_modifier;
-        DataType mem_type = semantic_type_from_type_info(member_node->variable_type, context);
+        DataType mem_type = semantic__type_from_type_info(member_node->variable_type, context);
         Type* mem_type_info = member_node->variable_type;
         InitState mem_init = member_node->default_value ? INIT_FULL : INIT_UNINITIALIZED;
         bool is_const = (mod && strcmp(mod, "const") == 0); /* Not typical for structs, but allowed */
 
         /* Add member to the struct's scope */
-        if (!semantic_add_variable_ex(context, struct_scope,
+        if (!semantic__add_variable_ex(context, struct_scope,
                                       member_node->value,
                                       mem_type, mem_type_info,
                                       is_const, mod,
@@ -656,7 +656,7 @@ bool semantic_add_compound_type(SemanticContext* context, const char* name,
     return true;
 }
 
-SymbolEntry* semantic_find_symbol(SemanticContext* context, const char* name) {
+SymbolEntry* semantic__find_symbol(SemanticContext* context, const char* name) {
     if (!context || !name) return NULL;
 
     SymbolTable* table = context->current_scope;
@@ -670,16 +670,16 @@ SymbolEntry* semantic_find_symbol(SemanticContext* context, const char* name) {
     return NULL;
 }
 
-SymbolEntry* semantic_find_struct_member(SemanticContext* context,
+SymbolEntry* semantic__find_struct_member(SemanticContext* context,
                                          const char* struct_name,
                                          const char* field_name) {
-    SymbolEntry* struct_entry = semantic_find_symbol(context, struct_name);
+    SymbolEntry* struct_entry = semantic__find_symbol(context, struct_name);
     if (!struct_entry || struct_entry->type != TYPE_COMPOUND || !struct_entry->compound_scope)
         return NULL;
     return find_symbol_in_table(struct_entry->compound_scope, field_name);
 }
 
-VisibilityResult semantic_check_visibility(SemanticContext* context,
+VisibilityResult semantic__check_visibility(SemanticContext* context,
                                            const char* name,
                                            bool require_initialized,
                                            bool allow_shadowing) {
@@ -742,8 +742,8 @@ VisibilityResult semantic_check_visibility(SemanticContext* context,
     return result;
 }
 
-bool semantic_mark_symbol_used(SemanticContext* context, const char* name) {
-    SymbolEntry* entry = semantic_find_symbol(context, name);
+bool semantic__mark_symbol_used(SemanticContext* context, const char* name) {
+    SymbolEntry* entry = semantic__find_symbol(context, name);
     if (entry) {
         entry->is_used = true;
         return true;
@@ -751,9 +751,9 @@ bool semantic_mark_symbol_used(SemanticContext* context, const char* name) {
     return false;
 }
 
-bool semantic_update_init_state(SemanticContext* context, const char* name,
+bool semantic__update_init_state(SemanticContext* context, const char* name,
                                 InitState new_state) {
-    SymbolEntry* entry = semantic_find_symbol(context, name);
+    SymbolEntry* entry = semantic__find_symbol(context, name);
     if (!entry) return false;
 
     /* Cannot change initialization state of constants */
@@ -782,26 +782,26 @@ bool semantic_update_init_state(SemanticContext* context, const char* name,
     return false;
 }
 
-InitState semantic_get_init_state(SemanticContext* context, const char* name) {
-    SymbolEntry* entry = semantic_find_symbol(context, name);
+InitState semantic__get_init_state(SemanticContext* context, const char* name) {
+    SymbolEntry* entry = semantic__find_symbol(context, name);
     return entry ? entry->init_state : INIT_UNINITIALIZED;
 }
 
-bool semantic_can_modify_symbol(SemanticContext* context, const char* name) {
-    SymbolEntry* entry = semantic_find_symbol(context, name);
+bool semantic__can_modify_symbol(SemanticContext* context, const char* name) {
+    SymbolEntry* entry = semantic__find_symbol(context, name);
     if (!entry) return false;
     if (entry->is_constant) return false;
     if (!entry->is_mutable) return false;
     return true;
 }
 
-bool semantic_is_valid_struct_member_modifier(const char* state_modifier) {
+bool semantic__is_valid_struct_member_modifier(const char* state_modifier) {
     if (!state_modifier) return false;
     return (strcmp(state_modifier, "var") == 0 ||
             strcmp(state_modifier, "obj") == 0);
 }
 
-DataType semantic_type_from_token(TokenType token_type) {
+DataType semantic__type_from_token(TokenType token_type) {
     switch (token_type) {
         case TOKEN_NUMBER:  return TYPE_REAL;
         case TOKEN_CHAR:    return TYPE_CHAR;
@@ -812,7 +812,7 @@ DataType semantic_type_from_token(TokenType token_type) {
     }
 }
 
-const char* semantic_type_to_string(DataType type) {
+const char* semantic__type_to_string(DataType type) {
     switch (type) {
         case TYPE_INT:      return "Int";
         case TYPE_REAL:     return "Real";
@@ -830,7 +830,7 @@ const char* semantic_type_to_string(DataType type) {
     }
 }
 
-const char* semantic_init_state_to_string(InitState state) {
+const char* semantic__init_state_to_string(InitState state) {
     switch (state) {
         case INIT_UNINITIALIZED: return "uninitialized";
         case INIT_PARTIAL:       return "partially initialized";
@@ -841,7 +841,7 @@ const char* semantic_init_state_to_string(InitState state) {
     }
 }
 
-bool semantic_types_compatible(DataType type1, DataType type2) {
+bool semantic__types_compatible(DataType type1, DataType type2) {
     /* Same type is always compatible */
     if (type1 == type2) return true;
 
@@ -873,10 +873,10 @@ bool semantic_types_compatible(DataType type1, DataType type2) {
     return false;
 }
 
-bool semantic_types_assignable_ex(DataType target_type, DataType source_type,
+bool semantic__types_assignable_ex(DataType target_type, DataType source_type,
                                   InitState target_init, InitState source_init) {
     /* Type compatibility first */
-    if (!semantic_types_compatible(target_type, source_type)) {
+    if (!semantic__types_compatible(target_type, source_type)) {
         return false;
     }
 
@@ -898,11 +898,11 @@ bool semantic_types_assignable_ex(DataType target_type, DataType source_type,
     return true;
 }
 
-bool semantic_types_assignable(DataType target_type, DataType source_type) {
-    return semantic_types_compatible(target_type, source_type);
+bool semantic__types_assignable(DataType target_type, DataType source_type) {
+    return semantic__types_compatible(target_type, source_type);
 }
 
-TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node) {
+TypeCheckResult semantic__check_type(SemanticContext* context, ASTNode* node) {
     TypeCheckResult result = {false, TYPE_UNKNOWN, NULL, INIT_UNINITIALIZED, NULL};
 
     if (!node) {
@@ -912,7 +912,7 @@ TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node) {
 
     switch (node->type) {
         case AST_LITERAL_VALUE:
-            result.type = semantic_type_from_token(node->operation_type);
+            result.type = semantic__type_from_token(node->operation_type);
             result.init_state = INIT_CONSTANT;
             result.valid = (result.type != TYPE_UNKNOWN);
             if (!result.valid) {
@@ -922,10 +922,10 @@ TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node) {
 
         case AST_IDENTIFIER: {
             if (node->value) {
-                VisibilityResult vis = semantic_check_visibility(
+                VisibilityResult vis = semantic__check_visibility(
                     context, node->value, true, false);
                 if (vis.visible) {
-                    semantic_mark_symbol_used(context, node->value);
+                    semantic__mark_symbol_used(context, node->value);
                     result.type = vis.entry->type;
                     result.type_info = vis.entry->type_info;
                     result.init_state = vis.entry->init_state;
@@ -964,16 +964,16 @@ TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node) {
         }
 
         case AST_BINARY_OPERATION:
-            result = semantic_check_binary_op(context, node);
+            result = semantic__check_binary_op(context, node);
             break;
 
         case AST_UNARY_OPERATION:
-            result = semantic_check_unary_op(context, node);
+            result = semantic__check_unary_op(context, node);
             break;
 
         case AST_ASSIGNMENT:
         case AST_COMPOUND_ASSIGNMENT:
-            result = semantic_check_assignment(context, node);
+            result = semantic__check_assignment(context, node);
             break;
 
         case AST_FUNCTION_DECLARATION:
@@ -990,11 +990,11 @@ TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node) {
 
         case AST_CAST: {
             if (node->variable_type) {
-                result.type = semantic_type_from_type_info(node->variable_type, context);
+                result.type = semantic__type_from_type_info(node->variable_type, context);
                 result.type_info = node->variable_type;
-                TypeCheckResult expr = semantic_check_type(context, node->left);
+                TypeCheckResult expr = semantic__check_type(context, node->left);
                 result.valid = expr.valid &&
-                               semantic_types_compatible(result.type, expr.type);
+                               semantic__types_compatible(result.type, expr.type);
                 if (result.valid) {
                     result.init_state = expr.init_state;
                 } else {
@@ -1007,7 +1007,7 @@ TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node) {
         }
 
         case AST_FIELD_ACCESS: {
-            if (!semantic_check_field_access(context, node)) {
+            if (!semantic__check_field_access(context, node)) {
                 result.valid = false;
                 result.error_msg = duplicate_string("Invalid field access");
                 break;
@@ -1017,7 +1017,7 @@ TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node) {
                 node->right && node->right->type == AST_IDENTIFIER) {
                 const char* struct_name = node->left->value;
                 const char* field_name = node->right->value;
-                SymbolEntry* field = semantic_find_struct_member(context,
+                SymbolEntry* field = semantic__find_struct_member(context,
                                                                  struct_name,
                                                                  field_name);
                 if (field) {
@@ -1038,7 +1038,7 @@ TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node) {
     return result;
 }
 
-TypeCheckResult semantic_check_binary_op(SemanticContext* context, ASTNode* node) {
+TypeCheckResult semantic__check_binary_op(SemanticContext* context, ASTNode* node) {
     TypeCheckResult result = {false, TYPE_UNKNOWN, NULL, INIT_UNINITIALIZED, NULL};
 
     if (!node->left || !node->right) {
@@ -1046,20 +1046,20 @@ TypeCheckResult semantic_check_binary_op(SemanticContext* context, ASTNode* node
         return result;
     }
 
-    TypeCheckResult left = semantic_check_type(context, node->left);
-    TypeCheckResult right = semantic_check_type(context, node->right);
+    TypeCheckResult left = semantic__check_type(context, node->left);
+    TypeCheckResult right = semantic__check_type(context, node->right);
 
     if (!left.valid || !right.valid) {
         result.error_msg = duplicate_string("Invalid operand type");
         return result;
     }
 
-    if (!semantic_types_compatible(left.type, right.type)) {
+    if (!semantic__types_compatible(left.type, right.type)) {
         char msg[256];
         snprintf(msg, sizeof(msg),
                  "Type mismatch in binary operation: %s and %s",
-                 semantic_type_to_string(left.type),
-                 semantic_type_to_string(right.type));
+                 semantic__type_to_string(left.type),
+                 semantic__type_to_string(right.type));
         result.error_msg = duplicate_string(msg);
         errhandler__report_error_ex(
             ERROR_LEVEL_ERROR,
@@ -1144,7 +1144,7 @@ TypeCheckResult semantic_check_binary_op(SemanticContext* context, ASTNode* node
     return result;
 }
 
-TypeCheckResult semantic_check_unary_op(SemanticContext* context, ASTNode* node) {
+TypeCheckResult semantic__check_unary_op(SemanticContext* context, ASTNode* node) {
     TypeCheckResult result = {false, TYPE_UNKNOWN, NULL, INIT_UNINITIALIZED, NULL};
 
     if (!node->right) {
@@ -1152,7 +1152,7 @@ TypeCheckResult semantic_check_unary_op(SemanticContext* context, ASTNode* node)
         return result;
     }
 
-    TypeCheckResult operand = semantic_check_type(context, node->right);
+    TypeCheckResult operand = semantic__check_type(context, node->right);
     if (!operand.valid) {
         result.error_msg = duplicate_string("Invalid operand type");
         return result;
@@ -1199,7 +1199,7 @@ TypeCheckResult semantic_check_unary_op(SemanticContext* context, ASTNode* node)
     return result;
 }
 
-TypeCheckResult semantic_check_assignment(SemanticContext* context, ASTNode* node) {
+TypeCheckResult semantic__check_assignment(SemanticContext* context, ASTNode* node) {
     TypeCheckResult result = {false, TYPE_UNKNOWN, NULL, INIT_UNINITIALIZED, NULL};
 
     if (!node->left || !node->right) {
@@ -1224,12 +1224,12 @@ TypeCheckResult semantic_check_assignment(SemanticContext* context, ASTNode* nod
     const char* var_name = node->left->value;
 
     /* Check mutability */
-    if (!semantic_validate_mutation(context, var_name, 0, 0)) {
+    if (!semantic__validate_mutation(context, var_name, 0, 0)) {
         result.error_msg = duplicate_string("Cannot modify variable");
         return result;
     }
 
-    SymbolEntry* target = semantic_find_symbol(context, var_name);
+    SymbolEntry* target = semantic__find_symbol(context, var_name);
     if (!target) {
         result.error_msg = duplicate_string("Assignment to undeclared variable");
         errhandler__report_error_ex(
@@ -1245,22 +1245,22 @@ TypeCheckResult semantic_check_assignment(SemanticContext* context, ASTNode* nod
     }
 
     /* Check right-hand side */
-    TypeCheckResult rhs = semantic_check_type(context, node->right);
+    TypeCheckResult rhs = semantic__check_type(context, node->right);
     if (!rhs.valid) {
         result.error_msg = duplicate_string("Invalid right-hand side type");
         return result;
     }
 
     /* Type compatibility with initialization states */
-    if (!semantic_types_assignable_ex(target->type, rhs.type,
+    if (!semantic__types_assignable_ex(target->type, rhs.type,
                                       target->init_state, rhs.init_state)) {
         char msg[256];
         snprintf(msg, sizeof(msg),
                  "Type mismatch in assignment: cannot assign %s (%s) to %s (%s)",
-                 semantic_type_to_string(rhs.type),
-                 semantic_init_state_to_string(rhs.init_state),
-                 semantic_type_to_string(target->type),
-                 semantic_init_state_to_string(target->init_state));
+                 semantic__type_to_string(rhs.type),
+                 semantic__init_state_to_string(rhs.init_state),
+                 semantic__type_to_string(target->type),
+                 semantic__init_state_to_string(target->init_state));
         result.error_msg = duplicate_string(msg);
         errhandler__report_error_ex(
             ERROR_LEVEL_ERROR,
@@ -1277,7 +1277,7 @@ TypeCheckResult semantic_check_assignment(SemanticContext* context, ASTNode* nod
     InitState new_state = (rhs.init_state == INIT_FULL ||
                            rhs.init_state == INIT_CONSTANT) ?
                            INIT_FULL : INIT_PARTIAL;
-    semantic_update_init_state(context, var_name, new_state);
+    semantic__update_init_state(context, var_name, new_state);
 
     result.type = target->type;
     result.type_info = target->type_info;
@@ -1287,7 +1287,7 @@ TypeCheckResult semantic_check_assignment(SemanticContext* context, ASTNode* nod
     return result;
 }
 
-TypeCheckResult semantic_check_function_call(SemanticContext* context,
+TypeCheckResult semantic__check_function_call(SemanticContext* context,
                                              ASTNode* node) {
     /* TODO: Implement full function call type checking */
     TypeCheckResult result = {false, TYPE_UNKNOWN, NULL, INIT_UNINITIALIZED, NULL};
@@ -1296,7 +1296,7 @@ TypeCheckResult semantic_check_function_call(SemanticContext* context,
     return result;
 }
 
-bool semantic_check_compound_type(SemanticContext* context, ASTNode* node) {
+bool semantic__check_compound_type(SemanticContext* context, ASTNode* node) {
     if (!node || !node->value) {
         errhandler__report_error_ex(
             ERROR_LEVEL_ERROR,
@@ -1336,11 +1336,11 @@ bool semantic_check_compound_type(SemanticContext* context, ASTNode* node) {
         return false;
     }
 
-    return semantic_add_compound_type(context, node->value, extra,
+    return semantic__add_compound_type(context, node->value, extra,
                                       0, 0);
 }
 
-bool semantic_check_block_ends_with_return(SemanticContext* context, AST* block_ast) {
+bool semantic__check_block_ends_with_return(SemanticContext* context, AST* block_ast) {
     if (!block_ast || block_ast->count == 0) return false;
 
     ASTNode* last = block_ast->nodes[block_ast->count - 1];
@@ -1350,32 +1350,32 @@ bool semantic_check_block_ends_with_return(SemanticContext* context, AST* block_
         if (last->right && last->extra) {
             AST* then_block = (AST*)last->right;
             AST* else_block = (AST*)last->extra;
-            return semantic_check_block_ends_with_return(context, then_block) &&
-                   semantic_check_block_ends_with_return(context, else_block);
+            return semantic__check_block_ends_with_return(context, then_block) &&
+                   semantic__check_block_ends_with_return(context, else_block);
         }
     }
     return false;
 }
 
-bool semantic_statement_ensures_return(SemanticContext* context, ASTNode* node) {
+bool semantic__statement_ensures_return(SemanticContext* context, ASTNode* node) {
     if (!node) return false;
     if (node->type == AST_RETURN) return true;
     if (node->type == AST_BLOCK) {
         if (node->extra) {
             AST* block = (AST*)node->extra;
-            return semantic_check_block_ends_with_return(context, block);
+            return semantic__check_block_ends_with_return(context, block);
         }
     }
     if (node->type == AST_IF_STATEMENT) {
         if (node->right && node->extra) {
-            return semantic_statement_ensures_return(context, node->right) &&
-                   semantic_statement_ensures_return(context, node->extra);
+            return semantic__statement_ensures_return(context, node->right) &&
+                   semantic__statement_ensures_return(context, node->extra);
         }
     }
     return false;
 }
 
-bool semantic_check_scope_initialization(SemanticContext* context, SymbolTable* scope) {
+bool semantic__check_scope_initialization(SemanticContext* context, SymbolTable* scope) {
     if (!scope) scope = context->current_scope;
     bool all_init = true;
 
@@ -1402,7 +1402,7 @@ bool semantic_check_scope_initialization(SemanticContext* context, SymbolTable* 
     return all_init;
 }
 
-void semantic_check_shadowing(SemanticContext* context, const char* name,
+void semantic__check_shadowing(SemanticContext* context, const char* name,
                               uint16_t line, uint16_t column) {
     SymbolEntry* outer = NULL;
     SymbolTable* table = context->current_scope->parent;
@@ -1426,9 +1426,9 @@ void semantic_check_shadowing(SemanticContext* context, const char* name,
     }
 }
 
-bool semantic_validate_mutation(SemanticContext* context, const char* name,
+bool semantic__validate_mutation(SemanticContext* context, const char* name,
                                 uint16_t line, uint16_t column) {
-    SymbolEntry* entry = semantic_find_symbol(context, name);
+    SymbolEntry* entry = semantic__find_symbol(context, name);
     if (!entry) return false;
 
     if (entry->is_constant) {
@@ -1459,7 +1459,7 @@ bool semantic_validate_mutation(SemanticContext* context, const char* name,
     return true;
 }
 
-bool semantic_check_field_access(SemanticContext* context, ASTNode* node) {
+bool semantic__check_field_access(SemanticContext* context, ASTNode* node) {
     if (!node || node->type != AST_FIELD_ACCESS) return false;
 
     ASTNode* object = node->left;
@@ -1488,7 +1488,7 @@ bool semantic_check_field_access(SemanticContext* context, ASTNode* node) {
     }
 
     const char* obj_name = object->value;
-    SymbolEntry* obj = semantic_find_symbol(context, obj_name);
+    SymbolEntry* obj = semantic__find_symbol(context, obj_name);
     if (!obj) {
         errhandler__report_error_ex(
             ERROR_LEVEL_ERROR,
@@ -1510,7 +1510,7 @@ bool semantic_check_field_access(SemanticContext* context, ASTNode* node) {
             0, 0, (uint8_t)strlen(obj_name),
             "semantic",
             "Cannot access field of non-struct type '%s'",
-            semantic_type_to_string(obj->type)
+            semantic__type_to_string(obj->type)
         );
         context->has_errors = true;
         return false;
@@ -1548,7 +1548,7 @@ bool semantic_check_field_access(SemanticContext* context, ASTNode* node) {
     }
 
     /* Check that the field exists */
-    SymbolEntry* field_entry = semantic_find_struct_member(context,
+    SymbolEntry* field_entry = semantic__find_struct_member(context,
                                                            struct_name,
                                                            field->value);
     if (!field_entry) {
@@ -1582,11 +1582,11 @@ static bool check_variable_declaration(SemanticContext* context, ASTNode* node) 
 
     /* Determine type from explicit annotation or default value */
     if (type_info) {
-        type = semantic_type_from_type_info(type_info, context);
+        type = semantic__type_from_type_info(type_info, context);
     }
 
     if (node->default_value) {
-        TypeCheckResult def = semantic_check_type(context, node->default_value);
+        TypeCheckResult def = semantic__check_type(context, node->default_value);
         if (def.valid) {
             type = def.type;
             init_state = (def.init_state == INIT_CONSTANT) ?
@@ -1628,14 +1628,13 @@ static bool check_variable_declaration(SemanticContext* context, ASTNode* node) 
         init_state = INIT_UNINITIALIZED;
     }
 
-    bool added = semantic_add_variable_ex(context, context->current_scope,
+    bool added = semantic__add_variable_ex(context, context->current_scope,
                                           node->value, type, type_info,
                                           is_const, node->state_modifier,
                                           init_state, 0, 0);
     if (added && node->default_value) {
-        if (!semantic_check_expression(context, node->default_value)) {
+        if (!semantic__check_expression(context, node->default_value))
             return false;
-        }
     }
     return added;
 }
@@ -1651,24 +1650,21 @@ static bool check_function_declaration(SemanticContext* context, ASTNode* node) 
 
     DataType return_type = TYPE_VOID;
     Type* return_type_info = node->variable_type;
-    if (return_type_info) {
-        return_type = semantic_type_from_type_info(return_type_info, context);
-    }
+    if (return_type_info)
+        return_type = semantic__type_from_type_info(return_type_info, context);
 
-    /* TODO: Extract parameters from AST */
     FunctionParam* params = NULL;
     size_t param_count = 0;
 
-    bool added = semantic_add_function(context, node->value, return_type,
+    bool added = semantic__add_function(context, node->value, return_type,
                                        return_type_info, params, param_count,
                                        0, 0);
     if (added && node->right) {
-        semantic_enter_function_scope(context, node->value, return_type);
-        /* TODO: Add parameters to function scope */
-        semantic_check_statement(context, node->right);
+        semantic__enter_function_scope(context, node->value, return_type);
+        semantic__check_statement(context, node->right);
 
         if (return_type != TYPE_VOID) {
-            if (!semantic_statement_ensures_return(context, node->right)) {
+            if (!semantic__statement_ensures_return(context, node->right)) {
                 errhandler__report_error_ex(
                     ERROR_LEVEL_ERROR,
                     ERROR_CODE_SEM_MISSING_RETURN,
@@ -1678,11 +1674,11 @@ static bool check_function_declaration(SemanticContext* context, ASTNode* node) 
                     node->value
                 );
                 context->has_errors = true;
-                semantic_exit_function_scope(context);
+                semantic__exit_function_scope(context);
                 return false;
             }
         } else {
-            if (!semantic_statement_ensures_return(context, node->right)) {
+            if (!semantic__statement_ensures_return(context, node->right)) {
                 errhandler__report_error_ex(
                     ERROR_LEVEL_WARNING,
                     ERROR_CODE_SEM_MISSING_RETURN,
@@ -1694,16 +1690,16 @@ static bool check_function_declaration(SemanticContext* context, ASTNode* node) 
             }
         }
 
-        semantic_check_scope_initialization(context, context->function_scope);
-        semantic_exit_function_scope(context);
+        semantic__check_scope_initialization(context, context->function_scope);
+        semantic__exit_function_scope(context);
     }
 
     return added;
 }
 
-bool semantic_check_expression(SemanticContext* context, ASTNode* node) {
+bool semantic__check_expression(SemanticContext* context, ASTNode* node) {
     if (!node) return true;
-    TypeCheckResult res = semantic_check_type(context, node);
+    TypeCheckResult res = semantic__check_type(context, node);
     if (!res.valid && res.error_msg) {
         errhandler__report_error_ex(
             ERROR_LEVEL_ERROR,
@@ -1721,7 +1717,7 @@ bool semantic_check_expression(SemanticContext* context, ASTNode* node) {
     return true;
 }
 
-bool semantic_check_statement(SemanticContext* context, ASTNode* node) {
+bool semantic__check_statement(SemanticContext* context, ASTNode* node) {
     if (!node) return true;
 
     switch (node->type) {
@@ -1732,65 +1728,65 @@ bool semantic_check_statement(SemanticContext* context, ASTNode* node) {
             return check_function_declaration(context, node);
 
         case AST_COMPOUND_TYPE:
-            return semantic_check_compound_type(context, node);
+            return semantic__check_compound_type(context, node);
 
         case AST_ASSIGNMENT:
         case AST_COMPOUND_ASSIGNMENT:
-            return semantic_check_expression(context, node);
+            return semantic__check_expression(context, node);
 
         case AST_IF_STATEMENT:
-            if (!semantic_check_expression(context, node->left)) {
+            if (!semantic__check_expression(context, node->left)) {
                 return false;
             }
-            semantic_enter_scope(context);
-            if (node->right && !semantic_check_statement(context, node->right)) {
-                semantic_exit_scope(context);
+            semantic__enter_scope(context);
+            if (node->right && !semantic__check_statement(context, node->right)) {
+                semantic__exit_scope(context);
                 return false;
             }
-            semantic_exit_scope(context);
+            semantic__exit_scope(context);
             if (node->extra) {
-                semantic_enter_scope(context);
-                if (!semantic_check_statement(context, node->extra)) {
-                    semantic_exit_scope(context);
+                semantic__enter_scope(context);
+                if (!semantic__check_statement(context, node->extra)) {
+                    semantic__exit_scope(context);
                     return false;
                 }
-                semantic_exit_scope(context);
+                semantic__exit_scope(context);
             }
             return true;
 
         case AST_BLOCK: {
-            semantic_enter_scope(context);
+            semantic__enter_scope(context);
             if (node->extra) {
                 AST* block = (AST*)node->extra;
                 for (uint16_t i = 0; i < block->count; i++) {
-                    if (!semantic_check_statement(context, block->nodes[i])) {
-                        semantic_exit_scope(context);
+                    if (!semantic__check_statement(context, block->nodes[i])) {
+                        semantic__exit_scope(context);
                         return false;
                     }
                 }
             }
-            semantic_check_scope_initialization(context, NULL);
-            semantic_exit_scope(context);
+            semantic__check_scope_initialization(context, NULL);
+            semantic__exit_scope(context);
             return true;
         }
 
         case AST_RETURN:
             if (node->left) {
-                return semantic_check_expression(context, node->left);
+                return semantic__check_expression(context, node->left);
             }
             return true;
 
         case AST_DO_LOOP:
-            semantic_enter_loop_scope(context);
-            if (!semantic_check_expression(context, node->left)) {
-                semantic_exit_loop_scope(context);
+            semantic__enter_loop_scope(context);
+            if (!semantic__check_expression(context, node->left)) {
+                semantic__exit_loop_scope(context);
                 return false;
             }
-            if (node->right && !semantic_check_statement(context, node->right)) {
-                semantic_exit_loop_scope(context);
+            if (node->right && !semantic__check_statement(context, node->right)) {
+                semantic__exit_loop_scope(context);
                 return false;
             }
-            semantic_exit_loop_scope(context);
+            semantic__exit_loop_scope(context);
             return true;
 
         case AST_BREAK:
@@ -1810,11 +1806,11 @@ bool semantic_check_statement(SemanticContext* context, ASTNode* node) {
             return true;
 
         default:
-            return semantic_check_expression(context, node);
+            return semantic__check_expression(context, node);
     }
 }
 
-bool semantic_analyze(SemanticContext* context, AST* ast) {
+bool semantic__analyze(SemanticContext* context, AST* ast) {
     if (!context || !ast || !ast->nodes) {
         return false;
     }
@@ -1822,7 +1818,7 @@ bool semantic_analyze(SemanticContext* context, AST* ast) {
     context->has_errors = false;
 
     for (uint16_t i = 0; i < ast->count; i++) {
-        if (!semantic_check_statement(context, ast->nodes[i])) {
+        if (!semantic__check_statement(context, ast->nodes[i])) {
             context->has_errors = true;
             if (context->exit_on_error) {
                 fprintf(stderr, "Semantic analysis failed with errors. Compilation terminated.\n");
@@ -1833,7 +1829,7 @@ bool semantic_analyze(SemanticContext* context, AST* ast) {
 
     /* No warnings for unused variables – feature disabled */
     if (context->warnings_enabled) {
-        semantic_check_scope_initialization(context, context->global_scope);
+        semantic__check_scope_initialization(context, context->global_scope);
     }
 
     if (context->has_errors && context->exit_on_error) {
@@ -1844,20 +1840,20 @@ bool semantic_analyze(SemanticContext* context, AST* ast) {
     return !context->has_errors;
 }
 
-size_t semantic_get_symbol_count(SemanticContext* context) {
+size_t semantic__get_symbol_count(SemanticContext* context) {
     if (!context || !context->global_scope) return 0;
     return context->global_scope->count;
 }
 
-SymbolTable* semantic_get_global_table(SemanticContext* context) {
+SymbolTable* semantic__get_global_table(SemanticContext* context) {
     if (!context) return NULL;
     return context->global_scope;
 }
 
-bool semantic_has_errors(SemanticContext* context) {
+bool semantic__has_errors(SemanticContext* context) {
     return context ? context->has_errors : false;
 }
 
-bool semantic_warnings_enabled(SemanticContext* context) {
+bool semantic__warnings_enabled(SemanticContext* context) {
     return context ? context->warnings_enabled : false;
 }
