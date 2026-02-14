@@ -6,8 +6,9 @@
 #include <stdio.h>
 
 /*
- * Skip whitespace characters in input stream
- * Copy of the function from lexer.c for use in literals.c
+ * Skip whitespace characters in input stream.
+ * This is a copy of the lexer's whitespace skipping function, used here
+ * to check for concatenated literals.
  */
 static inline void skip_whitespace(Lexer* lexer) {
     const char* source = lexer->source;
@@ -34,8 +35,8 @@ static inline void skip_whitespace(Lexer* lexer) {
 }
 
 /*
- * Check if the next character after the current position is a string or char literal
- * Used for concatenating adjacent literals
+ * Check if the next character after the current position is a string or char literal.
+ * Used for concatenating adjacent literals.
  */
 static inline int is_next_string_or_char(Lexer* lexer) {
     Lexer temp_lexer = *lexer;
@@ -49,7 +50,7 @@ static inline int is_next_string_or_char(Lexer* lexer) {
 }
 
 /*
- * Check if character is uppercase hexadecimal digit
+ * Check if character is uppercase hexadecimal digit.
  * @param c: character to check
  * @return: true if character is A-F, false otherwise
  */
@@ -58,7 +59,7 @@ static inline bool is_uppercase_hex_digit(char c) {
 }
 
 /*
- * Check if character is lowercase hexadecimal digit
+ * Check if character is lowercase hexadecimal digit.
  * @param c: character to check
  * @return: true if character is a-f, false otherwise
  */
@@ -67,7 +68,7 @@ static inline bool is_lowercase_hex_digit(char c) {
 }
 
 /*
- * Check if character is valid digit for specified base
+ * Check if character is valid digit for specified base.
  * @param c: character to check
  * @param base: numeric base (2, 8, 10, 16)
  * @return: true if character is valid digit for base, false otherwise
@@ -85,7 +86,7 @@ static inline bool is_valid_digit_for_base(char c, uint8_t base) {
 }
 
 /*
- * Skip underscore characters in numbers (used as digit separators)
+ * Skip underscore characters in numbers (used as digit separators).
  * @param lexer: lexer instance
  */
 static inline void skip_underscores(Lexer* lexer) {
@@ -97,7 +98,7 @@ static inline void skip_underscores(Lexer* lexer) {
 }
 
 /*
- * Parse integer part of a number
+ * Parse integer part of a number.
  * @param lexer: lexer instance
  * @param base: numeric base for digit validation
  * @param allow_period: allow period '(' character in integer part (for floating-point numbers)
@@ -113,7 +114,7 @@ static bool parse_integer_part(Lexer* lexer, uint8_t base, bool allow_period) {
         
         char c = input[lexer->position];
         
-        /* Stop parsing integer part if we encounter decimal point, period, or exponent */
+        // Stop parsing integer part if we encounter decimal point, period, or exponent
         if ((allow_period && c == '(') || c == '.' || c == 'e' || c == 'E') break;
         
         if (!is_valid_digit_for_base(c, base)) {
@@ -130,9 +131,10 @@ static bool parse_integer_part(Lexer* lexer, uint8_t base, bool allow_period) {
 }
 
 /*
- * Parse period part in fractional number (used for grouping digits in floating-point)
+ * Parse period part in fractional number (used for grouping digits in floating‑point).
+ * Example: 123(456) where digits inside parentheses form a group.
  * @param lexer: lexer instance
- * @param base: numeric base for digit validation (always 10 for floating-point)
+ * @param base: numeric base for digit validation (always 10 for floating‑point)
  * @return: true if period was parsed successfully, false otherwise
  */
 static bool parse_period_part(Lexer* lexer, uint8_t base) {
@@ -172,14 +174,14 @@ static bool parse_period_part(Lexer* lexer, uint8_t base) {
 }
 
 /*
- * Parse exponent part of a floating-point number
+ * Parse exponent part of a floating‑point number.
  * @param lexer: lexer instance
  * @return: true if exponent was parsed successfully, false otherwise
  */
 static bool parse_exponent_part(Lexer* lexer) {
     const char* input = lexer->source;
     
-    /* Exponent can be either lowercase 'e' or uppercase 'E' */
+    // Exponent can be either lowercase 'e' or uppercase 'E'
     if (lexer->position >= lexer->source_length || 
         (input[lexer->position] != 'e' && input[lexer->position] != 'E')) {
         return false;
@@ -188,7 +190,7 @@ static bool parse_exponent_part(Lexer* lexer) {
     lexer->position++;
     lexer->column++;
     
-    /* Optional sign for exponent (+ or -) */
+    // Optional sign for exponent (+ or -)
     if (lexer->position < lexer->source_length) {
         char next_char = input[lexer->position];
         if (next_char == '+' || next_char == '-') {
@@ -197,15 +199,15 @@ static bool parse_exponent_part(Lexer* lexer) {
         }
     }
     
-    /* Parse exponent value (always uses base 10 for exponent) */
+    // Parse exponent value (always uses base 10 for exponent)
     return parse_integer_part(lexer, 10, false);
 }
 
 /*
  * Parse numeric literal with the following rules:
  * - Integer literals can have bases: 2 (0b), 8 (0o), 10 (default), 16 (0x)
- * - Floating-point literals can only be in base 10
- * - Floating-point literals support scientific notation with 'e' or 'E'
+ * - Floating‑point literals can only be in base 10
+ * - Floating‑point literals support scientific notation with 'e' or 'E'
  * - Underscores can be used as digit separators
  * @param lexer: lexer instance
  * @return: token representing the number literal
@@ -218,36 +220,36 @@ Token literal__parse_number(Lexer* lexer) {
     
     uint8_t base = 10;
     bool has_prefix = false;
-    bool is_integer_only = false; /* If true, number cannot have fractional part or exponent */
+    bool is_integer_only = false; // If true, number cannot have fractional part or exponent
     bool error = false;
     
-    /* Check for base prefix (only for integer literals) */
+    // Check for base prefix (only for integer literals)
     if (lexer->position < lexer->source_length && input[lexer->position] == '0') {
         if (lexer->position + 1 < lexer->source_length) {
             char next_char = input[lexer->position + 1];
             
-            /* Only allow bases 2, 8, 16 with prefixes */
+            // Only allow bases 2, 8, 16 with prefixes
             if (next_char == 'b' || next_char == 'B') { 
                 base = 2; 
                 has_prefix = true; 
-                is_integer_only = true; /* Binary numbers must be integers */
+                is_integer_only = true; // Binary numbers must be integers
             }
             else if (next_char == 'o' || next_char == 'O') { 
                 base = 8; 
                 has_prefix = true; 
-                is_integer_only = true; /* Octal numbers must be integers */
+                is_integer_only = true; // Octal numbers must be integers
             }
             else if (next_char == 'x' || next_char == 'X') { 
                 base = 16; 
                 has_prefix = true; 
-                is_integer_only = true; /* Hexadecimal numbers must be integers */
+                is_integer_only = true; // Hexadecimal numbers must be integers
             }
             
             if (has_prefix) {
                 lexer->position += 2;
                 lexer->column += 2;
                 
-                /* Check that there's at least one valid digit after prefix */
+                // Check that there's at least one valid digit after prefix
                 if (lexer->position >= lexer->source_length || 
                     !is_valid_digit_for_base(input[lexer->position], base)) {
                     errhandler__report_error
@@ -265,7 +267,7 @@ Token literal__parse_number(Lexer* lexer) {
     }
     
     if (!error) {
-        /* Parse integer part (mandatory for all numbers) */
+        // Parse integer part (mandatory for all numbers)
         bool has_integer = parse_integer_part(lexer, base, false);
         
         if (!has_integer) {
@@ -281,12 +283,12 @@ Token literal__parse_number(Lexer* lexer) {
     }
     
     if (!error) {
-        /* Parse fractional part (if present) - only allowed for base 10 numbers */
+        // Parse fractional part (if present) - only allowed for base 10 numbers
         bool has_fraction = false;
         if (lexer->position < lexer->source_length && 
             input[lexer->position] == '.') {
             
-            /* Check if fractional part is allowed (only for base 10) */
+            // Check if fractional part is allowed (only for base 10)
             if (is_integer_only) {
                 errhandler__report_error
                     ( ERROR_CODE_LEXER_INVALID_NUMBER
@@ -303,12 +305,12 @@ Token literal__parse_number(Lexer* lexer) {
                 
                 bool has_content = false;
                 
-                /* Parse initial digits before first period */
+                // Parse initial digits before first period
                 if (parse_integer_part(lexer, base, true)) {
                     has_content = true;
                 }
                 
-                /* Parse periods and digits between periods */
+                // Parse periods and digits between periods
                 while (!error && lexer->position < lexer->source_length && 
                        input[lexer->position] == '(') {
                     if (!parse_period_part(lexer, base)) {
@@ -317,7 +319,7 @@ Token literal__parse_number(Lexer* lexer) {
                     }
                     has_content = true;
                     
-                    /* Parse digits after period */
+                    // Parse digits after period
                     if (parse_integer_part(lexer, base, true)) {
                         has_content = true;
                     }
@@ -336,17 +338,17 @@ Token literal__parse_number(Lexer* lexer) {
             }
         }
         
-        /* Parse exponent (if present) - only allowed for floating-point numbers (base 10) */
+        // Parse exponent (if present) - only allowed for floating-point numbers (base 10)
         if (!error && lexer->position < lexer->source_length && 
             (input[lexer->position] == 'e' || input[lexer->position] == 'E')) {
             
-            /* Save position before checking exponent */
+            // Save position before checking exponent
             uint32_t before_exp_pos = lexer->position;
             uint16_t before_exp_col = lexer->column;
             
-            /* Try to parse exponent */
+            // Try to parse exponent
             if (parse_exponent_part(lexer)) {
-                /* Exponent is valid only for floating-point numbers (base 10) */
+                // Exponent is valid only for floating-point numbers (base 10)
                 if (is_integer_only) {
                     errhandler__report_error
                         ( ERROR_CODE_LEXER_INVALID_NUMBER
@@ -357,11 +359,11 @@ Token literal__parse_number(Lexer* lexer) {
                     );
                     error = true;
                 } else if (!has_fraction) {
-                    /* Exponent without decimal point is allowed (e.g., 123e10) */
-                    /* This is valid - do nothing */
+                    // Exponent without decimal point is allowed (e.g., 123e10)
+                    // This is valid - do nothing
                 }
             } else {
-                /* No valid exponent, restore position */
+                // No valid exponent, restore position
                 lexer->position = before_exp_pos;
                 lexer->column = before_exp_col;
             }
@@ -394,7 +396,7 @@ Token literal__parse_number(Lexer* lexer) {
 }
 
 /*
- * Parse escape sequence in character or string literal
+ * Parse escape sequence in character or string literal.
  * @param lexer: lexer instance
  * @return: escaped character value
  */
@@ -427,7 +429,7 @@ static inline char parse_escape_sequence(Lexer* lexer) {
         case '\\': return '\\';
         case 'a': return '\a';
         case 'v': return '\v';
-        case 'e': return '\x1B';
+        case 'e': return '\x1B'; // ESC character
         default:
             errhandler__report_error
                 ( ERROR_CODE_LEXER_INVALID_ESCAPE
@@ -442,7 +444,7 @@ static inline char parse_escape_sequence(Lexer* lexer) {
 }
 
 /*
- * Parse character literal with escape sequence support and multiline support
+ * Parse character literal with escape sequence support and multiline support.
  * @param lexer: lexer instance
  * @return: token representing the character literal
  */
@@ -473,7 +475,7 @@ Token literal__parse_char(Lexer* lexer) {
     lexer->position++;
     lexer->column++;
     
-    /* String buffer for character literal (may contain newlines) */
+    // String buffer for character literal (may contain newlines)
     uint32_t buf_size = 128;
     char* buffer = (char*)malloc(buf_size);
     uint32_t buf_index = 0;
@@ -491,14 +493,14 @@ Token literal__parse_char(Lexer* lexer) {
     
     while (lexer->position < lexer->source_length) {
         if (input[lexer->position] == '\'') {
-            /* Found closing quote */
+            // Found closing quote
             lexer->position++;
             lexer->column++;
             break;
         }
         
         if (buf_index >= buf_size - 1) {
-            buf_size <<= 1; /* Multiply by 2 */
+            buf_size <<= 1; // Multiply by 2
             char* new_buffer = (char*)realloc(buffer, buf_size);
             if (!new_buffer) {
                 errhandler__report_error
@@ -519,7 +521,7 @@ Token literal__parse_char(Lexer* lexer) {
             lexer->column++;
             buffer[buf_index++] = parse_escape_sequence(lexer);
         } else if (input[lexer->position] == '\n') {
-            /* Handle newline in multiline character literal */
+            // Handle newline in multiline character literal
             buffer[buf_index++] = input[lexer->position++];
             lexer->line++;
             lexer->column = 1;
@@ -530,7 +532,7 @@ Token literal__parse_char(Lexer* lexer) {
     }
     
     if (lexer->position > start_pos && input[lexer->position - 1] != '\'') {
-        /* Check if we found the closing quote */
+        // Check if we found the closing quote
         if (lexer->position < lexer->source_length && input[lexer->position] == '\'') {
             lexer->position++;
             lexer->column++;
@@ -549,9 +551,9 @@ Token literal__parse_char(Lexer* lexer) {
     
     buffer[buf_index] = '\0';
     
-    /* For character literal, we expect exactly one character or a valid escape sequence */
+    // For character literal, we expect exactly one character or a valid escape sequence
     if (buf_index != 1) {
-        /* Check if it's a valid escape sequence that may produce one character */
+        // Check if it's a valid escape sequence that may produce one character
         if (buf_index == 0) {
             errhandler__report_error
                 ( ERROR_CODE_SYNTAX_GENERIC
@@ -563,8 +565,8 @@ Token literal__parse_char(Lexer* lexer) {
             free(buffer);
             return token;
         } else if (buffer[0] == '\\' && buf_index == 2) {
-            /* Single escape sequence like \n, \t, etc. */
-            /* This is valid - keep as is */
+            // Single escape sequence like \n, \t, etc. – valid
+            // Keep as is
         } else {
             errhandler__report_error
                 ( ERROR_CODE_SYNTAX_GENERIC
@@ -579,10 +581,10 @@ Token literal__parse_char(Lexer* lexer) {
     }
     
     token.type = TOKEN_CHAR;
-    token.length = 1; /* Character literals always have length 1 in terms of value */
+    token.length = 1; // Character literals always have length 1 in terms of value
     token.value = (char*)malloc(2);
     if (token.value) {
-        token.value[0] = buffer[0]; /* Store the actual character value */
+        token.value[0] = buffer[0]; // Store the actual character value
         token.value[1] = '\0';
     }
     
@@ -591,7 +593,7 @@ Token literal__parse_char(Lexer* lexer) {
 }
 
 /*
- * Parse string literal with escape sequence support and multiline support
+ * Parse string literal with escape sequence support and multiline support.
  * @param lexer: lexer instance
  * @return: token representing the string literal
  */
@@ -622,7 +624,7 @@ Token literal__parse_string(Lexer* lexer) {
     lexer->position++;
     lexer->column++;
     
-    /* String buffer with dynamic allocation */
+    // String buffer with dynamic allocation
     uint32_t buf_size = 128;
     char* buffer = (char*)malloc(buf_size);
     uint32_t buf_index = 0;
@@ -640,14 +642,14 @@ Token literal__parse_string(Lexer* lexer) {
     
     while (lexer->position < lexer->source_length) {
         if (input[lexer->position] == '"') {
-            /* Found closing quote */
+            // Found closing quote
             lexer->position++;
             lexer->column++;
             break;
         }
         
         if (buf_index >= buf_size - 1) {
-            buf_size <<= 1; /* Multiply by 2 */
+            buf_size <<= 1; // Multiply by 2
             char* new_buffer = (char*)realloc(buffer, buf_size);
             if (!new_buffer) {
                 errhandler__report_error
@@ -668,7 +670,7 @@ Token literal__parse_string(Lexer* lexer) {
             lexer->column++;
             buffer[buf_index++] = parse_escape_sequence(lexer);
         } else if (input[lexer->position] == '\n') {
-            /* Handle newline in multiline string literal */
+            // Handle newline in multiline string literal
             buffer[buf_index++] = input[lexer->position++];
             lexer->line++;
             lexer->column = 1;
@@ -679,7 +681,7 @@ Token literal__parse_string(Lexer* lexer) {
     }
     
     if (lexer->position > start_pos && input[lexer->position - 1] != '"') {
-        /* Check if we found the closing quote */
+        // Check if we found the closing quote
         if (lexer->position < lexer->source_length && input[lexer->position] == '"') {
             lexer->position++;
             lexer->column++;
@@ -713,9 +715,10 @@ Token literal__parse_string(Lexer* lexer) {
 }
 
 /*
- * Parse and concatenate adjacent string and character literals
+ * Parse and concatenate adjacent string and character literals.
+ * For example: "Hello " 'W' "orld" becomes a single string token.
  * @param lexer: Lexer instance
- * @return: Combined token
+ * @return: Combined token (type TOKEN_STRING)
  */
 Token literal__parse_concatenated(Lexer* lexer) {
     const char* source = lexer->source;
@@ -723,7 +726,7 @@ Token literal__parse_concatenated(Lexer* lexer) {
     uint16_t start_line = lexer->line;
     uint16_t start_col = lexer->column;
     
-    /* Buffer to store concatenated string */
+    // Buffer to store concatenated string
     uint32_t buffer_size = 128;
     char* buffer = (char*)malloc(buffer_size);
     uint32_t buffer_index = 0;
@@ -749,7 +752,7 @@ Token literal__parse_concatenated(Lexer* lexer) {
                 return char_token;
             }
             
-            /* Add character to buffer */
+            // Add character to buffer
             if (char_token.value) {
                 uint32_t needed_size = buffer_index + 1;
                 if (needed_size >= buffer_size) {
@@ -780,7 +783,7 @@ Token literal__parse_concatenated(Lexer* lexer) {
                 return string_token;
             }
             
-            /* Add string to buffer */
+            // Add string to buffer
             if (string_token.value) {
                 uint32_t str_len = string_token.length;
                 uint32_t needed_size = buffer_index + str_len;
@@ -811,13 +814,13 @@ Token literal__parse_concatenated(Lexer* lexer) {
             break;
         }
         
-        /* Check if there's another literal immediately after */
+        // Check if there's another literal immediately after
         if (!is_next_string_or_char(lexer)) {
             break;
         }
     }
     
-    /* Create the combined token */
+    // Create the combined token
     buffer[buffer_index] = '\0';
     
     Token combined_token;
