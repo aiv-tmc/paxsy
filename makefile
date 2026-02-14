@@ -16,7 +16,7 @@ CFLAGS = -std=c99 \
          -DDATE=\"$(DATE)\" \
 
 SRC = src/preprocessor/preprocessor.c \
-      src/preprocessor/DPP__include/DPPF__include.c \
+      src/preprocessor/directive/include/include.c \
       src/lexer/lexer.c \
       src/parser/literals.c \
       src/parser/parser.c \
