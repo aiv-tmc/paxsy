@@ -35,7 +35,6 @@ typedef enum {
     AST_POP,
     AST_CAST,
     AST_SIGNAL,
-    AST_INTER,
     AST_MULTI_INITIALIZER,
     AST_LABEL_DECLARATION,
     AST_JUMP,
@@ -65,7 +64,7 @@ typedef enum {
  */
 
 typedef struct Type {
-    char *name;                    /* Type name (e.g., "Int", "String")       */
+    char *name;
     char *access_modifier;         /* Access modifier (public/private)        */
     char **modifiers;              /* Type modifiers array                    */
     uint8_t modifier_count;        /* Number of modifiers                     */
