@@ -1,7 +1,7 @@
-#inclib "_zero"
-#inclib "sigf"
-#inclib "inout"
-#go .start
+#using "base"
+#using "simac"
+#using "inout"
+#entry .start
 
 func start(none) {
     var number : Int<1> = zero;
@@ -15,5 +15,6 @@ func start(none) {
     else =>
         io::print(number, " odd number");
     
-    sig::exit(0);
+    exit(0);
+    return;
 }
