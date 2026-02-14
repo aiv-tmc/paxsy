@@ -4,11 +4,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-/* Static module variables */
 static bool parser_trace_enabled = false;
 static FILE* trace_file          = NULL;
 
-/* Token type names array */
 const char* token_names[] = {
     [TOKEN_NUMBER]              = "NUMBER",
     [TOKEN_CHAR]                = "CHAR",
@@ -95,7 +93,6 @@ const char* token_names[] = {
     [TOKEN_ERROR]               = "ERROR"
 };
 
-/* AST node type names array */
 const char* ast_node_names[] = {
     [AST_VARIABLE_DECLARATION]   = "VARIABLE_DECLARATION",
     [AST_VARIABLE_WITH_BODY]     = "VARIABLE_WITH_BODY",
@@ -144,63 +141,62 @@ const char* ast_node_names[] = {
     [AST_TERNARY_OPERATION]      = "TERNARY_OPERATION"
 };
 
-/*
- * Get initialization state string
+/**
+ * @brief Convert an initialization state to a human-readable string.
+ * @param state Initialization state.
+ * @return Constant string describing the state.
  */
 static const char* get_init_state_string(InitState state) {
     switch (state) {
         case INIT_UNINITIALIZED: return "no";
-        case INIT_PARTIAL: return "partial";
-        case INIT_FULL: return "yes";
-        case INIT_CONSTANT: return "const";
-        case INIT_DEFAULT: return "default";
-        default: return "unknown";
+        case INIT_PARTIAL:       return "partial";
+        case INIT_FULL:          return "yes";
+        case INIT_CONSTANT:      return "const";
+        case INIT_DEFAULT:       return "default";
+        default:                 return "unknown";
     }
 }
 
-/*
- * Get scope level string
+/**
+ * @brief Convert a scope level to a human-readable string.
+ * @param level Scope level.
+ * @return Constant string describing the scope.
  */
 static const char* get_scope_level_string(ScopeLevel level) {
     switch (level) {
-        case SCOPE_GLOBAL: return "global";
-        case SCOPE_FUNCTION: return "function";
-        case SCOPE_BLOCK: return "block";
-        case SCOPE_LOOP: return "loop";
-        case SCOPE_COMPOUND: return "compound";
-        default: return "unknown";
+        case SCOPE_GLOBAL:    return "global";
+        case SCOPE_FUNCTION:  return "function";
+        case SCOPE_BLOCK:     return "block";
+        case SCOPE_LOOP:      return "loop";
+        case SCOPE_COMPOUND:  return "compound";
+        default:              return "unknown";
     }
 }
 
-/*
- * Print section header with title
- */
-void print_section_header(const char* title, FILE* out) {
-    fprintf(out, "\n");
-    fprintf(out, "\033[34m%s\033[0m\n", title);
-}
-
-/*
- * Print indentation for tree display
+/**
+ * @brief Print indentation spaces for tree display.
+ * @param level Number of spaces to print.
+ * @param out   Output file stream.
  */
 static inline void print_indent(uint8_t level, FILE* out) {
     for (uint8_t i = 0; i < level; i++) fputc(' ', out);
 }
 
-/*
- * Recursively print AST node with indentation
+/**
+ * @brief Recursively print an AST node and its children with indentation.
+ * @param node  Current node.
+ * @param depth Current indentation depth.
+ * @param out   Output file stream.
  */
 static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
     if (!node) return;
 
     print_indent(depth, out);
     fprintf(out, "%s", get_ast_node_type_name(node->type));
-    
+
     if (node->value) fprintf(out, ": '%s'", node->value);
-    
     if (node->operation_type)
         fprintf(out, " [op: %s]", get_token_type_name(node->operation_type));
-    
     fputc('\n', out);
 
     if (node->state_modifier) {
@@ -239,27 +235,29 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
     if (node->extra) {
         print_indent(depth + 1, out);
         fputs("Extra:\n", out);
-        
+
         if (node->type == AST_BLOCK || node->type == AST_FUNCTION_DECLARATION) {
             AST* ast_list = (AST*)node->extra;
-            
             if (ast_list) {
                 for (uint16_t i = 0; i < ast_list->count; i++)
                     print_ast_node_recursive(ast_list->nodes[i], depth + 2, out);
             }
-        } else
+        } else {
             print_ast_node_recursive(node->extra, depth + 2, out);
+        }
     }
 }
 
-/*
- * Recursive helper for counting AST nodes
+/**
+ * @brief Recursively count AST nodes and update statistics.
+ * @param node         Current node.
+ * @param total_nodes  Pointer to total node counter.
+ * @param type_counts  Array of counters per node type.
  */
 static void count_nodes(ASTNode* node, uint32_t* total_nodes, uint32_t* type_counts) {
     if (!node) return;
 
     (*total_nodes)++;
-    
     if ((node->type & (AST_NODE_TYPE_COUNT - 1)) == node->type)
         type_counts[node->type]++;
 
@@ -269,376 +267,52 @@ static void count_nodes(ASTNode* node, uint32_t* total_nodes, uint32_t* type_cou
     count_nodes(node->default_value, total_nodes, type_counts);
 }
 
-/*
- * Print symbol table from semantic context
- */
-void print_semantic_symbol_table(SemanticContext* context, FILE* out) {
-    if (!context || !out) {
-        fputs("No semantic context to display\n", out);
-        return;
-    }
-    
-    SymbolTable* table = semantic_get_global_table(context);
-    if (!table) {
-        fputs("No symbol table available\n", out);
-        return;
-    }
-    
-    fprintf(out, "SYMBOL TABLE:\n");
-    fprintf(out, "%-20s %-12s %-10s %-12s %-10s %-10s %-10s\n", 
-            "Name", "Type", "Const", "Init State", "Used", "Mutable", "Scope");
-    fprintf(out, "%-20s %-12s %-10s %-12s %-10s %-10s %-10s\n",
-            "--------------------", "------------", "----------", "------------", 
-            "----------", "----------", "----------");
-    
-    size_t total_symbols = 0;
-    
-    /* Helper function to print table recursively */
-    void print_table(SymbolTable* tbl, int indent) {
-        char indent_str[32];
-        memset(indent_str, ' ', indent * 2);
-        indent_str[indent * 2] = '\0';
-        
-        for (size_t i = 0; i < tbl->capacity; i++) {
-            SymbolEntry* entry = tbl->entries[i];
-            
-            while (entry) {
-                fprintf(out, "%s%-20s %-12s %-10s %-12s %-10s %-10s %-10s\n",
-                        indent_str,
-                        entry->name, 
-                        semantic_type_to_string(entry->type),
-                        entry->is_constant ? "yes" : "no",
-                        get_init_state_string(entry->init_state),
-                        entry->is_used ? "yes" : "no",
-                        entry->is_mutable ? "yes" : "no",
-                        get_scope_level_string(entry->declared_scope));
-                
-                total_symbols++;
-                entry = entry->next;
-            }
-        }
-        
-        /* Print child scopes */
-        SymbolTable* child = tbl->children;
-        while (child) {
-            fprintf(out, "\n%sScope: %s (child)\n", indent_str, 
-                    get_scope_level_string(child->level));
-            print_table(child, indent + 1);
-            child = child->next_child;
-        }
-    }
-    
-    print_table(table, 0);
-    fprintf(out, "\nTotal symbols: %zu\n", total_symbols);
-}
-
-/*
- * Print type information from semantic context
- */
-void print_semantic_type_info(SemanticContext* context, FILE* out) {
-    if (!context || !out) return;
-    
-    SymbolTable* table = semantic_get_global_table(context);
-    if (!table) return;
-    
-    /* Type statistics */
-    size_t type_counts[TYPE_COMPOUND + 1] = {0};
-    size_t init_counts[INIT_DEFAULT + 1] = {0};
-    size_t total_symbols = 0;
-    
-    for (size_t i = 0; i < table->capacity; i++) {
-        SymbolEntry* entry = table->entries[i];
-        while (entry) {
-            if (entry->type <= TYPE_COMPOUND) {
-                type_counts[entry->type]++;
-            }
-            if (entry->init_state <= INIT_DEFAULT) {
-                init_counts[entry->init_state]++;
-            }
-            total_symbols++;
-            entry = entry->next;
-        }
-    }
-    
-    if (total_symbols == 0) {
-        fprintf(out, "No symbols to analyze\n");
-        return;
-    }
-    
-    fprintf(out, "TYPE DISTRIBUTION:\n");
-    fprintf(out, "%-15s %-8s %-10s\n", "Type", "Count", "Percentage");
-    fprintf(out, "%-15s %-8s %-10s\n", "---------------", "--------", "----------");
-    
-    for (int i = TYPE_UNKNOWN; i <= TYPE_COMPOUND; i++) {
-        if (type_counts[i] > 0) {
-            fprintf(out, "%-15s %-8zu %-9.1f%%\n",
-                    semantic_type_to_string(i),
-                    type_counts[i],
-                    (float)type_counts[i] / total_symbols * 100.0f);
-        }
-    }
-    
-    fprintf(out, "\nINITIALIZATION STATE:\n");
-    fprintf(out, "%-20s %-8s %-10s\n", "State", "Count", "Percentage");
-    fprintf(out, "%-20s %-8s %-10s\n", "--------------------", "--------", "----------");
-    
-    const char* init_state_names[] = {
-        "Uninitialized", "Partial", "Full", "Constant", "Default"
-    };
-    
-    for (int i = 0; i <= INIT_DEFAULT; i++) {
-        if (init_counts[i] > 0) {
-            fprintf(out, "%-20s %-8zu %-9.1f%%\n",
-                    init_state_names[i],
-                    init_counts[i],
-                    (float)init_counts[i] / total_symbols * 100.0f);
-        }
-    }
-    
-    /* Additional type compatibility information */
-    fprintf(out, "\nTYPE COMPATIBILITY:\n");
-    fprintf(out, "  Int <-> Real: compatible\n");
-    fprintf(out, "  none <-> pointer/reference: compatible\n");
-    fprintf(out, "  Identical types: always compatible\n");
-}
-
-/*
- * Print semantic analysis errors and warnings
- */
-void print_semantic_errors_warnings(SemanticContext* context, FILE* out) {
-    if (!context || !out) return;
-    
-    /* Errors and warnings are already reported through errhandler,
-       but we can output a summary */
-    fprintf(out, "Errors and warnings are reported through the error handler.\n");
-    fprintf(out, "Use --log or --verbose flags to see detailed messages.\n");
-}
-
-/*
- * Print semantic analysis summary
- */
-void print_semantic_summary(SemanticContext* context, FILE* out) {
-    if (!context || !out) return;
-    
-    fprintf(out, "SEMANTIC ANALYSIS SUMMARY:\n");
-    fprintf(out, "  Status: %s\n", 
-            semantic_has_errors(context) ? "FAILED" : "PASSED");
-    fprintf(out, "  Warnings enabled: %s\n",
-            semantic_warnings_enabled(context) ? "yes" : "no");
-    fprintf(out, "  Total symbols: %zu\n",
-            semantic_get_symbol_count(context));
-    fprintf(out, "  Exit on error: %s\n",
-            context->exit_on_error ? "yes" : "no");
-    
-    /* Scope depth tracking */
-    int depth = 0;
-    SymbolTable* scope = context->current_scope;
-    while (scope) {
-        depth++;
-        scope = scope->parent;
-    }
-    fprintf(out, "  Scope depth: %d\n", depth);
-    fprintf(out, "  In function: %s\n", context->in_function ? "yes" : "no");
-    fprintf(out, "  In loop: %s\n", context->in_loop ? "yes" : "no");
-    fprintf(out, "  Current function: %s\n", 
-            context->current_function ? context->current_function : "none");
-}
-
-/*
- * Print semantic analysis log
- */
-void print_semantic_log(SemanticContext* context, FILE* out) {
-    if (!context || !out) {
-        fputs("No semantic context to display\n", out);
-        return;
-    }
-    
-    fprintf(out, "SEMANTIC ANALYSIS LOG\n");
-    fprintf(out, "====================\n\n");
-    
-    if (semantic_has_errors(context)) {
-        fprintf(out, "❌ Semantic analysis FAILED with errors\n\n");
-    } else {
-        fprintf(out, "✅ Semantic analysis PASSED\n\n");
-    }
-    
-    print_semantic_summary(context, out);
+void print_section_header(const char* title, FILE* out) {
     fprintf(out, "\n");
-    
-    /* Print symbol table */
-    print_semantic_symbol_table(context, out);
-    fprintf(out, "\n");
-    
-    /* Print type information */
-    print_semantic_type_info(context, out);
-    fprintf(out, "\n");
-    
-    /* Print scope information */
-    fprintf(out, "SCOPE INFORMATION:\n");
-    fprintf(out, "  Global symbols: %zu\n", semantic_get_symbol_count(context));
-    fprintf(out, "  Current scope: %s\n", 
-            get_scope_level_string(context->current_scope->level));
-    fprintf(out, "  In function: %s\n", context->in_function ? "yes" : "no");
-    fprintf(out, "  In loop: %s\n", context->in_loop ? "yes" : "no");
-    fprintf(out, "\n");
-    
-    /* Print analysis flags */
-    fprintf(out, "ANALYSIS SETTINGS:\n");
-    fprintf(out, "  Exit on error: %s\n", context->exit_on_error ? "enabled" : "disabled");
-    fprintf(out, "  Warnings: %s\n", context->warnings_enabled ? "enabled" : "disabled");
+    fprintf(out, "\033[34m%s\033[0m\n", title);
 }
 
-/*
- * Print complete semantic analysis
- */
-void print_semantic_analysis(SemanticContext* context, FILE* out) {
-    if (!context || !out) {
-        fputs("No semantic context to display\n", out);
-        return;
-    }
-    
-    /* Summary */
-    print_semantic_summary(context, out);
-    fputc('\n', out);
-    
-    /* Symbol table */
-    print_semantic_symbol_table(context, out);
-    fputc('\n', out);
-    
-    /* Type information */
-    print_semantic_type_info(context, out);
-}
-
-/*
- * Get AST node type name as string
- */
-const char* get_ast_node_type_name(ASTNodeType type) {
-    return (type & (AST_NODE_TYPE_COUNT - 1)) == type ? 
-           ast_node_names[type] : "UNKNOWN";
-}
-
-/*
- * Get token type name as string
- */
-const char* get_token_type_name(TokenType type) {
-    return (type & (TOKEN_TYPE_COUNT - 1)) == type ? 
-           token_names[type] : "UNKNOWN";
-}
-
-/*
- * Print AST node inline (without newline)
- */
-void print_ast_node_inline(ASTNode* node, FILE* out) {
-    if (!node) {
-        fputs("NULL", out);
-        return;
-    }
-    
-    node->value ? fprintf(out, "'%s'", node->value) : 
-                  fputs(get_ast_node_type_name(node->type), out);
-}
-
-/*
- * Print type information
- */
-void print_type_info(Type* type, FILE* out) {
-    if (!type) return;
-
-    fputs("Type: ", out);
-    
-    for (uint8_t i = 0; i < type->modifier_count; i++)
-        fprintf(out, "%s ", type->modifiers[i]);
-    
-    if (type->pointer_level)
-        fprintf(out, "@%d", type->pointer_level);
-    
-    if (type->is_reference)
-        fprintf(out, "&%d", type->is_reference);
-    
-    if (type->is_register)
-        fprintf(out, "%%%d", type->is_register);
-    
-    if (type->prefix_number)
-        fprintf(out, "%d", type->prefix_number);
-    
-    if (type->compound_count) {
-        fputc('(', out);
-        
-        for (uint8_t i = 0; i < type->compound_count; i++) {
-            if (type->compound_types[i])
-                fprintf(out, "%s", type->compound_types[i]->name);
-            
-            if (i < type->compound_count - 1) fputs(", ", out);
-        }
-        
-        fputc(')', out);
-    }
-    
-    if (type->angle_expression) {
-        fputc('<', out);
-        print_ast_node_inline(type->angle_expression, out);
-        fputc('>', out);
-    }
-    
-    if (type->is_array) fputs("[]", out);
-    
-    fputc('\n', out);
-}
-
-/*
- * Print all tokens in lexer
- */
 void print_all_tokens(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
         fputs("No tokens to display\n", out);
         return;
     }
-    
+
     for (uint16_t i = 0; i < lexer->token_count; i++) {
         Token* token = &lexer->tokens[i];
         fprintf(out, "%4u: %-20s", i, get_token_type_name(token->type));
-        
+
         if (token->value && token->value[0])
             fprintf(out, " = '%s'", token->value);
-        
+
         fprintf(out, " [line %u, col %u]\n", token->line, token->column);
     }
 }
 
-/*
- * Print tokens grouped by line
- */
 void print_tokens_by_line(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
         fputs("No tokens to display\n", out);
         return;
     }
-    
+
     uint16_t current_line = 0;
-    
     for (uint16_t i = 0; i < lexer->token_count; i++) {
         Token* token = &lexer->tokens[i];
-        
         if (token->type == TOKEN_EOF) continue;
-        
+
         if (token->line != current_line) {
             if (current_line) fputc('\n', out);
-            
             current_line = token->line;
             fprintf(out, "Line %3u: ", current_line);
         }
-        
-        token->value && token->value[0] ? 
-            fprintf(out, "%s ", token->value) : 
+
+        token->value && token->value[0] ?
+            fprintf(out, "%s ", token->value) :
             fprintf(out, "%s ", get_token_type_name(token->type));
     }
-    
     fputc('\n', out);
 }
 
-/*
- * Print token statistics
- */
 void print_token_statistics(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
         fputs("No tokens to analyze\n", out);
@@ -646,48 +320,37 @@ void print_token_statistics(Lexer* lexer, FILE* out) {
     }
 
     uint32_t counts[TOKEN_TYPE_COUNT] = {0};
-    
     for (uint16_t i = 0; i < lexer->token_count; i++) {
         TokenType type = lexer->tokens[i].type;
-        
         if ((type & (TOKEN_TYPE_COUNT - 1)) == type) counts[type]++;
     }
 
     fprintf(out, "Total: %u\n", lexer->token_count);
     fprintf(out, "Non-EOF: %u\n\n", lexer->token_count - counts[TOKEN_EOF]);
-    
+
     fputs("Distribution:\n", out);
-    
     for (uint32_t i = 0; i < TOKEN_TYPE_COUNT; i++) {
         if (counts[i])
             fprintf(out, "  %-20s: %u\n", get_token_type_name(i), counts[i]);
     }
 }
 
-/*
- * Print detailed token information
- */
 void print_detailed_token_info(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
         fputs("No tokens to display\n", out);
         return;
     }
 
-    
     for (uint16_t i = 0; i < lexer->token_count; i++) {
         Token* token = &lexer->tokens[i];
         fprintf(out, "%4u: %s\n", i, get_token_type_name(token->type));
         fprintf(out, "     Value: %s\n", token->value ? token->value : "[none]");
         fprintf(out, "     Pos: line %u, col %u\n", token->line, token->column);
         fprintf(out, "     Len: %u bytes\n", token->length);
-        
         if (i < lexer->token_count - 1) fputc('\n', out);
     }
 }
 
-/*
- * Print tokens with line markers
- */
 void print_tokens_in_lines(Lexer* lexer, FILE* out) {
     if (!lexer || !lexer->tokens) {
         fputs("No tokens to display\n", out);
@@ -695,30 +358,44 @@ void print_tokens_in_lines(Lexer* lexer, FILE* out) {
     }
 
     uint16_t current_line = 0;
-    
     for (uint16_t i = 0; i < lexer->token_count; i++) {
         Token* token = &lexer->tokens[i];
-        
         if (token->type == TOKEN_EOF) continue;
-        
+
         if (token->line != current_line) {
             if (current_line) fputs("]\n", out);
-            
             current_line = token->line;
             fprintf(out, "[Line %u: ", current_line);
         }
-        
-        token->value && token->value[0] ? 
-            fprintf(out, "%s ", token->value) : 
+
+        token->value && token->value[0] ?
+            fprintf(out, "%s ", token->value) :
             fprintf(out, "%s ", get_token_type_name(token->type));
     }
-    
     if (current_line) fputs("]\n", out);
 }
 
-/*
- * Print AST in detailed tree format
- */
+void print_parser_trace(ParserState* parser, FILE* out) {
+    if (!parser) {
+        fputs("Parser state is NULL\n", out);
+        return;
+    }
+
+    fprintf(out, "Position: %u/%u\n", parser->current_token_position,
+            parser->total_tokens);
+    fprintf(out, "In declaration context: %s\n",
+            parser->in_declaration_context ? "yes" : "no");
+
+    if (parser->current_token_position < parser->total_tokens) {
+        Token* token = &parser->token_stream[parser->current_token_position];
+        fprintf(out, "\nCurrent token:\n");
+        fprintf(out, "  Type: %s\n", get_token_type_name(token->type));
+        if (token->value)
+            fprintf(out, "  Value: '%s'\n", token->value);
+        fprintf(out, "  Pos: line %u, col %u\n", token->line, token->column);
+    }
+}
+
 void print_ast_detailed(AST* ast, FILE* out) {
     if (!ast || !ast->nodes || !ast->count) {
         fputs("AST is empty\n", out);
@@ -727,17 +404,12 @@ void print_ast_detailed(AST* ast, FILE* out) {
 
     for (uint16_t i = 0; i < ast->count; i++) {
         if (!ast->nodes[i]) continue;
-        
         fprintf(out, "Statement %u:\n", i + 1);
         print_ast_node_recursive(ast->nodes[i], 1, out);
-        
         if (i < ast->count - 1) fputc('\n', out);
     }
 }
 
-/*
- * Print AST nodes grouped by type
- */
 void print_ast_by_type(AST* ast, FILE* out) {
     if (!ast || !ast->nodes) {
         fputs("AST is empty\n", out);
@@ -745,32 +417,23 @@ void print_ast_by_type(AST* ast, FILE* out) {
     }
 
     uint32_t type_counts[AST_NODE_TYPE_COUNT] = {0};
-    
     for (uint16_t i = 0; i < ast->count; i++)
         if (ast->nodes[i]) type_counts[ast->nodes[i]->type]++;
 
     fprintf(out, "Total: %u\n\n", ast->count);
-    
     for (int i = 0; i < AST_NODE_TYPE_COUNT; i++) {
         if (type_counts[i])
-            fprintf( out
-                   , "  %-30s: %u\n"
-                   , get_ast_node_type_name(i)
-                   , type_counts[i]
-            );
+            fprintf(out, "  %-30s: %u\n", get_ast_node_type_name(i), type_counts[i]);
     }
 }
 
-/*
- * Print AST statistics
- */
 void print_ast_statistics(AST* ast, FILE* out) {
     if (!ast || !ast->nodes) {
         fputs("AST is empty\n", out);
         return;
     }
 
-    uint32_t total_nodes                = 0;
+    uint32_t total_nodes = 0;
     uint32_t type_counts[AST_NODE_TYPE_COUNT] = {0};
 
     for (uint16_t i = 0; i < ast->count; i++)
@@ -778,21 +441,14 @@ void print_ast_statistics(AST* ast, FILE* out) {
 
     fprintf(out, "Statements: %u\n", ast->count);
     fprintf(out, "Total nodes: %u\n\n", total_nodes);
-    
+
     fputs("Distribution:\n", out);
-    
     for (int i = 0; i < AST_NODE_TYPE_COUNT; i++) {
         if (type_counts[i])
-            fprintf( out
-                   , "  %-30s: %u\n", get_ast_node_type_name(i)
-                   , type_counts[i]
-            );
+            fprintf(out, "  %-30s: %u\n", get_ast_node_type_name(i), type_counts[i]);
     }
 }
 
-/*
- * Print AST with type information
- */
 void print_ast_with_types(AST* ast, FILE* out) {
     if (!ast || !ast->nodes) {
         fputs("AST is empty\n", out);
@@ -801,15 +457,9 @@ void print_ast_with_types(AST* ast, FILE* out) {
 
     for (uint16_t i = 0; i < ast->count; i++) {
         ASTNode* node = ast->nodes[i];
-        
         if (!node) continue;
-        
-        fprintf( out
-               , "Statement %u: %s\n"
-               , i + 1
-               , get_ast_node_type_name(node->type)
-        );
-        
+
+        fprintf(out, "Statement %u: %s\n", i + 1, get_ast_node_type_name(node->type));
         if (node->value) fprintf(out, "  Value: '%s'\n", node->value);
         if (node->operation_type)
             fprintf(out, "  Op: %s\n", get_token_type_name(node->operation_type));
@@ -821,18 +471,14 @@ void print_ast_with_types(AST* ast, FILE* out) {
             fprintf(out, "  State: %s\n", node->state_modifier);
         if (node->access_modifier)
             fprintf(out, "  Access: %s\n", node->access_modifier);
-        
-        uint8_t children = (node->left ? 1 : 0) + (node->right ? 1 : 0) + 
+
+        uint8_t children = (node->left ? 1 : 0) + (node->right ? 1 : 0) +
                            (node->extra ? 1 : 0) + (node->default_value ? 1 : 0);
-        
         if (children) fprintf(out, "  Children: %u\n", children);
         if (i < ast->count - 1) fputc('\n', out);
     }
 }
 
-/*
- * Print AST in compact format
- */
 void print_ast_compact(AST* ast, FILE* out) {
     if (!ast || !ast->nodes) {
         fputs("AST is empty\n", out);
@@ -841,9 +487,8 @@ void print_ast_compact(AST* ast, FILE* out) {
 
     for (uint16_t i = 0; i < ast->count; i++) {
         ASTNode* node = ast->nodes[i];
-        
         if (!node) continue;
-        
+
         fprintf(out, "%u: %s", i + 1, get_ast_node_type_name(node->type));
         if (node->value) fprintf(out, " '%s'", node->value);
         if (node->operation_type)
@@ -852,70 +497,262 @@ void print_ast_compact(AST* ast, FILE* out) {
     }
 }
 
-/*
- * Enable or disable parser trace
- */
-void enable_parser_trace(bool enabled) {
-    parser_trace_enabled = enabled;
-}
-
-/*
- * Log parser step for debugging
- */
-void log_parser_step(ParserState* parser, const char* action, ASTNode* node) {
-    if (!parser_trace_enabled || !parser) return;
-
-    FILE* out = trace_file ? trace_file : stdout;
-    
-    fprintf(out, "[Parser@%u] %s: ", parser->current_token_position, action);
-    
-    if (node) {
-        fprintf(out, "%s", get_ast_node_type_name(node->type));
-        
-        if (node->value) fprintf(out, " '%s'", node->value);
-    }
-    
-    if (parser->current_token_position < parser->total_tokens) {
-        Token* token = &parser->token_stream[parser->current_token_position];
-        fprintf(out, " | Current: %s", get_token_type_name(token->type));
-        
-        if (token->value) fprintf(out, " '%s'", token->value);
-    }
-    
-    fputc('\n', out);
-}
-
-/*
- * Print parser trace information
- */
-void print_parser_trace(ParserState* parser, FILE* out) {
-    if (!parser) {
-        fputs("Parser state is NULL\n", out);
+void print_semantic_symbol_table(SemanticContext* context, FILE* out) {
+    if (!context || !out) {
+        fputs("No semantic context to display\n", out);
         return;
     }
 
-    fprintf(out, "Position: %u/%u\n", parser->current_token_position, 
-            parser->total_tokens);
-    fprintf(out, "In declaration context: %s\n", 
-            parser->in_declaration_context ? "yes" : "no");
-    
-    if (parser->current_token_position < parser->total_tokens) {
-        Token* token = &parser->token_stream[parser->current_token_position];
-        fprintf(out, "\nCurrent token:\n");
-        fprintf(out, "  Type: %s\n", get_token_type_name(token->type));
-        
-        if (token->value)
-            fprintf(out, "  Value: '%s'\n", token->value);
-        
-        fprintf(out, "  Pos: line %u, col %u\n", token->line, token->column);
+    SymbolTable* table = semantic__get_global_table(context);
+    if (!table) {
+        fputs("No symbol table available\n", out);
+        return;
     }
+
+    fprintf(out, "SYMBOL TABLE:\n");
+    fprintf(out, "%-20s %-12s %-10s %-12s %-10s %-10s %-10s\n",
+            "Name", "Type", "Const", "Init State", "Used", "Mutable", "Scope");
+    fprintf(out, "%-20s %-12s %-10s %-12s %-10s %-10s %-10s\n",
+            "--------------------", "------------", "----------", "------------",
+            "----------", "----------", "----------");
+
+    size_t total_symbols = 0;
+
+    /* Recursive helper to print table with indentation for child scopes */
+    void print_table(SymbolTable* tbl, int indent) {
+        char indent_str[32];
+        memset(indent_str, ' ', indent * 2);
+        indent_str[indent * 2] = '\0';
+
+        for (size_t i = 0; i < tbl->capacity; i++) {
+            SymbolEntry* entry = tbl->entries[i];
+            while (entry) {
+                fprintf(out, "%s%-20s %-12s %-10s %-12s %-10s %-10s %-10s\n",
+                        indent_str,
+                        entry->name,
+                        semantic__type_to_string(entry->type),
+                        entry->is_constant ? "yes" : "no",
+                        get_init_state_string(entry->init_state),
+                        entry->is_used ? "yes" : "no",
+                        entry->is_mutable ? "yes" : "no",
+                        get_scope_level_string(entry->declared_scope));
+                total_symbols++;
+                entry = entry->next;
+            }
+        }
+
+        /* Process child scopes */
+        SymbolTable* child = tbl->children;
+        while (child) {
+            fprintf(out, "\n%sScope: %s (child)\n", indent_str,
+                    get_scope_level_string(child->level));
+            print_table(child, indent + 1);
+            child = child->next_child;
+        }
+    }
+
+    print_table(table, 0);
+    fprintf(out, "\nTotal symbols: %zu\n", total_symbols);
 }
 
-/*
- * Print complete analysis with specified mode
- */
-void print_complete_analysis(Lexer* lexer, AST* ast, 
-                            SemanticContext* semantic, PrintMode mode, FILE* out) {
+void print_semantic_type_info(SemanticContext* context, FILE* out) {
+    if (!context || !out) return;
+
+    SymbolTable* table = semantic__get_global_table(context);
+    if (!table) return;
+
+    size_t type_counts[TYPE_COMPOUND + 1] = {0};
+    size_t init_counts[INIT_DEFAULT + 1] = {0};
+    size_t total_symbols = 0;
+
+    for (size_t i = 0; i < table->capacity; i++) {
+        SymbolEntry* entry = table->entries[i];
+        while (entry) {
+            if (entry->type <= TYPE_COMPOUND) type_counts[entry->type]++;
+            if (entry->init_state <= INIT_DEFAULT) init_counts[entry->init_state]++;
+            total_symbols++;
+            entry = entry->next;
+        }
+    }
+
+    if (total_symbols == 0) {
+        fprintf(out, "No symbols to analyze\n");
+        return;
+    }
+
+    fprintf(out, "TYPE DISTRIBUTION:\n");
+    fprintf(out, "%-15s %-8s %-10s\n", "Type", "Count", "Percentage");
+    fprintf(out, "%-15s %-8s %-10s\n", "---------------", "--------", "----------");
+
+    for (int i = TYPE_UNKNOWN; i <= TYPE_COMPOUND; i++) {
+        if (type_counts[i] > 0) {
+            fprintf(out, "%-15s %-8zu %-9.1f%%\n",
+                    semantic__type_to_string(i),
+                    type_counts[i],
+                    (float)type_counts[i] / total_symbols * 100.0f);
+        }
+    }
+
+    fprintf(out, "\nINITIALIZATION STATE:\n");
+    fprintf(out, "%-20s %-8s %-10s\n", "State", "Count", "Percentage");
+    fprintf(out, "%-20s %-8s %-10s\n", "--------------------", "--------", "----------");
+
+    const char* init_state_names[] = {
+        "Uninitialized", "Partial", "Full", "Constant", "Default"
+    };
+    for (int i = 0; i <= INIT_DEFAULT; i++) {
+        if (init_counts[i] > 0) {
+            fprintf(out, "%-20s %-8zu %-9.1f%%\n",
+                    init_state_names[i],
+                    init_counts[i],
+                    (float)init_counts[i] / total_symbols * 100.0f);
+        }
+    }
+
+    fprintf(out, "\nTYPE COMPATIBILITY:\n");
+    fprintf(out, "  Int <-> Real: compatible\n");
+    fprintf(out, "  none <-> pointer/reference: compatible\n");
+    fprintf(out, "  Identical types: always compatible\n");
+}
+
+void print_semantic_errors_warnings(SemanticContext* context, FILE* out) {
+    if (!context || !out) return;
+
+    fprintf(out, "Errors and warnings are reported through the error handler.\n");
+    fprintf(out, "Use --log or --verbose flags to see detailed messages.\n");
+}
+
+void print_semantic_summary(SemanticContext* context, FILE* out) {
+    if (!context || !out) return;
+
+    fprintf(out, "SEMANTIC ANALYSIS SUMMARY:\n");
+    fprintf(out, "  Status: %s\n",
+            semantic__has_errors(context) ? "FAILED" : "PASSED");
+    fprintf(out, "  Warnings enabled: %s\n",
+            semantic__warnings_enabled(context) ? "yes" : "no");
+    fprintf(out, "  Total symbols: %zu\n",
+            semantic__get_symbol_count(context));
+    fprintf(out, "  Exit on error: %s\n",
+            context->exit_on_error ? "yes" : "no");
+
+    int depth = 0;
+    SymbolTable* scope = context->current_scope;
+    while (scope) {
+        depth++;
+        scope = scope->parent;
+    }
+    fprintf(out, "  Scope depth: %d\n", depth);
+    fprintf(out, "  In function: %s\n", context->in_function ? "yes" : "no");
+    fprintf(out, "  In loop: %s\n", context->in_loop ? "yes" : "no");
+    fprintf(out, "  Current function: %s\n",
+            context->current_function ? context->current_function : "none");
+}
+
+void print_semantic_log(SemanticContext* context, FILE* out) {
+    if (!context || !out) {
+        fputs("No semantic context to display\n", out);
+        return;
+    }
+
+    fprintf(out, "SEMANTIC ANALYSIS LOG\n");
+
+    if (semantic__has_errors(context)) {
+        fprintf(out, "Semantic analysis FAILED with errors\n\n");
+    } else {
+        fprintf(out, "Semantic analysis PASSED\n\n");
+    }
+
+    print_semantic_summary(context, out);
+    fprintf(out, "\n");
+    print_semantic_symbol_table(context, out);
+    fprintf(out, "\n");
+    print_semantic_type_info(context, out);
+    fprintf(out, "\n");
+
+    fprintf(out, "SCOPE INFORMATION:\n");
+    fprintf(out, "  Global symbols: %zu\n", semantic__get_symbol_count(context));
+    fprintf(out, "  Current scope: %s\n",
+            get_scope_level_string(context->current_scope->level));
+    fprintf(out, "  In function: %s\n", context->in_function ? "yes" : "no");
+    fprintf(out, "  In loop: %s\n", context->in_loop ? "yes" : "no");
+    fprintf(out, "\n");
+
+    fprintf(out, "ANALYSIS SETTINGS:\n");
+    fprintf(out, "  Exit on error: %s\n", context->exit_on_error ? "enabled" : "disabled");
+    fprintf(out, "  Warnings: %s\n", context->warnings_enabled ? "enabled" : "disabled");
+}
+
+void print_semantic_analysis(SemanticContext* context, FILE* out) {
+    if (!context || !out) {
+        fputs("No semantic context to display\n", out);
+        return;
+    }
+
+    print_semantic_summary(context, out);
+    fputc('\n', out);
+    print_semantic_symbol_table(context, out);
+    fputc('\n', out);
+    print_semantic_type_info(context, out);
+}
+
+const char* get_ast_node_type_name(ASTNodeType type) {
+    return (type & (AST_NODE_TYPE_COUNT - 1)) == type ?
+           ast_node_names[type] : "UNKNOWN";
+}
+
+const char* get_token_type_name(TokenType type) {
+    return (type & (TOKEN_TYPE_COUNT - 1)) == type ?
+           token_names[type] : "UNKNOWN";
+}
+
+void print_ast_node_inline(ASTNode* node, FILE* out) {
+    if (!node) {
+        fputs("NULL", out);
+        return;
+    }
+    node->value ? fprintf(out, "'%s'", node->value) :
+                  fputs(get_ast_node_type_name(node->type), out);
+}
+
+void print_type_info(Type* type, FILE* out) {
+    if (!type) return;
+
+    fputs("Type: ", out);
+
+    for (uint8_t i = 0; i < type->modifier_count; i++)
+        fprintf(out, "%s ", type->modifiers[i]);
+
+    if (type->pointer_level)
+        fprintf(out, "@%d", type->pointer_level);
+    if (type->is_reference)
+        fprintf(out, "&%d", type->is_reference);
+    if (type->is_register)
+        fprintf(out, "%%%d", type->is_register);
+    if (type->prefix_number)
+        fprintf(out, "%d", type->prefix_number);
+
+    if (type->compound_count) {
+        fputc('(', out);
+        for (uint8_t i = 0; i < type->compound_count; i++) {
+            if (type->compound_types[i])
+                fprintf(out, "%s", type->compound_types[i]->name);
+            if (i < type->compound_count - 1) fputs(", ", out);
+        }
+        fputc(')', out);
+    }
+
+    if (type->angle_expression) {
+        fputc('<', out);
+        print_ast_node_inline(type->angle_expression, out);
+        fputc('>', out);
+    }
+
+    if (type->is_array) fputs("[]", out);
+    fputc('\n', out);
+}
+
+void print_complete_analysis(Lexer* lexer, AST* ast,
+                             SemanticContext* semantic, PrintMode mode, FILE* out) {
     switch (mode) {
         case PRINT_TOKENS_ONLY:
             print_section_header("LEXER TOKENS", out);
@@ -923,14 +760,14 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
             print_token_statistics(lexer, out);
             fprintf(out, "\n");
             break;
-            
+
         case PRINT_AST_ONLY:
             print_section_header("PARSER AST", out);
             print_ast_detailed(ast, out);
             print_ast_statistics(ast, out);
             fprintf(out, "\n");
             break;
-            
+
         case PRINT_SEMANTIC_ONLY:
             if (semantic) {
                 print_section_header("SEMANTIC ANALYSIS", out);
@@ -940,7 +777,7 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
                 fputs("No semantic context available\n", out);
             }
             break;
-            
+
         case PRINT_SEMANTIC_FULL:
             if (semantic) {
                 print_section_header("SEMANTIC ANALYSIS", out);
@@ -952,7 +789,7 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
                 fprintf(out, "\n");
             }
             break;
-            
+
         case PRINT_SEMANTIC_LOG:
             if (semantic) {
                 print_semantic_log(semantic, out);
@@ -961,60 +798,58 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
                 fputs("No semantic context available\n", out);
             }
             break;
-            
+
         case PRINT_ALL:
             print_section_header("LEXER TOKENS", out);
             print_all_tokens(lexer, out);
             fprintf(out, "\n");
-            
+
             print_section_header("PARSER AST", out);
             print_ast_detailed(ast, out);
             fprintf(out, "\n");
-            
+
             if (semantic) {
                 print_section_header("SEMANTIC ANALYSIS", out);
                 print_semantic_analysis(semantic, out);
                 fprintf(out, "\n");
             }
             break;
-            
+
         case PRINT_VERBOSE:
             print_section_header("LEXER TOKENS (DETAILED)", out);
             print_detailed_token_info(lexer, out);
             fprintf(out, "\n");
-            
+
             print_section_header("PARSER AST BY TYPE", out);
             print_ast_by_type(ast, out);
             fprintf(out, "\n");
-            
+
             print_section_header("PARSER AST WITH TYPES", out);
             print_ast_with_types(ast, out);
             fprintf(out, "\n");
-            
+
             if (semantic) {
                 print_section_header("SEMANTIC ANALYSIS", out);
                 print_semantic_analysis(semantic, out);
                 fprintf(out, "\n");
             }
             break;
-            
+
         case PRINT_COMPLETE_ANALYSIS:
             print_section_header("LEXER TOKENS", out);
             print_tokens_in_lines(lexer, out);
             fprintf(out, "\n");
-            
+
             print_section_header("PARSER AST", out);
             print_ast_compact(ast, out);
             fprintf(out, "\n");
-            
-            /* Semantic analysis */
+
             if (semantic) {
                 print_section_header("SEMANTIC ANALYSIS", out);
                 print_semantic_analysis(semantic, out);
                 fprintf(out, "\n");
             }
-            
-            /* Statistics */
+
             ParseStatistics* stats = collect_parse_statistics(lexer, ast, semantic);
             if (stats) {
                 print_section_header("STATISTICS", out);
@@ -1023,67 +858,54 @@ void print_complete_analysis(Lexer* lexer, AST* ast,
                 free(stats);
             }
             break;
-            
+
         case PRINT_PARSER_TRACE:
             fputs("Parser trace requires parser state\n", out);
             break;
     }
 }
 
-/*
- * Collect parse statistics
- */
 ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast,
-                                         SemanticContext* semantic) {
+                                          SemanticContext* semantic) {
     ParseStatistics* stats = malloc(sizeof(ParseStatistics));
-    
     if (!stats) return NULL;
-    
     memset(stats, 0, sizeof(ParseStatistics));
 
     if (lexer && lexer->tokens) {
         stats->total_tokens = lexer->token_count;
-        
         for (uint16_t i = 0; i < lexer->token_count; i++) {
             TokenType type = lexer->tokens[i].type;
-            
             if (type < 256) stats->token_types[type]++;
         }
     }
 
     if (ast && ast->nodes) {
         stats->total_nodes = ast->count;
-        
+        /* Recursive lambda to count nodes */
+        void count_node(ASTNode* node) {
+            if (!node) return;
+            if (node->type < 64)
+                stats->node_types[node->type]++;
+
+            count_node(node->left);
+            count_node(node->right);
+            count_node(node->extra);
+            count_node(node->default_value);
+        }
         for (uint16_t i = 0; i < ast->count; i++) {
-            if (ast->nodes[i]) {
-                void count_node(ASTNode* node) {
-                    if (!node) return;
-                    if (node->type < 64)
-                        stats->node_types[node->type]++;
-                    
-                    count_node(node->left);
-                    count_node(node->right);
-                    count_node(node->extra);
-                    count_node(node->default_value);
-                }
-                
-                count_node(ast->nodes[i]);
-            }
+            if (ast->nodes[i]) count_node(ast->nodes[i]);
         }
     }
-    
+
     if (semantic) {
-        stats->symbols_count = semantic_get_symbol_count(semantic);
-        stats->semantic_errors = semantic_has_errors(semantic) ? 1 : 0;
-        stats->semantic_warnings = semantic_warnings_enabled(semantic) ? 1 : 0;
+        stats->symbols_count = semantic__get_symbol_count(semantic);
+        stats->semantic_errors = semantic__has_errors(semantic) ? 1 : 0;
+        stats->semantic_warnings = semantic__warnings_enabled(semantic) ? 1 : 0;
     }
-    
+
     return stats;
 }
 
-/*
- * Print statistics report
- */
 void print_statistics_report(ParseStatistics* stats, FILE* out) {
     if (!stats) {
         fputs("No statistics\n", out);
@@ -1093,40 +915,51 @@ void print_statistics_report(ParseStatistics* stats, FILE* out) {
     fprintf(out, "COMPILATION STATISTICS:\n");
     fprintf(out, "  Tokens: %u\n", stats->total_tokens);
     fprintf(out, "  AST Nodes: %u\n", stats->total_nodes);
-    
     if (stats->symbols_count > 0) {
         fprintf(out, "  Symbols: %u\n", stats->symbols_count);
     }
-    
     if (stats->semantic_errors > 0) {
         fprintf(out, "  Semantic errors: %u\n", stats->semantic_errors);
     }
-    
     if (stats->semantic_warnings > 0) {
         fprintf(out, "  Semantic warnings: %u\n", stats->semantic_warnings);
     }
-    
+
     fputs("\nToken types:\n", out);
-    
     for (int i = 0; i < 256; i++) {
         if (stats->token_types[i]) {
-            fprintf( out
-                   , "  %-20s: %u\n"
-                   , get_token_type_name(i)
-                   , stats->token_types[i]
-            );
+            fprintf(out, "  %-20s: %u\n", get_token_type_name(i), stats->token_types[i]);
         }
     }
-    
+
     fputs("\nAST node types:\n", out);
-    
     for (int i = 0; i < 64; i++) {
         if (stats->node_types[i]) {
-            fprintf( out
-                   , "  %-30s: %u\n"
-                   , get_ast_node_type_name(i)
-                   , stats->node_types[i]
-            );
+            fprintf(out, "  %-30s: %u\n", get_ast_node_type_name(i), stats->node_types[i]);
         }
     }
+}
+
+void enable_parser_trace(bool enabled) {
+    parser_trace_enabled = enabled;
+}
+
+void log_parser_step(ParserState* parser, const char* action, ASTNode* node) {
+    if (!parser_trace_enabled || !parser) return;
+
+    FILE* out = trace_file ? trace_file : stdout;
+    fprintf(out, "[Parser@%u] %s: ", parser->current_token_position, action);
+
+    if (node) {
+        fprintf(out, "%s", get_ast_node_type_name(node->type));
+        if (node->value) fprintf(out, " '%s'", node->value);
+    }
+
+    if (parser->current_token_position < parser->total_tokens) {
+        Token* token = &parser->token_stream[parser->current_token_position];
+        fprintf(out, " | Current: %s", get_token_type_name(token->type));
+        if (token->value) fprintf(out, " '%s'", token->value);
+    }
+
+    fputc('\n', out);
 }
