@@ -1,36 +1,41 @@
-#inclib "inout"
-#inclib "string"
-#inclib "type"
-#inclib "simac"
-#go .start
+#using "inout"
+#using "string"
+#using "type"
+#using "sigf"
+#entry .start
 
 class Person;
 class Employee : Person;
 
-func calc(var num1 : Int<2>, var num2 : Int<2>) : Int<2>;
+func calc( var num1 : Int<2>
+         , var num2 : Int<2>
+         ) : Int<2>;
 
 func start(none) {
     obj tom : Employee;
-    io::scan(typeof(tom->name), tom->name);
-    io::scan(typeof(tom->age), tom->age);
-    io::scan(typeof(tom->specif), tom->specif);
-    io::print("name:\t", tom->name, '\n');
-    io::print("age:\t", tom->age, '\n');
-    io::print("specif:\t", tom->specif, '\n');
+    io::scan('s', tom->name);
+    io::scan('i', tom->age);
+    io::scan('s', tom->specif);
+    io::printL("name:\t", tom->name);
+    io::printL("age:\t", tom->age);
+    io::printL("specif:\t", tom->specif);
     
-    if (tom->age < 18 or tom->age > 85) => sys::exit(1);
+    if (tom->age < 18 or tom->age > 85) =>
+        sys::exit(1);
     
     io::print("calc print:", calc(24, 10), '\n');
     
-    sig::exit(0);
+    exit(0);
+    return;
 }
 
 func calc( var num1 : Int<2>
          , var num2 : Int<2>
-         ) : Int<2> => return num1 + num2;
+         ) : Int<2> =>
+    return num1 + num2;
 
 class Person {
     var name : Str;
     var age : Int<1>;
-    var specif : Flex;
+    var specif : Str;
 };
