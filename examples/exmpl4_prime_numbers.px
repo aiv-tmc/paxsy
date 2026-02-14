@@ -1,10 +1,10 @@
-#inclib "_zero"
-#inclib "sigf"
-#inclib "inout"
-#inclib "bool"
-#inclib "type"
-#inclib "cyclic"
-#go .start
+#using "base"
+#using "simac"
+#using "inout"
+#using "bool"
+#using "type"
+#using "cyclic"
+#entry .start
 
 func start(none) {
     var low : Byte = zero;
@@ -24,10 +24,14 @@ func start(none) {
         var j : Byte = low;
         while (j * j <= i) {
             if (i % j == 0) => is_prime = false;
-        j++;}
+            j++;
+        }
         if (is_prime) => io::print(i);
-    i++;}
+        
+        i++;
+    }
     io::print('\n');
 
-    sig::exit(0);
+    exit(0);
+    return;
 }
