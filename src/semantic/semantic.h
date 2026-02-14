@@ -169,51 +169,43 @@ typedef struct VisibilityResult {
     char* error_msg;             /**< Dynamically allocated error message */
 } VisibilityResult;
 
-/* -------------------------------------------------------------------------
-   Context management
-   ------------------------------------------------------------------------- */
-
 /**
  * @brief Create a new semantic analysis context.
  * @return Pointer to new context, or NULL on allocation failure.
  */
-SemanticContext* semantic_create_context(void);
+SemanticContext* semantic__create_context(void);
 
 /**
  * @brief Destroy a semantic context and free all associated memory.
  * @param context Context to destroy.
  */
-void semantic_destroy_context(SemanticContext* context);
+void semantic__destroy_context(SemanticContext* context);
 
 /**
  * @brief Set whether compilation should terminate on semantic errors.
  * @param context Semantic context.
  * @param exit_on_error true to exit on error, false to continue.
  */
-void semantic_set_exit_on_error(SemanticContext* context, bool exit_on_error);
-
-/* -------------------------------------------------------------------------
-   Scope management
-   ------------------------------------------------------------------------- */
+void semantic__set_exit_on_error(SemanticContext* context, bool exit_on_error);
 
 /**
  * @brief Enter a new scope with a specific level.
  * @param context Semantic context.
  * @param level Scope level (SCOPE_GLOBAL, SCOPE_FUNCTION, etc.)
  */
-void semantic_enter_scope_ex(SemanticContext* context, ScopeLevel level);
+void semantic__enter_scope_ex(SemanticContext* context, ScopeLevel level);
 
 /**
  * @brief Enter a new scope (defaults to SCOPE_BLOCK).
  * @param context Semantic context.
  */
-void semantic_enter_scope(SemanticContext* context);
+void semantic__enter_scope(SemanticContext* context);
 
 /**
  * @brief Exit the current scope and return to its parent.
  * @param context Semantic context.
  */
-void semantic_exit_scope(SemanticContext* context);
+void semantic__exit_scope(SemanticContext* context);
 
 /**
  * @brief Enter a function scope (special handling for return types).
@@ -221,7 +213,7 @@ void semantic_exit_scope(SemanticContext* context);
  * @param function_name Name of the function.
  * @param return_type Return type of the function.
  */
-void semantic_enter_function_scope(SemanticContext* context,
+void semantic__enter_function_scope(SemanticContext* context,
                                    const char* function_name,
                                    DataType return_type);
 
@@ -229,23 +221,19 @@ void semantic_enter_function_scope(SemanticContext* context,
  * @brief Exit the current function scope.
  * @param context Semantic context.
  */
-void semantic_exit_function_scope(SemanticContext* context);
+void semantic__exit_function_scope(SemanticContext* context);
 
 /**
  * @brief Enter a loop scope (enables break/continue statements).
  * @param context Semantic context.
  */
-void semantic_enter_loop_scope(SemanticContext* context);
+void semantic__enter_loop_scope(SemanticContext* context);
 
 /**
  * @brief Exit the current loop scope.
  * @param context Semantic context.
  */
-void semantic_exit_loop_scope(SemanticContext* context);
-
-/* -------------------------------------------------------------------------
-   Symbol table insertion
-   ------------------------------------------------------------------------- */
+void semantic__exit_loop_scope(SemanticContext* context);
 
 /**
  * @brief Add a variable symbol to a specific symbol table.
@@ -261,7 +249,7 @@ void semantic_exit_loop_scope(SemanticContext* context);
  * @param column Declaration column number.
  * @return true on success, false on redeclaration or allocation failure.
  */
-bool semantic_add_variable_ex(SemanticContext* context, SymbolTable* target_scope,
+bool semantic__add_variable_ex(SemanticContext* context, SymbolTable* target_scope,
                               const char* name, DataType type, Type* type_info,
                               bool is_constant, const char* state_modifier,
                               InitState init_state, uint16_t line, uint16_t column);
@@ -277,7 +265,7 @@ bool semantic_add_variable_ex(SemanticContext* context, SymbolTable* target_scop
  * @param column Declaration column number.
  * @return true on success, false on redeclaration or allocation failure.
  */
-bool semantic_add_variable(SemanticContext* context, const char* name,
+bool semantic__add_variable(SemanticContext* context, const char* name,
                            DataType type, Type* type_info, bool is_constant,
                            uint16_t line, uint16_t column);
 
@@ -294,7 +282,7 @@ bool semantic_add_variable(SemanticContext* context, const char* name,
  * @param column Declaration column number.
  * @return true on success, false on redeclaration or allocation failure.
  */
-bool semantic_add_function_ex(SemanticContext* context, const char* name,
+bool semantic__add_function_ex(SemanticContext* context, const char* name,
                               DataType return_type, Type* return_type_info,
                               FunctionParam* params, size_t param_count,
                               bool is_variadic, uint16_t line, uint16_t column);
@@ -311,7 +299,7 @@ bool semantic_add_function_ex(SemanticContext* context, const char* name,
  * @param column Declaration column number.
  * @return true on success, false on redeclaration or allocation failure.
  */
-bool semantic_add_function(SemanticContext* context, const char* name,
+bool semantic__add_function(SemanticContext* context, const char* name,
                            DataType return_type, Type* return_type_info,
                            FunctionParam* params, size_t param_count,
                            uint16_t line, uint16_t column);
@@ -326,13 +314,9 @@ bool semantic_add_function(SemanticContext* context, const char* name,
  * @param column Declaration column number.
  * @return true on success, false on error.
  */
-bool semantic_add_compound_type(SemanticContext* context, const char* name,
+bool semantic__add_compound_type(SemanticContext* context, const char* name,
                                 ASTNode* members_ast,
                                 uint16_t line, uint16_t column);
-
-/* -------------------------------------------------------------------------
-   Symbol lookup
-   ------------------------------------------------------------------------- */
 
 /**
  * @brief Find a symbol by name, searching from current scope up to global.
@@ -340,7 +324,7 @@ bool semantic_add_compound_type(SemanticContext* context, const char* name,
  * @param name Symbol name.
  * @return SymbolEntry pointer, or NULL if not found.
  */
-SymbolEntry* semantic_find_symbol(SemanticContext* context, const char* name);
+SymbolEntry* semantic__find_symbol(SemanticContext* context, const char* name);
 
 /**
  * @brief Find a member of a struct.
@@ -349,7 +333,7 @@ SymbolEntry* semantic_find_symbol(SemanticContext* context, const char* name);
  * @param field_name Name of the member.
  * @return SymbolEntry of the member, or NULL if not found.
  */
-SymbolEntry* semantic_find_struct_member(SemanticContext* context,
+SymbolEntry* semantic__find_struct_member(SemanticContext* context,
                                          const char* struct_name,
                                          const char* field_name);
 
@@ -361,14 +345,10 @@ SymbolEntry* semantic_find_struct_member(SemanticContext* context,
  * @param allow_shadowing Whether to allow shadowed symbols.
  * @return VisibilityResult structure.
  */
-VisibilityResult semantic_check_visibility(SemanticContext* context,
+VisibilityResult semantic__check_visibility(SemanticContext* context,
                                            const char* name,
                                            bool require_initialized,
                                            bool allow_shadowing);
-
-/* -------------------------------------------------------------------------
-   Symbol state manipulation
-   ------------------------------------------------------------------------- */
 
 /**
  * @brief Mark a symbol as used (does not trigger warnings – feature disabled).
@@ -376,7 +356,7 @@ VisibilityResult semantic_check_visibility(SemanticContext* context,
  * @param name Symbol name.
  * @return true if symbol was found and marked, false otherwise.
  */
-bool semantic_mark_symbol_used(SemanticContext* context, const char* name);
+bool semantic__mark_symbol_used(SemanticContext* context, const char* name);
 
 /**
  * @brief Update the initialization state of a variable.
@@ -385,7 +365,7 @@ bool semantic_mark_symbol_used(SemanticContext* context, const char* name);
  * @param new_state New initialization state.
  * @return true if update succeeded, false if symbol not found or invalid transition.
  */
-bool semantic_update_init_state(SemanticContext* context, const char* name,
+bool semantic__update_init_state(SemanticContext* context, const char* name,
                                 InitState new_state);
 
 /**
@@ -394,7 +374,7 @@ bool semantic_update_init_state(SemanticContext* context, const char* name,
  * @param name Symbol name.
  * @return InitState value, or INIT_UNINITIALIZED if not found.
  */
-InitState semantic_get_init_state(SemanticContext* context, const char* name);
+InitState semantic__get_init_state(SemanticContext* context, const char* name);
 
 /**
  * @brief Check whether a variable can be modified.
@@ -402,11 +382,7 @@ InitState semantic_get_init_state(SemanticContext* context, const char* name);
  * @param name Symbol name.
  * @return true if variable is mutable and not constant, false otherwise.
  */
-bool semantic_can_modify_symbol(SemanticContext* context, const char* name);
-
-/* -------------------------------------------------------------------------
-   Type checking
-   ------------------------------------------------------------------------- */
+bool semantic__can_modify_symbol(SemanticContext* context, const char* name);
 
 /**
  * @brief Perform type checking on an AST node.
@@ -414,7 +390,7 @@ bool semantic_can_modify_symbol(SemanticContext* context, const char* name);
  * @param node AST node to check.
  * @return TypeCheckResult containing type, init state, and possible error.
  */
-TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node);
+TypeCheckResult semantic__check_type(SemanticContext* context, ASTNode* node);
 
 /**
  * @brief Specialized type check for binary operations.
@@ -422,7 +398,7 @@ TypeCheckResult semantic_check_type(SemanticContext* context, ASTNode* node);
  * @param node AST_BINARY_OPERATION node.
  * @return TypeCheckResult.
  */
-TypeCheckResult semantic_check_binary_op(SemanticContext* context,
+TypeCheckResult semantic__check_binary_op(SemanticContext* context,
                                          ASTNode* node);
 
 /**
@@ -431,7 +407,7 @@ TypeCheckResult semantic_check_binary_op(SemanticContext* context,
  * @param node AST_UNARY_OPERATION node.
  * @return TypeCheckResult.
  */
-TypeCheckResult semantic_check_unary_op(SemanticContext* context,
+TypeCheckResult semantic__check_unary_op(SemanticContext* context,
                                         ASTNode* node);
 
 /**
@@ -440,7 +416,7 @@ TypeCheckResult semantic_check_unary_op(SemanticContext* context,
  * @param node AST_ASSIGNMENT or AST_COMPOUND_ASSIGNMENT node.
  * @return TypeCheckResult.
  */
-TypeCheckResult semantic_check_assignment(SemanticContext* context,
+TypeCheckResult semantic__check_assignment(SemanticContext* context,
                                           ASTNode* node);
 
 /**
@@ -449,12 +425,8 @@ TypeCheckResult semantic_check_assignment(SemanticContext* context,
  * @param node AST_FUNCTION_DECLARATION node used as call.
  * @return TypeCheckResult.
  */
-TypeCheckResult semantic_check_function_call(SemanticContext* context,
+TypeCheckResult semantic__check_function_call(SemanticContext* context,
                                              ASTNode* node);
-
-/* -------------------------------------------------------------------------
-   AST traversal and analysis
-   ------------------------------------------------------------------------- */
 
 /**
  * @brief Perform full semantic analysis on the entire AST.
@@ -462,7 +434,7 @@ TypeCheckResult semantic_check_function_call(SemanticContext* context,
  * @param ast Abstract syntax tree.
  * @return true if no errors, false otherwise.
  */
-bool semantic_analyze(SemanticContext* context, AST* ast);
+bool semantic__analyze(SemanticContext* context, AST* ast);
 
 /**
  * @brief Check semantic correctness of a single statement node.
@@ -470,7 +442,7 @@ bool semantic_analyze(SemanticContext* context, AST* ast);
  * @param node Statement AST node.
  * @return true if valid, false otherwise (error reported).
  */
-bool semantic_check_statement(SemanticContext* context, ASTNode* node);
+bool semantic__check_statement(SemanticContext* context, ASTNode* node);
 
 /**
  * @brief Check semantic correctness of a single expression node.
@@ -478,7 +450,7 @@ bool semantic_check_statement(SemanticContext* context, ASTNode* node);
  * @param node Expression AST node.
  * @return true if valid, false otherwise (error reported).
  */
-bool semantic_check_expression(SemanticContext* context, ASTNode* node);
+bool semantic__check_expression(SemanticContext* context, ASTNode* node);
 
 /**
  * @brief Validate a struct definition and add it to symbol table.
@@ -486,7 +458,7 @@ bool semantic_check_expression(SemanticContext* context, ASTNode* node);
  * @param node AST_COMPOUND_TYPE node.
  * @return true if valid, false otherwise.
  */
-bool semantic_check_compound_type(SemanticContext* context, ASTNode* node);
+bool semantic__check_compound_type(SemanticContext* context, ASTNode* node);
 
 /**
  * @brief Check that all variables in a scope are properly initialized.
@@ -494,47 +466,43 @@ bool semantic_check_compound_type(SemanticContext* context, ASTNode* node);
  * @param scope Scope to check (NULL = current scope).
  * @return true if all initialized, false otherwise (warnings emitted).
  */
-bool semantic_check_scope_initialization(SemanticContext* context,
+bool semantic__check_scope_initialization(SemanticContext* context,
                                          SymbolTable* scope);
-
-/* -------------------------------------------------------------------------
-   Utility functions
-   ------------------------------------------------------------------------- */
 
 /**
  * @brief Validate that a struct member has a legal state modifier.
  * @param state_modifier Modifier string.
  * @return true if modifier is "var" or "obj".
  */
-bool semantic_is_valid_struct_member_modifier(const char* state_modifier);
+bool semantic__is_valid_struct_member_modifier(const char* state_modifier);
 
 /**
  * @brief Convert a token type to the corresponding DataType.
  * @param token_type Token type from lexer.
  * @return DataType value.
  */
-DataType semantic_type_from_token(TokenType token_type);
+DataType semantic__type_from_token(TokenType token_type);
 
 /**
  * @brief Convert a type name string to DataType.
  * @param type_name Type name.
  * @return DataType value.
  */
-DataType semantic_type_from_string(const char* type_name);
+DataType semantic__type_from_string(const char* type_name);
 
 /**
  * @brief Convert DataType to a human-readable string.
  * @param type DataType.
  * @return Constant string representation.
  */
-const char* semantic_type_to_string(DataType type);
+const char* semantic__type_to_string(DataType type);
 
 /**
  * @brief Convert InitState to a human-readable string.
  * @param state Initialization state.
  * @return Constant string representation.
  */
-const char* semantic_init_state_to_string(InitState state);
+const char* semantic__init_state_to_string(InitState state);
 
 /**
  * @brief Check if two types are compatible for arithmetic/logical operations.
@@ -542,7 +510,7 @@ const char* semantic_init_state_to_string(InitState state);
  * @param type2 Second type.
  * @return true if compatible.
  */
-bool semantic_types_compatible(DataType type1, DataType type2);
+bool semantic__types_compatible(DataType type1, DataType type2);
 
 /**
  * @brief Check if a source type can be assigned to a target type,
@@ -553,7 +521,7 @@ bool semantic_types_compatible(DataType type1, DataType type2);
  * @param source_init Initialization state of source.
  * @return true if assignment is allowed.
  */
-bool semantic_types_assignable_ex(DataType target_type, DataType source_type,
+bool semantic__types_assignable_ex(DataType target_type, DataType source_type,
                                   InitState target_init, InitState source_init);
 
 /**
@@ -562,35 +530,35 @@ bool semantic_types_assignable_ex(DataType target_type, DataType source_type,
  * @param source_type Source type.
  * @return true if types are compatible.
  */
-bool semantic_types_assignable(DataType target_type, DataType source_type);
+bool semantic__types_assignable(DataType target_type, DataType source_type);
 
 /**
  * @brief Get the total number of symbols in the global scope.
  * @param context Semantic context.
  * @return Symbol count.
  */
-size_t semantic_get_symbol_count(SemanticContext* context);
+size_t semantic__get_symbol_count(SemanticContext* context);
 
 /**
  * @brief Get the global symbol table for inspection (e.g., for debug output).
  * @param context Semantic context.
  * @return Global symbol table.
  */
-SymbolTable* semantic_get_global_table(SemanticContext* context);
+SymbolTable* semantic__get_global_table(SemanticContext* context);
 
 /**
  * @brief Check whether any semantic error has been reported.
  * @param context Semantic context.
  * @return true if errors exist.
  */
-bool semantic_has_errors(SemanticContext* context);
+bool semantic__has_errors(SemanticContext* context);
 
 /**
  * @brief Check whether warnings are enabled.
  * @param context Semantic context.
  * @return true if warnings are enabled.
  */
-bool semantic_warnings_enabled(SemanticContext* context);
+bool semantic__warnings_enabled(SemanticContext* context);
 
 /**
  * @brief Determine if a block of statements ends with a return statement.
@@ -598,7 +566,7 @@ bool semantic_warnings_enabled(SemanticContext* context);
  * @param block_ast AST of the block.
  * @return true if the last statement is a return or all branches return.
  */
-bool semantic_check_block_ends_with_return(SemanticContext* context, AST* block_ast);
+bool semantic__check_block_ends_with_return(SemanticContext* context, AST* block_ast);
 
 /**
  * @brief Determine if a statement guarantees a return (for non-void functions).
@@ -606,7 +574,7 @@ bool semantic_check_block_ends_with_return(SemanticContext* context, AST* block_
  * @param node Statement node.
  * @return true if statement ensures return.
  */
-bool semantic_statement_ensures_return(SemanticContext* context, ASTNode* node);
+bool semantic__statement_ensures_return(SemanticContext* context, ASTNode* node);
 
 /**
  * @brief Emit a warning if a newly declared variable shadows an outer one.
@@ -615,7 +583,7 @@ bool semantic_statement_ensures_return(SemanticContext* context, ASTNode* node);
  * @param line Declaration line.
  * @param column Declaration column.
  */
-void semantic_check_shadowing(SemanticContext* context, const char* name,
+void semantic__check_shadowing(SemanticContext* context, const char* name,
                               uint16_t line, uint16_t column);
 
 /**
@@ -626,7 +594,7 @@ void semantic_check_shadowing(SemanticContext* context, const char* name,
  * @param column Mutation column.
  * @return true if mutation is allowed.
  */
-bool semantic_validate_mutation(SemanticContext* context, const char* name,
+bool semantic__validate_mutation(SemanticContext* context, const char* name,
                                 uint16_t line, uint16_t column);
 
 /**
@@ -635,6 +603,6 @@ bool semantic_validate_mutation(SemanticContext* context, const char* name,
  * @param node AST_FIELD_ACCESS node.
  * @return true if the access is semantically valid.
  */
-bool semantic_check_field_access(SemanticContext* context, ASTNode* node);
+bool semantic__check_field_access(SemanticContext* context, ASTNode* node);
 
 #endif
