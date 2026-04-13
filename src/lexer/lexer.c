@@ -58,48 +58,48 @@ static void init_symbol_table(void) {
         /* Keywords */
         {"if",          TOKEN_IF},
         {"else",        TOKEN_ELSE},
+        {"do",          TOKEN_DO},
+        {"break",       TOKEN_BREAK},
+        {"continue",    TOKEN_CONTINUE},
+        {"try",         TOKEN_TRY},
+        {"catch",       TOKEN_CATCH},
         {"nop",         TOKEN_NOP},
         {"halt",        TOKEN_HALT},
-        {"jump",        TOKEN_JUMP},
-        {"free",        TOKEN_FREE},
-        {"sizeof",      TOKEN_SIZEOF},
-        {"parseof",     TOKEN_PARSEOF},
+        {"interflag",   TOKEN_INTERFLAG},
         {"signal",      TOKEN_SIGNAL},
-        {"alloc",       TOKEN_ALLOC},
-        {"realloc",     TOKEN_REALLOC},
-        {"push",        TOKEN_PUSH},
-        {"pop",         TOKEN_POP},
+        {"kill",        TOKEN_KILL},
+        {"jump",        TOKEN_JUMP},
         {"return",      TOKEN_RETURN},
+        {"sizeof",      TOKEN_SIZEOF},
+        {"typeof",      TOKEN_TYPEOF},
+        {"alloc",       TOKEN_ALLOC}, 
+        {"Calloc",      TOKEN_CALLOC},
+        {"realloc",     TOKEN_REALLOC},
+        {"free",        TOKEN_FREE},
         {"none",        TOKEN_NONE},
-        {"null",        TOKEN_NULL},
-        
-        /* State keywords (all map to TOKEN_STATE) */
-        {"func",        TOKEN_STATE},
-        {"var",         TOKEN_STATE},
-        {"obj",         TOKEN_STATE},
-        {"struct",      TOKEN_STATE},
-        {"class",       TOKEN_STATE},
+        {"extends",     TOKEN_EXTENDS}, 
         
         /* Type keywords */
         {"Int",         TOKEN_TYPE},
         {"Real",        TOKEN_TYPE},
         {"Char",        TOKEN_TYPE},
         {"Void",        TOKEN_TYPE},
+        {"Type",        TOKEN_TYPE},
+        
+        /* Const modifier */
+        {"const",       TOKEN_CONSTMOD},
         
         /* Access modifiers */
-        {"public",      TOKEN_ACCMOD},
-        {"protected",   TOKEN_ACCMOD},
-        {"private",     TOKEN_ACCMOD},
+        {"extern",      TOKEN_ACCMOD},
+        {"static",      TOKEN_ACCMOD},
         
-        /* Modifier keywords */
-        {"const",       TOKEN_MODIFIER},
-        {"fixed",       TOKEN_MODIFIER},
-        {"unsigned",    TOKEN_MODIFIER},
-        {"signed",      TOKEN_MODIFIER},
-        {"extern",      TOKEN_MODIFIER},
-        {"static",      TOKEN_MODIFIER},
-        {"volatile",    TOKEN_MODIFIER},
-        {"regis",       TOKEN_MODIFIER},
+        /* Signed modifiers */
+        {"unsigned",    TOKEN_SIGNEDMOD},
+        {"signed",      TOKEN_SIGNEDMOD},
+
+        /* Memmory midifiers */
+        {"volatile",    TOKEN_MEMMOD},
+        {"regis",       TOKEN_MEMMOD},
         
         /* Logical operator keywords */
         {"or",          TOKEN_LOGICAL},
@@ -150,12 +150,8 @@ static void init_symbol_table(void) {
         {">>>=",        TOKEN_SAR_EQ},
         {"<<<<=",       TOKEN_ROL_EQ},
         {">>>>=",       TOKEN_ROR_EQ},
-        {"&&",          TOKEN_DOUBLE_AMPERSAND},
-        {"@@",          TOKEN_DOUBLE_AT},
         {"++",          TOKEN_DOUBLE_PLUS},
         {"--",          TOKEN_DOUBLE_MINUS},
-        {"->",          TOKEN_INDICATOR},
-        {"::",          TOKEN_INDICATOR},
         {"=>",          TOKEN_THEN},
          
         /* Brackets */
@@ -256,18 +252,18 @@ static inline void skip_whitespace(Lexer* lexer) {
  * 
  * Tries the longest possible operator (up to 5 characters) by descending length.
  * If a match is found, `operator_length` is set to its length and the token type
- * is returned. Otherwise returns TOKEN_ERROR.
+ * is returned. Otherwise returns TOKEN_ERRORCODE.
  * 
  * @param lexer Lexer state
  * @param operator_length Output parameter: length of the matched operator
- * @return TokenType of the operator, or TOKEN_ERROR if none matches
+ * @return TokenType of the operator, or TOKEN_ERRORCODE if none matches
  */
 static inline TokenType lookup_operator(Lexer* lexer, uint8_t* operator_length) {
     const char* current_position = lexer->source + lexer->position;
     uint32_t remaining_chars = lexer->source_length - lexer->position;
     
     if (remaining_chars > 0 && !char_is_operator_start(*current_position))
-        return TOKEN_ERROR;
+        return TOKEN_ERRORCODE;
     
     /* Try lengths from 5 down to 1 */
     for (uint8_t test_length = 5; test_length > 0; test_length--) {
@@ -279,7 +275,7 @@ static inline TokenType lookup_operator(Lexer* lexer, uint8_t* operator_length) 
             }
         }
     }
-    return TOKEN_ERROR;
+    return TOKEN_ERRORCODE;
 }
 
 /**
@@ -468,7 +464,7 @@ void lexer__tokenize(Lexer* lexer) {
         if (current_char == '\'' || current_char == '"') {
             Token combined_token = literal__parse_concatenated(lexer);
             
-            if (combined_token.type != TOKEN_ERROR) {
+            if (combined_token.type != TOKEN_ERRORCODE) {
                 add_token_to_lexer(
                     lexer,
                     combined_token.type,
@@ -485,7 +481,7 @@ void lexer__tokenize(Lexer* lexer) {
         uint8_t operator_length;
         TokenType operator_type = lookup_operator(lexer, &operator_length);
         
-        if (operator_type != TOKEN_ERROR) {
+        if (operator_type != TOKEN_ERRORCODE) {
             add_token_to_lexer(
                 lexer,
                 operator_type,
