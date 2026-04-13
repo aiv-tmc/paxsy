@@ -10,7 +10,7 @@ You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#
 `$ git clone https://github.com/aiv-tmc/Paxsy.git`
 
 2. Go to the directory with the code:
-`$ cd ~/Download/Paxsy/src/`
+`$ cd ~/Download/Paxsy/`
 
 3. Start making the program:
 `$ sudo make all`
