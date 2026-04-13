@@ -1,0 +1,10 @@
+#using "simac"
+#using "inout"
+
+#entry @start
+
+start(Void) {
+    io.print("Hello, World!");
+    exit(0);
+    return;
+}
