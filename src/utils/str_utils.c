@@ -3,7 +3,7 @@
 #include <string.h>
 #include <ctype.h>
 
-char* strduplic(const char* str) {
+char* u__strduplic(const char* str) {
     if (!str) return NULL;
     
     size_t len = strlen(str);
@@ -15,7 +15,7 @@ char* strduplic(const char* str) {
     return copy;
 }
 
-char* strdup(const char* str, size_t max_len) {
+char* u__strdup(const char* str, size_t max_len) {
     if (!str) return NULL;
     
     size_t len = 0;
@@ -29,7 +29,15 @@ char* strdup(const char* str, size_t max_len) {
     return copy;
 }
 
-int str_startw(const char* str, const char* prefix) {
+char* u__strdup_safe(const char* str) {
+    if (!str) return NULL;
+    size_t len = strlen(str);
+    char* copy = (char*)memory_allocate_zero(len+1);
+    if (copy) memcpy(copy, str, len+1);
+    return copy;
+}
+
+int u__str_startw(const char* str, const char* prefix) {
     if (!str || !prefix) return 0;
     
     while (*prefix) {
@@ -40,7 +48,7 @@ int str_startw(const char* str, const char* prefix) {
     return 1;
 }
 
-int str_endw(const char* str, const char* suffix) {
+int u__str_endw(const char* str, const char* suffix) {
     if (!str || !suffix) return 0;
     
     size_t str_len = strlen(str);
@@ -51,12 +59,12 @@ int str_endw(const char* str, const char* suffix) {
     return strcmp(str + str_len - suffix_len, suffix) == 0;
 }
 
-int streq(const char* str1, const char* str2) {
+int u__streq(const char* str1, const char* str2) {
     if (!str1 || !str2) return str1 == str2;
     return strcmp(str1, str2) == 0;
 }
 
-int streq_ignore(const char* str1, const char* str2) {
+int u__streq_ignore(const char* str1, const char* str2) {
     if (!str1 || !str2) return str1 == str2;
     
     while (*str1 && *str2) {
@@ -70,7 +78,7 @@ int streq_ignore(const char* str1, const char* str2) {
     return *str1 == *str2;
 }
 
-size_t str_copy_safe
+size_t u__str_copy_safe
     ( char* dest
     , const char* src
     , size_t dest_size
@@ -87,7 +95,7 @@ size_t str_copy_safe
     return i;
 }
 
-size_t str_concat_safe
+size_t u__str_concat_safe
     ( char* dest
     , const char* src
     , size_t dest_size
@@ -107,7 +115,7 @@ size_t str_concat_safe
     return dest_len + i;
 }
 
-char* strtrim(char* str) {
+char* u__strtrim(char* str) {
     if (!str) return NULL;
     
     /* Trim leading whitespace */
@@ -132,7 +140,7 @@ char* strtrim(char* str) {
     return str;
 }
 
-char* strlow(char* str) {
+char* u__strlow(char* str) {
     if (!str) return NULL;
     
     for (char* p = str; *p; p++)
@@ -140,7 +148,7 @@ char* strlow(char* str) {
     return str;
 }
 
-char* strupp(char* str) {
+char* u__strupp(char* str) {
     if (!str) return NULL;
     
     for (char* p = str; *p; p++)
@@ -148,7 +156,7 @@ char* strupp(char* str) {
     return str;
 }
 
-const char* strfind_c(const char* str, char ch) {
+const char* u__strfind_c(const char* str, char ch) {
     if (!str) return NULL;
     
     while (*str) {
@@ -159,7 +167,7 @@ const char* strfind_c(const char* str, char ch) {
     return NULL;
 }
 
-const char* strfind_lc(const char* str, char ch) {
+const char* u__strfind_lc(const char* str, char ch) {
     if (!str) return NULL;
     
     const char* last = NULL;
@@ -171,7 +179,7 @@ const char* strfind_lc(const char* str, char ch) {
     return last;
 }
 
-int str_whitespace(const char* str) {
+int u__str_whitespace(const char* str) {
     if (!str) return 1;
     
     while (*str) {
