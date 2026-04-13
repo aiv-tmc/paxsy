@@ -78,18 +78,6 @@ typedef struct {
 } Arguments;
 
 /**
- * @brief Safely duplicates a string.
- * @return Newly allocated copy, or NULL on allocation failure.
- */
-static char* strdup_safe(const char* s) {
-    if (!s) return NULL;
-    size_t len = strlen(s);
-    char* copy = (char*)memory_allocate_zero(len + 1);
-    if (copy) memcpy(copy, s, len + 1);
-    return copy;
-}
-
-/**
  * @brief Adds a filename to the argument structure (makes a private copy).
  * @return 1 on success, 0 on error.
  */
@@ -99,7 +87,7 @@ static int collect_filename(const char* fname, Arguments* args) {
 
     /* Check for duplicates */
     for (size_t i = 0; i < args->file_count; ++i) {
-        if (streq(args->filenames[i], fname)) {
+        if (u__streq(args->filenames[i], fname)) {
             errhandler__report_error(ERROR_CODE_IO_DOUBLE_FILE, 0, 0, "file",
                                      "Duplicate file: %s", fname);
             return 0;
@@ -123,7 +111,7 @@ static int collect_filename(const char* fname, Arguments* args) {
     }
 
     /* Store a copy of the filename */
-    char* copy = strdup_safe(fname);
+    char* copy = u__strdup_safe(fname);
     if (!copy) {
         errhandler__report_error(ERROR_CODE_MEMORY_ALLOCATION, 0, 0, "memory",
                                  "Failed to duplicate filename");
@@ -220,12 +208,12 @@ static int parse_arguments(int argc, char* argv[], Arguments* args) {
             continue;
         }
 
-        if (streq(arg, "--help") || streq(arg, "-h")) {
+        if (u__streq(arg, "--help") || u__streq(arg, "-h")) {
             print_usage();
             args->exit_code = 0;
             return -1;
         }
-        if (streq(arg, "--version") || streq(arg, "-v")) {
+        if (u__streq(arg, "--version") || u__streq(arg, "-v")) {
             print_version();
             args->exit_code = 0;
             return -1;
@@ -433,7 +421,7 @@ static const char** split_into_lines(const char* text, size_t* out_count) {
     const char* p = text;
 
     while (*p) {
-        if (char_is_line_break(*p)) {
+        if (u__char_is_line_break(*p)) {
             size_t len = p - start;
             char* copy = (char*)memory_allocate_zero(len + 1);
             if (!copy)
