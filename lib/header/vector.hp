@@ -1,5 +1,5 @@
-#if !defed(VECTOR__LIB)
-#defien VECTOR__LIB
+#if !defined(VECTOR__LIB)
+#define VECTOR__LIB
 
 /**
  * 2D vector aliases (default to 32‑bit)
