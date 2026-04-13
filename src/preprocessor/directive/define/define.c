@@ -39,7 +39,7 @@ void DPPF__define(PreprocessorState* state, char* args) {
 
     /* Determine macro type: object-like or function-like. */
     char* name_start = ptr;
-    while (*ptr && char_is_identifier_char(*ptr)) ptr++;
+    while (*ptr && u__char_is_identifier_char(*ptr)) ptr++;
 
     ResultCode result = RESULT_ERROR;
     if (*ptr == '(') {
@@ -78,7 +78,7 @@ static ResultCode parse_object_like_macro(PreprocessorState* state, char* args) 
     char* value_end = find_macro_replacement_end(value_start);
 
     /* Trim trailing whitespace. */
-    while (value_end > value_start && char_is_whitespace(*(value_end - 1))) {
+    while (value_end > value_start && u__char_is_whitespace(*(value_end - 1))) {
         value_end--;
     }
 
@@ -168,7 +168,7 @@ static ResultCode parse_function_like_macro(PreprocessorState* state, char* args
         }
 
         /* Parameter name must start with an identifier character. */
-        if (!char_is_identifier_start(*ptr)) {
+        if (!u__char_is_identifier_start(*ptr)) {
             errhandler__report_error(
                 ERROR_CODE_PP_INVALID_DIR,
                 state->directive_start_line,
@@ -182,7 +182,7 @@ static ResultCode parse_function_like_macro(PreprocessorState* state, char* args
 
         /* Extract parameter name. */
         char* param_start = ptr;
-        while (char_is_identifier_char(*ptr)) ptr++;
+        while (u__char_is_identifier_char(*ptr)) ptr++;
         size_t param_len = ptr - param_start;
 
         param_names[param_count] = malloc(param_len + 1);
@@ -258,7 +258,7 @@ static ResultCode parse_function_like_macro(PreprocessorState* state, char* args
     char* value_end = find_macro_replacement_end(value_start);
 
     /* Trim trailing whitespace. */
-    while (value_end > value_start && char_is_whitespace(*(value_end - 1))) {
+    while (value_end > value_start && u__char_is_whitespace(*(value_end - 1))) {
         value_end--;
     }
 
@@ -349,12 +349,12 @@ static char* extract_macro_name(char* str, size_t* name_len) {
     assert(str != NULL);
     assert(name_len != NULL);
 
-    if (!char_is_identifier_start(*str)) {
+    if (!u__char_is_identifier_start(*str)) {
         return NULL;
     }
 
     char* end = str;
-    while (char_is_identifier_char(*end)) end++;
+    while (u__char_is_identifier_char(*end)) end++;
 
     *name_len = end - str;
 
@@ -373,7 +373,7 @@ static char* extract_macro_name(char* str, size_t* name_len) {
  */
 static char* skip_macro_whitespace(char* str) {
     if (str == NULL) return str;
-    while (char_is_whitespace(*str)) {
+    while (u__char_is_whitespace(*str)) {
         str++;
     }
     return str;
@@ -384,7 +384,7 @@ static char* skip_macro_whitespace(char* str) {
  */
 static char* find_macro_replacement_end(char* str) {
     if (str == NULL) return str;
-    while (*str && !char_is_line_break(*str)) {
+    while (*str && !u__char_is_line_break(*str)) {
         str++;
     }
     return str;
@@ -411,7 +411,7 @@ void DPPF__undef(PreprocessorState* state, char* args) {
 
     /* Extract macro name. */
     char* name_start = ptr;
-    while (char_is_identifier_char(*ptr)) ptr++;
+    while (u__char_is_identifier_char(*ptr)) ptr++;
 
     size_t name_len = ptr - name_start;
     if (name_len == 0) {
@@ -440,11 +440,11 @@ void DPPF__undef(PreprocessorState* state, char* args) {
 
     /* Copy name safely. */
     char name[MAX_MACRO_NAME_LEN];
-    str_copy_safe(name, name_start, (name_len + 1 < MAX_MACRO_NAME_LEN) ? name_len + 1 : MAX_MACRO_NAME_LEN);
+    u__str_copy_safe(name, name_start, (name_len + 1 < MAX_MACRO_NAME_LEN) ? name_len + 1 : MAX_MACRO_NAME_LEN);
 
     /* Ensure no extra characters after the name. */
     ptr = skip_macro_whitespace(ptr);
-    if (*ptr != '\0' && !char_is_line_break(*ptr)) {
+    if (*ptr != '\0' && !u__char_is_line_break(*ptr)) {
         errhandler__report_error(
             ERROR_CODE_PP_INVALID_DIR,
             state->directive_start_line,
