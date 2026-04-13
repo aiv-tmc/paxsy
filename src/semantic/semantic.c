@@ -343,9 +343,9 @@ bool semantic__add_variable_ex(SemanticContext* ctx, SymbolTable* target_scope,
     SymbolEntry* entry = (SymbolEntry*)calloc(1, sizeof(SymbolEntry));
     if (!entry) return false;
 
-    entry->name = strduplic(name);
-    entry->state_modifier = state_modifier ? strduplic(state_modifier) : NULL;
-    entry->access_modifier = access_modifier ? strduplic(access_modifier) : NULL;
+    entry->name = u__strduplic(name);
+    entry->state_modifier = state_modifier ? u__strduplic(state_modifier) : NULL;
+    entry->access_modifier = access_modifier ? u__strduplic(access_modifier) : NULL;
     entry->type = type;
     entry->type_info = type_info;
     entry->is_constant = is_constant;
@@ -456,9 +456,9 @@ bool semantic__add_function_ex(SemanticContext* ctx, SymbolTable* target_scope,
         goto cleanup_params;
     }
 
-    entry->name = strduplic(name);
-    entry->state_modifier = strduplic("func");
-    entry->access_modifier = access_modifier ? strduplic(access_modifier) : NULL;
+    entry->name = u__strduplic(name);
+    entry->state_modifier = u__strduplic("func");
+    entry->access_modifier = access_modifier ? u__strduplic(access_modifier) : NULL;
     entry->type = TYPE_FUNCTION;
     entry->type_info = return_type_info;
     entry->is_constant = true;
@@ -572,7 +572,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
     SymbolEntry* entry = (SymbolEntry*)calloc(1, sizeof(SymbolEntry));
     if (!entry) return false;
 
-    entry->name = strduplic(name);
+    entry->name = u__strduplic(name);
     entry->type = TYPE_COMPOUND;
     entry->compound_kind = kind;
     entry->declared_scope = ctx->current_scope->level;
@@ -654,9 +654,9 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
             /* Build debug list for output */
             CompoundMember* dbg = (CompoundMember*)malloc(sizeof(CompoundMember));
             if (dbg) {
-                dbg->name = strduplic(member->value);
-                dbg->state_modifier = strduplic(mod);
-                dbg->access_modifier = kind == 0 ? NULL : strduplic(member_access);
+                dbg->name = u__strduplic(member->value);
+                dbg->state_modifier = u__strduplic(mod);
+                dbg->access_modifier = kind == 0 ? NULL : u__strduplic(member_access);
                 dbg->type = mem_type;
                 dbg->type_info = member->variable_type;
                 dbg->init_state = init;
@@ -706,7 +706,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
                     }
 
                     FunctionParam* fp = (FunctionParam*)malloc(sizeof(FunctionParam));
-                    fp->name = pname ? strduplic(pname) : NULL; /* allow NULL name */
+                    fp->name = pname ? u__strduplic(pname) : NULL; /* allow NULL name */
                     fp->type = ptype;
                     fp->type_info = ptype_info;
                     fp->default_value = pnode->default_value;
@@ -744,9 +744,9 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
 
             CompoundMember* dbg = (CompoundMember*)malloc(sizeof(CompoundMember));
             if (dbg) {
-                dbg->name = strduplic(func_name);
-                dbg->state_modifier = strduplic("func");
-                dbg->access_modifier = kind == 0 ? NULL : strduplic(member_access);
+                dbg->name = u__strduplic(func_name);
+                dbg->state_modifier = u__strduplic("func");
+                dbg->access_modifier = kind == 0 ? NULL : u__strduplic(member_access);
                 dbg->type = TYPE_FUNCTION;
                 dbg->type_info = ret_type_info;
                 dbg->init_state = INIT_CONSTANT;
@@ -906,7 +906,7 @@ static DataType determine_numeric_type(const char* value,
 TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
     TypeCheckResult res = {false, TYPE_UNKNOWN, NULL, INIT_UNINITIALIZED, NULL};
     if (!node) {
-        res.error_msg = strduplic("Null node");
+        res.error_msg = u__strduplic("Null node");
         return res;
     }
 
@@ -926,7 +926,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
                 res.valid = true;
             } else {
                 res.valid = false;
-                res.error_msg = strduplic("Invalid literal");
+                res.error_msg = u__strduplic("Invalid literal");
             }
             break;
         }
@@ -934,7 +934,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
         case AST_IDENTIFIER: {
             if (!node->value) {
                 res.valid = false;
-                res.error_msg = strduplic("Identifier with null name");
+                res.error_msg = u__strduplic("Identifier with null name");
                 break;
             }
             SymbolEntry* sym = semantic__find_symbol(ctx, node->value);
@@ -944,7 +944,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
                                             (uint16_t)strlen(node->value), "semantic",
                                             "Undeclared identifier '%s'", node->value);
                 ctx->has_errors = true;
-                res.error_msg = strduplic("Undeclared identifier");
+                res.error_msg = u__strduplic("Undeclared identifier");
                 res.valid = false;
             } else {
                 if (sym->type == TYPE_FUNCTION) {
@@ -955,7 +955,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
                                                 node->value);
                     ctx->has_errors = true;
                     res.valid = false;
-                    res.error_msg = strduplic("Function used as value");
+                    res.error_msg = u__strduplic("Function used as value");
                     break;
                 }
 
@@ -980,7 +980,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
         case AST_BINARY_OPERATION: {
             if (!ast_has_left(node) || !ast_has_right(node)) {
                 res.valid = false;
-                res.error_msg = strduplic("Binary operation missing operands");
+                res.error_msg = u__strduplic("Binary operation missing operands");
                 break;
             }
             TypeCheckResult left = semantic__check_type(ctx, node->left);
@@ -988,7 +988,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
 
             if (!left.valid || !right.valid) {
                 res.valid = false;
-                res.error_msg = strduplic("Invalid operand type");
+                res.error_msg = u__strduplic("Invalid operand type");
                 break;
             }
 
@@ -997,7 +997,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
                 snprintf(msg, sizeof(msg), "Type mismatch: %s and %s",
                          semantic__type_to_string(left.type),
                          semantic__type_to_string(right.type));
-                res.error_msg = strduplic(msg);
+                res.error_msg = u__strduplic(msg);
                 errhandler__report_error_ex(ERROR_LEVEL_ERROR, ERROR_CODE_SEM_TYPE_ERROR,
                                             node->line, node->column, 0, "semantic", "%s", msg);
                 ctx->has_errors = true;
@@ -1022,7 +1022,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
                         res.type = TYPE_INT;
                     else {
                         res.valid = false;
-                        res.error_msg = strduplic("Bitwise ops require integers");
+                        res.error_msg = u__strduplic("Bitwise ops require integers");
                     }
                     break;
                 default:
@@ -1041,13 +1041,13 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
         case AST_UNARY_OPERATION: {
             if (!ast_has_right(node)) {
                 res.valid = false;
-                res.error_msg = strduplic("Unary operation missing operand");
+                res.error_msg = u__strduplic("Unary operation missing operand");
                 break;
             }
             TypeCheckResult operand = semantic__check_type(ctx, node->right);
             if (!operand.valid) {
                 res.valid = false;
-                res.error_msg = strduplic("Invalid operand type");
+                res.error_msg = u__strduplic("Invalid operand type");
                 break;
             }
 
@@ -1059,7 +1059,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
                         res.valid = true;
                     } else {
                         res.valid = false;
-                        res.error_msg = strduplic("Unary +/- requires numeric");
+                        res.error_msg = u__strduplic("Unary +/- requires numeric");
                     }
                     break;
                 case TOKEN_TILDE:
@@ -1068,12 +1068,12 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
                         res.valid = true;
                     } else {
                         res.valid = false;
-                        res.error_msg = strduplic("Bitwise NOT requires int");
+                        res.error_msg = u__strduplic("Bitwise NOT requires int");
                     }
                     break;
                 default:
                     res.valid = false;
-                    res.error_msg = strduplic("Unknown unary operation");
+                    res.error_msg = u__strduplic("Unknown unary operation");
                     break;
             }
 
@@ -1085,7 +1085,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
         case AST_COMPOUND_ASSIGNMENT: {
             if (!ast_has_left(node) || !ast_has_right(node)) {
                 res.valid = false;
-                res.error_msg = strduplic("Assignment missing left or right side");
+                res.error_msg = u__strduplic("Assignment missing left or right side");
                 break;
             }
             if (!ast_is_type(node->left, AST_IDENTIFIER)) {
@@ -1255,7 +1255,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
         case AST_CAST: {
             if (!node->variable_type) {
                 res.valid = false;
-                res.error_msg = strduplic("Cast missing type information");
+                res.error_msg = u__strduplic("Cast missing type information");
                 break;
             }
 
@@ -1263,13 +1263,13 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
             DataType target_dt = type_from_type_info(target_type, ctx);
             if (target_dt == TYPE_UNKNOWN) {
                 res.valid = false;
-                res.error_msg = strduplic("Invalid cast type");
+                res.error_msg = u__strduplic("Invalid cast type");
                 break;
             }
 
             if (!ast_has_left(node)) {
                 res.valid = false;
-                res.error_msg = strduplic("Cast missing expression");
+                res.error_msg = u__strduplic("Cast missing expression");
                 break;
             }
 
@@ -1295,7 +1295,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
                 res.valid = true;
             } else {
                 res.valid = false;
-                res.error_msg = strduplic("Invalid cast between types");
+                res.error_msg = u__strduplic("Invalid cast between types");
             }
             break;
         }
@@ -1304,7 +1304,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
             const char* label_name = node->value;
             if (!label_name) {
                 res.valid = false;
-                res.error_msg = strduplic("Label value with null name");
+                res.error_msg = u__strduplic("Label value with null name");
                 break;
             }
             SymbolEntry* entry = semantic__find_symbol(ctx, label_name);
@@ -1315,7 +1315,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
                                             "Undeclared label or function '%s'", label_name);
                 ctx->has_errors = true;
                 res.valid = false;
-                res.error_msg = strduplic("Undeclared label/function");
+                res.error_msg = u__strduplic("Undeclared label/function");
             } else {
                 res.type = (entry->type == TYPE_LABEL) ? TYPE_LABEL : TYPE_FUNCTION;
                 res.init_state = INIT_CONSTANT;
@@ -1334,7 +1334,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
 
             if (!operand || !ast_is_type(operand, AST_IDENTIFIER)) {
                 res.valid = false;
-                res.error_msg = strduplic("Invalid operand for increment/decrement");
+                res.error_msg = u__strduplic("Invalid operand for increment/decrement");
                 errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
                                          node->line, node->column,
                                          "semantic", "%s", res.error_msg);
@@ -1356,7 +1356,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
 
             if (sym->is_constant) {
                 res.valid = false;
-                res.error_msg = strduplic("Cannot modify constant");
+                res.error_msg = u__strduplic("Cannot modify constant");
                 errhandler__report_error_ex(ERROR_LEVEL_ERROR, ERROR_CODE_SEM_ASSIGN_TO_CONST,
                                             node->line, node->column,
                                             (uint16_t)strlen(operand->value), "semantic",
@@ -1367,7 +1367,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
 
             if (sym->init_state == INIT_UNINITIALIZED) {
                 res.valid = false;
-                res.error_msg = strduplic("Uninitialized variable");
+                res.error_msg = u__strduplic("Uninitialized variable");
                 errhandler__report_error_ex(ERROR_LEVEL_ERROR, ERROR_CODE_SEM_UNINITIALIZED,
                                             node->line, node->column,
                                             (uint16_t)strlen(operand->value), "semantic",
@@ -1657,7 +1657,7 @@ bool semantic__check_statement(SemanticContext* ctx, ASTNode* node) {
                         }
 
                         FunctionParam* param = (FunctionParam*)malloc(sizeof(FunctionParam));
-                        param->name = pname ? strduplic(pname) : NULL;
+                        param->name = pname ? u__strduplic(pname) : NULL;
                         param->type = ptype;
                         param->type_info = ptype_info;
                         param->default_value = p->default_value;
@@ -1876,7 +1876,7 @@ bool semantic__check_statement(SemanticContext* ctx, ASTNode* node) {
             SymbolEntry* entry = (SymbolEntry*)calloc(1, sizeof(SymbolEntry));
             if (!entry) return false;
 
-            entry->name = strduplic(label_name);
+            entry->name = u__strduplic(label_name);
             entry->type = TYPE_LABEL;
             entry->init_state = INIT_CONSTANT;
             entry->is_constant = true;
@@ -2053,12 +2053,12 @@ VisibilityResult semantic__check_visibility(SemanticContext* ctx, const char* na
 
     SymbolEntry* entry = semantic__find_symbol(ctx, name);
     if (!entry) {
-        res.error_msg = strduplic("Undeclared symbol");
+        res.error_msg = u__strduplic("Undeclared symbol");
         return res;
     }
 
     if (require_initialized && entry->init_state == INIT_UNINITIALIZED) {
-        res.error_msg = strduplic("Uninitialized variable");
+        res.error_msg = u__strduplic("Uninitialized variable");
         return res;
     }
 
