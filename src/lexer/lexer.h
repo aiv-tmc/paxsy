@@ -9,7 +9,7 @@
  * @brief All possible token kinds produced by the lexer.
  * 
  * The enumeration covers literals, keywords, operators, punctuation,
- * and special markers like EOF and ERROR.
+ * and special markers like EOF and ERRORCODE.
  */
 typedef enum {
     /* Literals */
@@ -20,26 +20,33 @@ typedef enum {
     /* Keywords */
     TOKEN_IF,              /**< `if` keyword */
     TOKEN_ELSE,            /**< `else` keyword */
-    TOKEN_NOP,             /**< `nop` keyword (no operation) */
+    TOKEN_DO,              /**< `do` keyword */
+    TOKEN_BREAK,           /**< `break` keyword */
+    TOKEN_CONTINUE,        /**< `continue` keyword */
+    TOKEN_TRY,             /**< `try` keyword */
+    TOKEN_CATCH,           /**< `catch` keyword */
+    TOKEN_NOP,             /**< `nop` keyword */
     TOKEN_HALT,            /**< `halt` keyword */
-    TOKEN_JUMP,            /**< `jump` keyword */
-    TOKEN_FREE,            /**< `free` keyword */
-    TOKEN_SIZEOF,          /**< `sizeof` keyword */
-    TOKEN_PARSEOF,         /**< `parseof` keyword */
-    TOKEN_REALLOC,         /**< `realloc` keyword */
-    TOKEN_ALLOC,           /**< `alloc` keyword */
+    TOKEN_INTERFLAG,       /**< `interflag` keyword */
     TOKEN_SIGNAL,          /**< `signal` keyword */
-    TOKEN_PUSH,            /**< `push` keyword */
-    TOKEN_POP,             /**< `pop` keyword */
+    TOKEN_KILL,            /**< `kill` keyword */
+    TOKEN_JUMP,            /**< `jump` keyword */
     TOKEN_RETURN,          /**< `return` keyword */
+    TOKEN_SIZEOF,          /**< `sizeof` keyword */
+    TOKEN_TYPEOF,          /**< `typeof` keyword */
+    TOKEN_ALLOC,           /**< `alloc` keyword */
+    TOKEN_CALLOC,          /**< `realloc` keyword */
+    TOKEN_REALLOC,         /**< `alloc` keyword */
+    TOKEN_FREE,            /**< `free` keyword */
     TOKEN_NONE,            /**< `none` keyword */
-    TOKEN_NULL,            /**< `null` keyword */
+    TOKEN_EXTENDS,         /**< `extends` keyword */
     
     /* Token categories (used for symbols that belong to a group) */
-    TOKEN_STATE,           /**< State keyword: func, var, obj, struct, class */
     TOKEN_TYPE,            /**< Type keyword: Int, Real, Char, Void */
-    TOKEN_ACCMOD,          /**< Access modifier: public, protected, private */
-    TOKEN_MODIFIER,        /**< Type modifier: const, fixed, unsigned, signed, etc. */
+    TOKEN_CONSTMOD,        /**< Const modifier: const */
+    TOKEN_ACCMOD,          /**< Access modifier: extern static */
+    TOKEN_SIGNEDMOD,       /**< Type modifier: unsigned, signed */
+    TOKEN_MEMMOD,          /**< Memory modifier: volatile, register */
     TOKEN_LOGICAL,         /**< Logical operator keyword: or, and */
     TOKEN_ID,              /**< Identifier (variable/function name) */
      
@@ -100,11 +107,8 @@ typedef enum {
     TOKEN_ROR_EQ,          /**< `>>>>=` (rotate right assign) */
     
     /* Multi-character operators */
-    TOKEN_DOUBLE_AMPERSAND,/**< `&&` logical AND */
-    TOKEN_DOUBLE_AT,       /**< `@@` */
     TOKEN_DOUBLE_PLUS,     /**< `++` increment */
     TOKEN_DOUBLE_MINUS,    /**< `--` decrement */
-    TOKEN_INDICATOR,       /**< `->` or `::` (member access / scope) */
     TOKEN_THEN,            /**< `=>` (then arrow) */
     
     /* Brackets and braces */
@@ -117,7 +121,7 @@ typedef enum {
     
     /* Special tokens */
     TOKEN_EOF,             /**< End‑of‑file marker */
-    TOKEN_ERROR            /**< Error token (unrecognised input) */
+    TOKEN_ERRORCODE        /**< Error token (unrecognised input) */
 } TokenType;
 
 /**
