@@ -1,4 +1,4 @@
-#if !def(STACK__LIB)
+#if !defined(STACK__LIB)
 #define STACK__LIB
 
 static Lstack__isEmpty(Void): Bool;
