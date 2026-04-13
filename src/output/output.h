@@ -36,11 +36,15 @@ typedef struct {
     uint32_t symbols_count;      ///< Number of symbols in the symbol table.
 } ParseStatistics;
 
+/* Extern arrays mapping token types and AST node types to human-readable strings. */
 extern const char* token_names[];
 extern const char* ast_node_names[];
 
-#define TOKEN_TYPE_COUNT (TOKEN_ERROR + 1)
-#define AST_NODE_TYPE_COUNT (AST_TERNARY_OPERATION + 1)
+/* Total number of token types. */
+#define TOKEN_TYPE_COUNT (TOKEN_ERRORCODE + 1)
+
+/* Total number of AST node types. Must match the last enum value + 1. */
+#define AST_NODE_TYPE_COUNT (AST_CATCH + 1)
 
 /**
  * @brief Print a formatted section header.
