@@ -1,4 +1,3 @@
-# Paxsy
 
 The **paxsy** project is freely available under the MIT license. You can read it at [this link](https://github.com/aiv-tmc/Paxsi/blob/main/LICENSE).
 
@@ -13,7 +12,7 @@ You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#
 `$ cd ~/Download/Paxsy/`
 
 3. Start making the program:
-`$ sudo make all`
+`$ make`
 
 <!--Syntax highlighting-->
 ## Syntax Highlighting (vim)
