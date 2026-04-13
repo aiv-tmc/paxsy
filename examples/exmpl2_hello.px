@@ -1,9 +1,0 @@
-#using "simac"
-#using "inout"
-#entry .start
-
-func start(none) {
-    io::print("Hello, World!");
-    exit(0);
-    return;
-}
