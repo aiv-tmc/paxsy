@@ -1,8 +1,0 @@
-#ifndef BASE__LIB
-#define BASE__LIB
-
-#define elif else if
-
-#define zero (@Void)0
-
-#endif
