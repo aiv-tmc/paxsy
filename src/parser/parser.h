@@ -8,188 +8,175 @@
 #include <stdbool.h>
 
 /*
- * AST node types for syntax tree representation.
- * Each constant corresponds to a specific language construct.
+ * AST node type enumeration.
+ * Each value identifies the kind of syntactic construct represented by an AST node.
  */
 typedef enum {
-    AST_VARIABLE_DECLARATION,      // Variable declaration without initializer
-    AST_VARIABLE_WITH_BODY,        // Variable declaration with a body (e.g., var x = { ... })
-    AST_FUNCTION_DECLARATION,      // Function declaration (with parameters and body)
-    AST_ARRAY_ACCESS,              // Array indexing expression (a[i])
-    AST_BINARY_OPERATION,          // Binary operation (+, -, *, etc.)
-    AST_UNARY_OPERATION,           // Unary operation (!, ~, *, /)
-    AST_LITERAL_VALUE,             // Literal constant (number, string, char, null, none)
-    AST_IDENTIFIER,                // Identifier (variable name, etc.)
-    AST_REGISTER,                  // Register name (e.g., %eax)
-    AST_ASSIGNMENT,                // Simple assignment (=)
-    AST_COMPOUND_ASSIGNMENT,       // Compound assignment (+=, -=, etc.)
-    AST_BLOCK,                     // Block of statements ( {...} or single statement after =>)
-    AST_IF_STATEMENT,              // If statement (if (cond) then-block [else-block])
-    AST_RETURN,                    // Return statement
-    AST_FREE,                      // Free statement (free(expr))
-    AST_SIZEOF,                    // Sizeof operator
-    AST_PARSEOF,                   // Parseof operator (parse-related)
-    AST_TYPEOF,                    // Typeof operator
-    AST_STACK,                     // Stack operation placeholder
-    AST_PUSH,                      // Push statement (push expr)
-    AST_POP,                       // Pop statement (pop [expr])
-    AST_CAST,                      // Type cast (type) expr
-    AST_SIGNAL,                    // Signal statement
-    AST_MULTI_INITIALIZER,         // Multi-value initializer { expr, expr, ... }
-    AST_LABEL_DECLARATION,         // Label declaration (.label:)
-    AST_JUMP,                      // Jump statement (jump target)
-    AST_POSTFIX_CAST,              // Postfix cast (expr->(type))
-    AST_FIELD_ACCESS,              // Field access via -> (expr->field)
-    AST_NOP,                       // No operation (nop;)
-    AST_ARRAY_DECLARATION,         // Array declaration (var a[10] : Int)
-    AST_HALT,                      // Halt statement (halt;)
-    AST_TYPE_CHANGE,               // Type change operation
-    AST_MULTI_ASSIGNMENT,          // Multi-assignment (left, right = ...)
-    AST_COMPOUND_TYPE,             // Compound type (e.g., (Int, String))
-    AST_PREFIX_INCREMENT,          // Prefix increment (++expr)
-    AST_PREFIX_DECREMENT,          // Prefix decrement (--expr)
-    AST_POSTFIX_INCREMENT,         // Postfix increment (expr++)
-    AST_POSTFIX_DECREMENT,         // Postfix decrement (expr--)
-    AST_LABEL_VALUE,               // Label value (.label)
-    AST_ALLOC,                     // Alloc expression (alloc(...))
-    AST_REALLOC,                   // Realloc expression (realloc(...))
-    AST_DO_LOOP,                   // Do loop (do ... while ...) – not yet used?
-    AST_BREAK,                     // Break statement
-    AST_CONTINUE,                  // Continue statement
-    AST_TERNARY_OPERATION          // Ternary conditional (cond ? true_expr : false_expr)
+    AST_VARIABLE_DECLARATION,   /* Single variable declaration (e.g., variable : Void;).           */
+    AST_VARIABLE_WITH_BODY,     /* Variable declaration with an associated body (unused).          */
+    AST_VARIABLE_LIST,          /* List of variable declarations (comma-separated).                */
+    AST_FUNCTION_DECLARATION,   /* Function declaration or definition (func name(params) : ret).   */
+    AST_ARRAY_ACCESS,           /* Array subscript access, e.g., arr[index].                       */
+    AST_BINARY_OPERATION,       /* Binary operation (+, -, *, /, etc.).                            */
+    AST_UNARY_OPERATION,        /* Unary operation (+, -, !, ~, etc.).                             */
+    AST_LITERAL_VALUE,          /* Literal constant (number, string, character).                   */
+    AST_IDENTIFIER,             /* Identifier (variable or function name).                         */
+    AST_REGISTER,               /* Register access (%%register).                                   */
+    AST_ASSIGNMENT,             /* Simple assignment (=).                                          */
+    AST_COMPOUND_ASSIGNMENT,    /* Compound assignment (+=, -=, etc.).                             */
+    AST_BLOCK,                  /* Block of statements enclosed in {}.                             */
+    AST_IF_STATEMENT,           /* If statement with optional else branch.                         */
+    AST_RETURN,                 /* Return statement (return expr, ...).                            */
+    AST_FREE,                   /* Free memory statement (free expression).                        */
+    AST_SIZEOF,                 /* sizeof operator.                                                */
+    AST_STACK,                  /* Stack operation (unused placeholder).                           */
+    AST_PUSH,                   /* Push operation (unused placeholder).                            */
+    AST_POP,                    /* Pop operation (unused placeholder).                             */
+    AST_CAST,                   /* Type cast (e.g., (int)expr).                                    */
+    AST_SIGNAL,                 /* Signal statement (signal(params) : type).                       */
+    AST_INTERFLAG,              /* Interflag operation (statement or expression).                  */
+    AST_MULTI_INITIALIZER,      /* Multi-value initializer list {a, b, c}.                         */
+    AST_LABEL_DECLARATION,      /* Label declaration (@label:).                                    */
+    AST_JUMP,                   /* Jump statement (jump target).                                   */
+    AST_POSTFIX_CAST,           /* Postfix cast (expr->type).                                      */
+    AST_FIELD_ACCESS,           /* Field access (struct.field or ptr->field).                      */
+    AST_NOP,                    /* No operation (nop).                                             */
+    AST_ARRAY_DECLARATION,      /* Array declaration (unused placeholder).                         */
+    AST_HALT,                   /* Halt execution (halt).                                          */
+    AST_TYPE_CHANGE,            /* Type change operation (unused).                                 */
+    AST_MULTI_ASSIGNMENT,       /* Multi-assignment (multiple values).                             */
+    AST_COMPOUND_TYPE,          /* Compound type (struct declaration).                             */
+    AST_PREFIX_INCREMENT,       /* Prefix increment (++x).                                         */
+    AST_PREFIX_DECREMENT,       /* Prefix decrement (--x).                                         */
+    AST_POSTFIX_INCREMENT,      /* Postfix increment (x++).                                        */
+    AST_POSTFIX_DECREMENT,      /* Postfix decrement (x--).                                        */
+    AST_LABEL_VALUE,            /* Label as value (unused).                                        */
+    AST_ALLOC,                  /* alloc() built-in function call.                                 */
+    AST_REALLOC,                /* realloc() built-in function call.                               */
+    AST_DO_LOOP,                /* Do loop: do (condition) { ... } [else { ... }].                */
+    AST_BREAK,                  /* Break statement with optional label (.label).                   */
+    AST_CONTINUE,               /* Continue statement with optional label (.label).                */
+    AST_TERNARY_OPERATION,      /* Ternary conditional (cond ? {true} : {false}).                  */
+    AST_TYPEOF,                 /* Typeof operator.                                                */
+    AST_KILL,                   /* Kill statement (kill).                                          */
+    AST_TRY,                    /* Try statement: try { ... } catch ... [else { ... }].           */
+    AST_CATCH,                  /* Catch clause inside a try statement.                            */
+    AST_ELSE_STATEMENT          /* Standalone else statement (e.g., else => nop;).                */
 } ASTNodeType;
 
 /*
- * Type structure with modifiers and attributes.
- * Represents a type in the language, including pointers, references, arrays, compound types, etc.
+ * Type structure: holds all information about a type in the language.
+ * Includes base name, modifiers, pointer/reference levels, and generic arguments.
  */
 typedef struct Type {
-    char *name;                    // Base type name (e.g., "Int", "Void", "none")
-    char *access_modifier;         // Access modifier (public/private) – reserved for future use
-    char **modifiers;              // Array of type modifiers (e.g., "const", "volatile")
-    uint8_t modifier_count;        // Number of modifiers in the array
-    uint8_t pointer_level;         // Pointer indirection level (0 = not a pointer)
-    uint8_t is_reference;          // Reference flag (1 = reference, 2 = double reference?)
-    uint8_t is_register;           // Register storage flag (1 = register)
-    uint8_t prefix_number;         // Numeric prefix for special types (unused?)
-    uint8_t is_array;              // Flag indicating this is an array type
-    uint8_t size_in_bytes;         // Type size in bytes (if known, e.g., Int<4>)
-    struct AST *array_dimensions;  // List of dimension expressions for arrays
-    struct Type **compound_types;  // Components of a compound type (e.g., tuple elements)
-    uint8_t compound_count;        // Number of components in compound type
-    struct ASTNode *angle_expression; // Expression inside angle brackets (generic parameters or size)
+    char *name;                     /* Base type name (e.g., "Int", "MyStruct").                  */
+    char *access_modifier;          /* Access modifier (reserved for future use).                 */
+    char **modifiers;               /* Array of type modifier strings (const, volatile, register, signed, unsigned). */
+    uint8_t modifier_count;         /* Number of modifiers.                                       */
+    uint8_t pointer_level;          /* Number of pointer indirections (@).                        */
+    uint8_t is_reference;           /* Whether the type is a reference (&).                       */
+    uint8_t prefix_number;          /* Numeric prefix (unused).                                   */
+    uint8_t is_array;               /* Flag indicating that this type is an array.                */
+    uint8_t size_in_bytes;          /* Explicit size in bytes (from type<size> syntax).           */
+    struct AST *array_dimensions;   /* AST for array dimensions (if array).                       */
+    struct Type **compound_types;   /* Nested compound types (for generics).                      */
+    uint8_t compound_count;         /* Number of compound types.                                  */
+    struct ASTNode *angle_expression; /* Expression inside angle brackets (e.g., type<expr>).     */
+    struct ASTNode *typeof_expression; /* Expression for typeof (typeof(expr)).                   */
 } Type;
 
 /*
- * Abstract syntax tree node structure.
- * Each node represents a language construct.
+ * AST node structure.
+ * Contains all information for a single syntactic node, including location data
+ * for accurate error reporting during semantic analysis.
  */
 typedef struct ASTNode {
-    ASTNodeType type;              // Node type from ASTNodeType enum
-    TokenType operation_type;      // Token type for operations (e.g., TOKEN_PLUS, TOKEN_EQUAL)
-    char *value;                   // String value for literals/identifiers/labels
-    struct ASTNode *left;          // Left child node (primary operand)
-    struct ASTNode *right;         // Right child node (secondary operand)
-    struct ASTNode *extra;         // Additional node for special cases (e.g., argument list, else block)
-    Type *variable_type;           // Type associated with the node (variable/function return type)
-    struct ASTNode *default_value; // Default value for parameters/variables (after =)
-    char *state_modifier;          // State modifier (var, let, const, etc.) from TOKEN_STATE
-    char *access_modifier;         // Access modifier (public/private) – reserved
+    ASTNodeType type;               /* Type of this AST node.                                     */
+    TokenType operation_type;       /* Token type for operations (e.g., TOKEN_PLUS).              */
+    char *value;                    /* String value (for literals, identifiers, labels).          */
+    uint16_t line;                  /* Source line number where the node starts.                  */
+    uint16_t column;                /* Source column number where the node starts.                */
+    struct ASTNode *left;           /* Left child (for binary/ternary operations).                */
+    struct ASTNode *right;          /* Right child (for binary/ternary operations).               */
+    struct ASTNode *extra;          /* Extra child or list (e.g., block statements, catch list).  */
+    Type *variable_type;            /* Type information associated with this node.                */
+    struct ASTNode *default_value;  /* Default value (for variable declarations).                 */
+    char *state_modifier;           /* State modifier (e.g., "var", "func", "struct").            */
+    char *access_modifier;          /* Access modifier (reserved).                                */
+    char *parent_struct;            /* Parent struct name (from 'extends' statement inside struct). */
+    char **modifiers;               /* Declaration modifiers (extern, static, const, volatile, register, signed, unsigned). */
+    uint8_t modifier_count;         /* Number of declaration modifiers.                           */
 } ASTNode;
 
 /*
- * Pool-based memory management for AST nodes.
- * Allows fast allocation/deallocation of nodes without fragmenting the heap.
+ * AST node pool.
+ * Provides fast allocation and reuse of ASTNode structures using a free list.
  */
 typedef struct ASTNodePool {
-    ASTNode *nodes;                // Array of AST nodes (contiguous memory)
-    uint16_t size;                 // Current number of allocated nodes (used slots)
-    uint16_t capacity;             // Maximum capacity of the pool (total slots)
-    uint16_t *free_list;           // List of free node indices (stack)
-    uint16_t free_top;             // Index of top element in free list
+    ASTNode *nodes;                 /* Contiguous array of nodes.                                 */
+    uint16_t size;                  /* Number of currently allocated nodes (unused).              */
+    uint16_t capacity;              /* Maximum number of nodes that can be stored.                */
+    uint16_t *free_list;            /* Stack of free indices for reuse.                           */
+    uint16_t free_top;              /* Top index of the free list stack.                          */
 } ASTNodePool;
 
 /*
- * Complete AST containing all parsed statements.
- * This is the top‑level structure returned by the parser.
+ * AST root structure.
+ * Holds the top-level statements of a program.
  */
 typedef struct AST {
-    ASTNode **nodes;               // Array of statement nodes
-    uint16_t count;                // Number of statements in the array
-    uint16_t capacity;             // Current capacity of the nodes array
-    ASTNodePool *pool;             // Memory pool used for all nodes in this AST
+    ASTNode **nodes;                /* Array of top-level AST nodes.                              */
+    uint16_t count;                 /* Number of nodes currently in the array.                    */
+    uint16_t capacity;              /* Capacity of the nodes array.                               */
+    ASTNodePool *pool;              /* Pool from which all nodes were allocated.                  */
 } AST;
 
 /*
- * Parser state tracking position and tokens during parsing.
- * Holds the current token stream and parsing context.
+ * Parser state.
+ * Maintains the token stream, current position, and the node pool.
  */
 typedef struct ParserState {
-    uint16_t current_token_position; // Current index in token_stream
-    Token *token_stream;            // Array of tokens from lexer
-    uint16_t total_tokens;          // Total number of tokens
-    ASTNodePool *pool;              // AST node memory pool (shared with AST)
-    bool in_declaration_context;    // Flag indicating we are inside a declaration (affects parsing rules)
+    uint16_t current_token_position; /* Index of the current token in the token stream.           */
+    Token *token_stream;            /* Array of tokens produced by the lexer.                     */
+    uint16_t total_tokens;          /* Total number of tokens in the stream.                      */
+    ASTNodePool *pool;              /* Node pool for AST allocations.                             */
+    bool in_declaration_context;    /* Flag indicating whether the parser is in a declaration context. */
 } ParserState;
 
 /*
- * Memory management functions.
+ * Helper macros for creating common AST node patterns.
+ * These macros simplify the construction of binary, unary, assignment, and ternary nodes.
  */
+#define AST_NEW_BINARY(state, op, left, right) \
+    create_ast_node(state, AST_BINARY_OPERATION, op, NULL, left, right, NULL)
+
+#define AST_NEW_UNARY(state, op, operand) \
+    create_ast_node(state, AST_UNARY_OPERATION, op, NULL, NULL, operand, NULL)
+
+#define AST_NEW_ASSIGNMENT(state, op, left, right) \
+    create_ast_node(state, ((op) == TOKEN_EQUAL) ? AST_ASSIGNMENT : AST_COMPOUND_ASSIGNMENT, op, NULL, left, right, NULL)
+
+#define AST_NEW_TERNARY(state, cond, true_expr, false_expr) \
+    create_ast_node(state, AST_TERNARY_OPERATION, 0, NULL, cond, true_expr, false_expr)
 
 /*
- * Create AST node memory pool.
- * @param initial_capacity: initial pool size (number of nodes)
- * @return: allocated pool or NULL on failure
+ * AST node pool management functions.
  */
 ASTNodePool *parser__ast_node_pool_create(uint16_t initial_capacity);
-
-/*
- * Destroy AST node pool and release memory.
- * @param pool: pool to destroy
- */
 void parser__ast_node_pool_destroy(ASTNodePool *pool);
-
-/*
- * Allocate a single node from the pool.
- * @param pool: source memory pool
- * @return: allocated node (zeroed) or NULL if pool is full
- */
 ASTNode *parser__ast_node_pool_alloc(ASTNodePool *pool);
-
-/*
- * Return a node to the pool for reuse.
- * @param pool: target memory pool
- * @param node: node to free (must belong to this pool)
- */
 void parser__ast_node_pool_free(ASTNodePool *pool, ASTNode *node);
 
 /*
- * Recursively free a type structure and all its components.
- * @param type: type structure to free
+ * Memory cleanup functions for types and AST structures.
  */
 void parser__free_type(Type *type);
-
-/*
- * Free an AST node and all its children recursively.
- * @param node: root node to free
- */
 void parser__free_ast_node(ASTNode *node);
-
-/*
- * Free an entire AST structure, including its nodes and pool.
- * @param ast: AST to free
- */
 void parser__free_ast(AST *ast);
 
 /*
- * Main parsing functions.
- */
-
-/*
  * Main parsing entry point.
- * @param tokens: token array from lexer
- * @param token_count: number of tokens
- * @return: complete AST or NULL on failure (errors reported via errhandler)
+ * Consumes a token array and returns the root AST of the program.
  */
 AST *parse(Token *tokens, uint16_t token_count);
 
