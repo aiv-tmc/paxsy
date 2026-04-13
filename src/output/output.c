@@ -4,33 +4,42 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+/* Internal trace flag and file for parser logging */
 static bool parser_trace_enabled = false;
 static FILE* trace_file          = NULL;
 
+/* Mapping from token type to printable name */
 const char* token_names[] = {
     [TOKEN_NUMBER]              = "NUMBER",
     [TOKEN_CHAR]                = "CHAR",
     [TOKEN_STRING]              = "STRING",
-    [TOKEN_NONE]                = "NONE",
-    [TOKEN_NULL]                = "NULL",
     [TOKEN_IF]                  = "IF",
     [TOKEN_ELSE]                = "ELSE",
+    [TOKEN_DO]                  = "DO",
+    [TOKEN_BREAK]               = "BREAK",
+    [TOKEN_CONTINUE]            = "CONTINUE",
+    [TOKEN_TRY]                 = "TRY",
+    [TOKEN_CATCH]               = "CATCH",
     [TOKEN_NOP]                 = "NOP",
     [TOKEN_HALT]                = "HALT",
-    [TOKEN_JUMP]                = "JUMP",
-    [TOKEN_FREE]                = "FREE",
-    [TOKEN_SIZEOF]              = "SIZEOF",
-    [TOKEN_PARSEOF]             = "PARSEOF",
-    [TOKEN_REALLOC]             = "REALLOC",
-    [TOKEN_ALLOC]               = "ALLOC",
+    [TOKEN_INTERFLAG]           = "INTERFLAG",
     [TOKEN_SIGNAL]              = "SIGNAL",
-    [TOKEN_PUSH]                = "PUSH",
-    [TOKEN_POP]                 = "POP",
+    [TOKEN_KILL]                = "KILL",
+    [TOKEN_JUMP]                = "JUMP",
     [TOKEN_RETURN]              = "RETURN",
-    [TOKEN_STATE]               = "STATE",
+    [TOKEN_SIZEOF]              = "SIZEOF",
+    [TOKEN_TYPEOF]              = "TYPEOF",
+    [TOKEN_ALLOC]               = "ALLOC",
+    [TOKEN_CALLOC]              = "CALLOC",
+    [TOKEN_REALLOC]             = "REALLOC",
+    [TOKEN_FREE]                = "FREE",
+    [TOKEN_NONE]                = "NONE",
+    [TOKEN_EXTENDS]             = "EXTENDS",
     [TOKEN_TYPE]                = "TYPE",
+    [TOKEN_CONSTMOD]            = "CONSTMOD",
     [TOKEN_ACCMOD]              = "ACCMOD",
-    [TOKEN_MODIFIER]            = "MODIFIER",
+    [TOKEN_SIGNEDMOD]           = "SIGNEDMOD",
+    [TOKEN_MEMMOD]              = "MEMMOD",
     [TOKEN_LOGICAL]             = "LOGICAL",
     [TOKEN_ID]                  = "ID",
     [TOKEN_PERCENT]             = "PERCENT",
@@ -77,11 +86,8 @@ const char* token_names[] = {
     [TOKEN_SAL_EQ]              = "SAL_EQ",
     [TOKEN_ROL_EQ]              = "ROL_EQ",
     [TOKEN_ROR_EQ]              = "ROR_EQ",
-    [TOKEN_DOUBLE_AMPERSAND]    = "DOUBLE_AMPERSAND",
-    [TOKEN_DOUBLE_AT]           = "DOUBLE_AT",
     [TOKEN_DOUBLE_PLUS]         = "DOUBLE_PLUS",
     [TOKEN_DOUBLE_MINUS]        = "DOUBLE_MINUS",
-    [TOKEN_INDICATOR]           = "INDICATOR",
     [TOKEN_THEN]                = "THEN",
     [TOKEN_LCURLY]              = "LCURLY",
     [TOKEN_RCURLY]              = "RCURLY",
@@ -90,12 +96,14 @@ const char* token_names[] = {
     [TOKEN_LPAREN]              = "LPAREN",
     [TOKEN_RPAREN]              = "RPAREN",
     [TOKEN_EOF]                 = "EOF",
-    [TOKEN_ERROR]               = "ERROR"
+    [TOKEN_ERRORCODE]           = "ERRORCODE"
 };
 
+/* Mapping from AST node type to printable name */
 const char* ast_node_names[] = {
     [AST_VARIABLE_DECLARATION]   = "VARIABLE_DECLARATION",
     [AST_VARIABLE_WITH_BODY]     = "VARIABLE_WITH_BODY",
+    [AST_VARIABLE_LIST]          = "VARIABLE_LIST",
     [AST_FUNCTION_DECLARATION]   = "FUNCTION_DECLARATION",
     [AST_ARRAY_ACCESS]           = "ARRAY_ACCESS",
     [AST_BINARY_OPERATION]       = "BINARY_OPERATION",
@@ -107,16 +115,16 @@ const char* ast_node_names[] = {
     [AST_COMPOUND_ASSIGNMENT]    = "COMPOUND_ASSIGNMENT",
     [AST_BLOCK]                  = "BLOCK",
     [AST_IF_STATEMENT]           = "IF_STATEMENT",
+    [AST_ELSE_STATEMENT]         = "ELSE_STATEMENT",
     [AST_RETURN]                 = "RETURN",
     [AST_FREE]                   = "FREE",
     [AST_SIZEOF]                 = "SIZEOF",
-    [AST_PARSEOF]                = "PARSEOF",
-    [AST_TYPEOF]                 = "TYPEOF",
     [AST_STACK]                  = "STACK",
     [AST_PUSH]                   = "PUSH",
     [AST_POP]                    = "POP",
     [AST_CAST]                   = "CAST",
     [AST_SIGNAL]                 = "SIGNAL",
+    [AST_INTERFLAG]              = "INTERFLAG",
     [AST_MULTI_INITIALIZER]      = "MULTI_INITIALIZER",
     [AST_LABEL_DECLARATION]      = "LABEL_DECLARATION",
     [AST_JUMP]                   = "JUMP",
@@ -138,13 +146,15 @@ const char* ast_node_names[] = {
     [AST_DO_LOOP]                = "DO_LOOP",
     [AST_BREAK]                  = "BREAK",
     [AST_CONTINUE]               = "CONTINUE",
-    [AST_TERNARY_OPERATION]      = "TERNARY_OPERATION"
+    [AST_TERNARY_OPERATION]      = "TERNARY_OPERATION",
+    [AST_TYPEOF]                 = "TYPEOF",
+    [AST_KILL]                   = "KILL",
+    [AST_TRY]                    = "TRY",
+    [AST_CATCH]                  = "CATCH"
 };
 
-/**
- * @brief Convert an initialization state to a human-readable string.
- * @param state Initialization state.
- * @return Constant string describing the state.
+/*
+ * Convert an initialization state to a human-readable string.
  */
 static const char* get_init_state_string(InitState state) {
     switch (state) {
@@ -157,10 +167,8 @@ static const char* get_init_state_string(InitState state) {
     }
 }
 
-/**
- * @brief Convert a scope level to a human-readable string.
- * @param level Scope level.
- * @return Constant string describing the scope.
+/*
+ * Convert a scope level to a human-readable string.
  */
 static const char* get_scope_level_string(ScopeLevel level) {
     switch (level) {
@@ -173,20 +181,15 @@ static const char* get_scope_level_string(ScopeLevel level) {
     }
 }
 
-/**
- * @brief Print indentation spaces for tree display.
- * @param level Number of spaces to print.
- * @param out   Output file stream.
+/*
+ * Print indentation spaces for tree display.
  */
 static inline void print_indent(uint8_t level, FILE* out) {
     for (uint8_t i = 0; i < level; i++) fputc(' ', out);
 }
 
-/**
- * @brief Recursively print an AST node and its children with indentation.
- * @param node  Current node.
- * @param depth Current indentation depth.
- * @param out   Output file stream.
+/*
+ * Recursively print an AST node and its children with indentation.
  */
 static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
     if (!node) return;
@@ -207,6 +210,11 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
     if (node->access_modifier) {
         print_indent(depth + 1, out);
         fprintf(out, "Access Modifier: %s\n", node->access_modifier);
+    }
+
+    if (node->parent_struct) {
+        print_indent(depth + 1, out);
+        fprintf(out, "Parent Struct: %s\n", node->parent_struct);
     }
 
     if (node->variable_type) {
@@ -236,23 +244,56 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
         print_indent(depth + 1, out);
         fputs("Extra:\n", out);
 
-        if (node->type == AST_BLOCK || node->type == AST_FUNCTION_DECLARATION) {
-            AST* ast_list = (AST*)node->extra;
-            if (ast_list) {
-                for (uint16_t i = 0; i < ast_list->count; i++)
-                    print_ast_node_recursive(ast_list->nodes[i], depth + 2, out);
+        /* Handle node types where 'extra' points to an AST* (list of nodes) */
+        if (node->type == AST_VARIABLE_LIST) {
+            AST* decl_list = (AST*)node->extra;
+            if (decl_list && decl_list->nodes) {
+                for (uint16_t i = 0; i < decl_list->count; i++) {
+                    print_ast_node_recursive(decl_list->nodes[i], depth + 2, out);
+                }
             }
-        } else {
+        }
+        else if (node->type == AST_BLOCK || node->type == AST_FUNCTION_DECLARATION) {
+            AST* stmt_list = (AST*)node->extra;
+            if (stmt_list && stmt_list->nodes) {
+                for (uint16_t i = 0; i < stmt_list->count; i++) {
+                    print_ast_node_recursive(stmt_list->nodes[i], depth + 2, out);
+                }
+            }
+        }
+        else if (node->type == AST_MULTI_INITIALIZER) {
+            AST* init_list = (AST*)node->extra;
+            if (init_list && init_list->nodes) {
+                for (uint16_t i = 0; i < init_list->count; i++) {
+                    print_ast_node_recursive(init_list->nodes[i], depth + 2, out);
+                }
+            }
+        }
+        else if (node->type == AST_TRY) {
+            AST* catch_list = (AST*)node->extra;
+            if (catch_list && catch_list->nodes) {
+                for (uint16_t i = 0; i < catch_list->count; i++) {
+                    print_ast_node_recursive(catch_list->nodes[i], depth + 2, out);
+                }
+            }
+        }
+        else if (node->type == AST_CATCH) {
+            /* For AST_CATCH, value holds the error code, extra is the block */
+            print_ast_node_recursive(node->extra, depth + 2, out);
+        }
+        else if (node->type == AST_ELSE_STATEMENT) {
+            /* Standalone else: extra contains the body (block or statement) */
+            print_ast_node_recursive(node->extra, depth + 2, out);
+        }
+        else {
+            /* Default: treat extra as a single ASTNode* */
             print_ast_node_recursive(node->extra, depth + 2, out);
         }
     }
 }
 
-/**
- * @brief Recursively count AST nodes and update statistics.
- * @param node         Current node.
- * @param total_nodes  Pointer to total node counter.
- * @param type_counts  Array of counters per node type.
+/*
+ * Recursively count AST nodes and update statistics.
  */
 static void count_nodes(ASTNode* node, uint32_t* total_nodes, uint32_t* type_counts) {
     if (!node) return;
@@ -726,8 +767,6 @@ void print_type_info(Type* type, FILE* out) {
         fprintf(out, "@%d", type->pointer_level);
     if (type->is_reference)
         fprintf(out, "&%d", type->is_reference);
-    if (type->is_register)
-        fprintf(out, "%%%d", type->is_register);
     if (type->prefix_number)
         fprintf(out, "%d", type->prefix_number);
 
