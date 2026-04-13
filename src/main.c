@@ -96,12 +96,6 @@ static char* strdup_safe(const char* s) {
 static int collect_filename(const char* fname, Arguments* args) {
     /* Validate extension */
     size_t len = strlen(fname);
-    if (len < 3 || !str_endw(fname, ".px")) {
-        errhandler__report_error(ERROR_CODE_IO_FILE_NOT_FOUND, 0, 0, "file",
-                                 "File '%s' has invalid extension. Only .px files are supported.",
-                                 fname);
-        return 0;
-    }
 
     /* Check for duplicates */
     for (size_t i = 0; i < args->file_count; ++i) {
@@ -150,7 +144,6 @@ static void print_usage(void) {
            "  \033[1m -wl --write-lexer\033[0m <source>             Display lexer output only\n"
            "  \033[1m -wp --write-parser\033[0m <source>            Display parser output only\n"
            "  \033[1m -ws --write-semantic\033[0m <source>          Display semantic analysis output\n"
-           "  \033[1m -wsl --write-semantic-log\033[0m <source>     Display semantic analysis log\n"
            "  \033[1m -w  --write\033[0m <source>                   Display all outputs (lexer, parser, semantic)\n"
            "  \033[1m -l  --log\033[0m <source>                     Write all outputs to files\n"
            "  \033[1m -ll --log-lexer\033[0m <source>               Write lexer output to file\n"
@@ -253,11 +246,6 @@ static int parse_arguments(int argc, char* argv[], Arguments* args) {
             if (rest) collect_filename(rest, args);
             continue;
         }
-        if (arg_matches(arg, "--write-semantic-log", &rest) || arg_matches(arg, "-wsl", &rest)) {
-            args->flags |= F_WRITE_SEMANTIC | F_LOG_SEMANTIC_LOG;
-            if (rest) collect_filename(rest, args);
-            continue;
-        }
         if (arg_matches(arg, "--write", &rest) || arg_matches(arg, "-w", &rest)) {
             args->flags |= F_WRITE_LEXER | F_WRITE_PARSER | F_WRITE_SEMANTIC;
             if (rest) collect_filename(rest, args);
@@ -302,13 +290,7 @@ static int parse_arguments(int argc, char* argv[], Arguments* args) {
         }
 
         if (arg_matches(arg, "--compile", &rest) || arg_matches(arg, "-c", &rest)) {
-            if (mode_seen) {
-                errhandler__report_error(ERROR_CODE_INPUT_MULTI_MOD_FLAGS, 0, 0, "input",
-                                         "Multiple mode flags specified");
-            } else {
                 args->flags |= F_MODE_COMPILE;
-                mode_seen = 1;
-            }
             if (rest) collect_filename(rest, args);
             continue;
         }
@@ -629,13 +611,6 @@ static int process_one_file(const char* filename,
         if (flags & F_LOG_SEMANTIC_LOG) {
             write_debug_output(filename, flags, F_LOG_SEMANTIC_LOG, SUFFIX_SEMANTIC_LOG,
                                semantic_log_writer, *semantic_ctx);
-        }
-
-        /* In compile mode, if there are semantic errors, print them to stdout */
-        if ((flags & F_MODE_COMPILE) && !semantic_ok) {
-            print_section_header("SEMANTIC ANALYSIS - ERRORS", stdout);
-            print_semantic_analysis(*semantic_ctx, stdout);
-            fprintf(stdout, "\n");
         }
     }
 
