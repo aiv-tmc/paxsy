@@ -1,4 +1,4 @@
-#if !defed(TYPE__LIB)
+#if !defined(TYPE__LIB)
 #define TYPE__LIB
 
 /**
