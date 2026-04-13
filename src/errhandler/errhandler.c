@@ -386,6 +386,55 @@ void errhandler__set_copy_source(bool enable) {
     em.copy_source_lines = enable;
 }
 
+int errhandler__load_source_file(const char* filename) {
+    if (!filename) return -1;
+    FILE* f = fopen(filename, "r");
+    if (!f) return -1;
+
+    /* Free any previously stored source lines if they were copied */
+    if (em.source_lines && em.copy_source_lines) {
+        for (uint32_t i = 0; i < em.source_line_count; i++) {
+            free((void*)em.source_lines[i]);
+        }
+    }
+    free((void*)em.source_lines);
+    em.source_lines = NULL;
+    em.source_line_count = 0;
+
+    /* Read file line by line */
+    char** lines = NULL;
+    uint16_t line_count = 0;
+    char buffer[4096];
+    while (fgets(buffer, sizeof(buffer), f)) {
+        /* Remove trailing newline (keep for display) */
+        size_t len = strlen(buffer);
+        if (len > 0 && buffer[len-1] == '\n') buffer[len-1] = '\0';
+        char* line = duplicate_string(buffer);
+        if (!line) {
+            for (uint16_t i = 0; i < line_count; i++) free(lines[i]);
+            free(lines);
+            fclose(f);
+            return -1;
+        }
+        char** new_lines = realloc(lines, (line_count + 1) * sizeof(char*));
+        if (!new_lines) {
+            free(line);
+            for (uint16_t i = 0; i < line_count; i++) free(lines[i]);
+            free(lines);
+            fclose(f);
+            return -1;
+        }
+        lines = new_lines;
+        lines[line_count++] = line;
+    }
+    fclose(f);
+
+    em.source_lines = (const char**)lines;
+    em.source_line_count = line_count;
+    em.copy_source_lines = true;  /* we own the copies */
+    return 0;
+}
+
 void errhandler__print_errors(void) {
     for (uint32_t i = 0; i < em.error_count; i++) {
         print_error_entry(&em.error_entries[i], false);
@@ -429,7 +478,13 @@ void errhandler__free_error_manager(void) {
     em.warning_count = 0;
     em.warning_capacity = 0;
 
-    /* Clear source references */
+    /* Clear source references (and free if we own them) */
+    if (em.source_lines && em.copy_source_lines) {
+        for (uint32_t i = 0; i < em.source_line_count; i++) {
+            free((void*)em.source_lines[i]);
+        }
+    }
+    free((void*)em.source_lines);
     em.source_lines = NULL;
     em.source_line_count = 0;
     em.copy_source_lines = true;   /* reset to default */
