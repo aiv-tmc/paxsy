@@ -7,33 +7,18 @@ SRCDIR = src
 # Version information
 GENERATION = "beta 4"
 NAME = "Rowan"
-VERSION = "0.4.1_8a"
-DATE = "2026FEB08"
+VERSION = "0.4.2a"
+DATE = "2026APR13"
 
 # Compilation flags with version definitions
-CFLAGS = -std=c99 \
+CFLAGS = -std=c11 \
          -DGENERATION=\"$(GENERATION)\" \
          -DNAME=\"$(NAME)\" \
          -DVERSION=\"v$(VERSION)\" \
          -DDATE=\"$(DATE)\"
 
 # Source files
-SRC = src/preprocessor/preprocessor.c \
-      src/preprocessor/defmacros/defmacros.c \
-      src/preprocessor/directive/include/include.c \
-      src/preprocessor/directive/define/macro.c \
-      src/preprocessor/directive/define/define.c \
-      src/preprocessor/directive/conditional/conditional.c \
-      src/lexer/lexer.c \
-      src/parser/literals.c \
-      src/parser/parser.c \
-      src/semantic/semantic.c \
-      src/output/output.c \
-      src/errhandler/errhandler.c \
-      src/main.c \
-      src/utils/str_utils.c \
-      src/utils/char_utils.c \
-      src/utils/memory_utils.c
+SRC := $(shell find $(SRCDIR) -type f -name '*.c')
 
 # Determine architecture and OS
 ARCH := $(shell uname -m)
@@ -42,12 +27,8 @@ UNAME_S := $(shell uname -s)
 # Convert OS to a short identifier
 ifeq ($(UNAME_S), Linux)
     OS_SUFFIX := gnu_linux
-    INSTALL_PATH := /usr/bin
-    LIB_BASE := /usr
 else ifeq ($(UNAME_S), Darwin)
     OS_SUFFIX := darwin
-    INSTALL_PATH := /usr/bin
-    LIB_BASE := /usr
 else ifeq ($(findstring MINGW32, $(UNAME_S)), MINGW32)
     OS_SUFFIX := mingw32
 else ifeq ($(findstring MINGW64, $(UNAME_S)), MINGW64)
@@ -56,22 +37,19 @@ else ifeq ($(findstring CYGWIN, $(UNAME_S)), CYGWIN)
     OS_SUFFIX := cygwin
 else ifeq ($(UNAME_S), FreeBSD)
     OS_SUFFIX := freebsd
-    INSTALL_PATH := /usr/bin
-    LIB_BASE := /usr
 else
     OS_SUFFIX := $(shell echo $(UNAME_S) | tr '[:upper:]' '[:lower:]')
 endif
 
+INSTALL_PATH := /usr/bin
+LIB_BASE := /usr
+
 SYS_ARCH := $(ARCH)-$(OS_SUFFIX)
-# Пути для библиотек собираются с учётом LIB_BASE
 LIB_HEADER_PATH := $(LIB_BASE)/lib/paxsy/$(SYS_ARCH)/incl
 LIB_INCLUDE_PATH := $(LIB_BASE)/include/paxsy
 
-# Используем /bin/bash для надёжной работы read и прочих конструкций
 SHELL := /bin/bash
 
-# Флаг для автоматической установки библиотек (можно передать при вызове)
-# make install-libs-auto - установит библиотеки без запроса
 INSTALL_LIBS ?= ask
 
 # Default target
