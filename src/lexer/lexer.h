@@ -2,7 +2,6 @@
 #define LEXER_H
 
 #include <stdint.h>
-#include "../utils/str_utils.h"
 
 /**
  * @enum TokenType
