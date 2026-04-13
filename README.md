@@ -20,12 +20,10 @@ You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#
 To add syntax highlighting in **vim**:
 
 1. Move the **paxsy.vim** file to: `~/.vim/syntax/`
+`$ cp vim_highlight/syntax/paxsy.vim ~/.vim/syntax/paxsy.vim`
 
 2. Move the contents of the **vim_highlight/ftdetect/** file to: `~/.vim/ftdetect/`
-
-3. Make sure that in the file `~/.vimrc` has the **industry style installed**
-
-P.S. To activate custom highlighting in the file `~/.vim/syntax/paxsy.vim` comment out **67-80** lines (optionally **14**, **27**, **33** and **18-20** more lines)
+`$ cp vim_highlight/ftdetect/paxsy.vim ~/.vim/ftdetect/paxsy.vim`
 
 <!--Documentation-->
 ## Documentation
