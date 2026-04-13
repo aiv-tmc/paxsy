@@ -143,7 +143,7 @@ static int64_t parse_identifier(ExprParser* parser);
  * @brief Skips whitespace characters (space, tab, newline, carriage return).
  */
 static void skip_ws(ExprParser* parser) {
-    while (char_is_whitespace(*parser->p) || *parser->p == '\n' || *parser->p == '\r')
+    while (u__char_is_whitespace(*parser->p) || *parser->p == '\n' || *parser->p == '\r')
         parser->p++;
 }
 
@@ -450,13 +450,13 @@ static int64_t parse_primary(ExprParser* parser) {
         }
         return val;
     }
-    if (char_is_digit(*parser->p)) {
+    if (u__char_is_digit(*parser->p)) {
         return parse_number(parser);
     }
-    if (str_startw(parser->p, "defined")) {
+    if (u__str_startw(parser->p, "defined")) {
         return parse_defined(parser);
     }
-    if (char_is_identifier_start(*parser->p)) {
+    if (u__char_is_identifier_start(*parser->p)) {
         return parse_identifier(parser);
     }
     errhandler__report_error(ERROR_CODE_PP_INVALID_DIR,
@@ -472,7 +472,7 @@ static int64_t parse_primary(ExprParser* parser) {
  * Syntax: defined identifier or defined ( identifier ).
  */
 static int64_t parse_defined(ExprParser* parser) {
-    if (!str_startw(parser->p, "defined")) {
+    if (!u__str_startw(parser->p, "defined")) {
         parser->error = 1;
         return 0;
     }
@@ -482,7 +482,7 @@ static int64_t parse_defined(ExprParser* parser) {
     int paren = expect_char(parser, '(');
     skip_ws(parser);
 
-    if (!char_is_identifier_start(*parser->p)) {
+    if (!u__char_is_identifier_start(*parser->p)) {
         errhandler__report_error(ERROR_CODE_PP_INVALID_DIR,
                                  parser->state->line, parser->state->column,
                                  "preproc", "defined() requires an identifier");
@@ -490,7 +490,7 @@ static int64_t parse_defined(ExprParser* parser) {
         return 0;
     }
     const char* id_start = parser->p;
-    while (char_is_identifier_char(*parser->p))
+    while (u__char_is_identifier_char(*parser->p))
         parser->p++;
     size_t id_len = parser->p - id_start;
     char id[256];
@@ -518,7 +518,7 @@ static int64_t parse_defined(ExprParser* parser) {
  */
 static int64_t parse_number(ExprParser* parser) {
     const char* start = parser->p;
-    while (char_is_digit(*parser->p))
+    while (u__char_is_digit(*parser->p))
         parser->p++;
     size_t len = parser->p - start;
     char buf[64];
@@ -547,7 +547,7 @@ static int64_t parse_number(ExprParser* parser) {
  */
 static int64_t parse_identifier(ExprParser* parser) {
     const char* start = parser->p;
-    while (char_is_identifier_char(*parser->p))
+    while (u__char_is_identifier_char(*parser->p))
         parser->p++;
     size_t len = parser->p - start;
     char id[256];
@@ -609,15 +609,15 @@ void DPPF__ifdef(PreprocessorState* state, const char* args) {
 
     /* Extract macro name */
     const char* p = args;
-    while (char_is_whitespace(*p) || *p == '\n' || *p == '\r') p++;
-    if (!char_is_identifier_start(*p)) {
+    while (u__char_is_whitespace(*p) || *p == '\n' || *p == '\r') p++;
+    if (!u__char_is_identifier_start(*p)) {
         errhandler__report_error(ERROR_CODE_PP_INVALID_DIR,
                                  state->line, state->column,
                                  "preproc", "#ifdef requires an identifier");
         return;
     }
     const char* id_start = p;
-    while (char_is_identifier_char(*p)) p++;
+    while (u__char_is_identifier_char(*p)) p++;
     size_t id_len = p - id_start;
     char id[256];
     if (id_len >= sizeof(id)) id_len = sizeof(id) - 1;
@@ -648,15 +648,15 @@ void DPPF__ifndef(PreprocessorState* state, const char* args) {
     int parent_skip = !conditional_should_output(state);
 
     const char* p = args;
-    while (char_is_whitespace(*p) || *p == '\n' || *p == '\r') p++;
-    if (!char_is_identifier_start(*p)) {
+    while (u__char_is_whitespace(*p) || *p == '\n' || *p == '\r') p++;
+    if (!u__char_is_identifier_start(*p)) {
         errhandler__report_error(ERROR_CODE_PP_INVALID_DIR,
                                  state->line, state->column,
                                  "preproc", "#ifndef requires an identifier");
         return;
     }
     const char* id_start = p;
-    while (char_is_identifier_char(*p)) p++;
+    while (u__char_is_identifier_char(*p)) p++;
     size_t id_len = p - id_start;
     char id[256];
     if (id_len >= sizeof(id)) id_len = sizeof(id) - 1;
