@@ -1,4 +1,5 @@
 #include "macro.h"
+#include "../../../utils/str_utils.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -8,19 +9,6 @@
  * Must be a power of two to enable efficient doubling via left shift.
  */
 #define MACRO_TABLE_INITIAL_CAPACITY 32
-
-/*
- * Internal: duplicate a string using malloc.
- * (Standard strdup may not be available on all platforms.)
- */
-static char* strdup(const char* s) {
-    if (!s) return NULL;
-
-    size_t len = strlen(s) + 1;
-    char* copy = malloc(len);
-    if (copy) memcpy(copy, s, len);
-    return copy;
-}
 
 /*
  * Create a new macro table.
@@ -106,7 +94,7 @@ int macro_table_add(MacroTable* table, const char* name, const char* value,
             }
 
             /* Set new values. */
-            macro->value = strdup(value);
+            macro->value = u__strdup_safe(value);
             macro->has_parameters = has_parameters;
             macro->param_count = param_count;
             macro->param_names = param_names;   /* Takes ownership. */
@@ -120,8 +108,8 @@ int macro_table_add(MacroTable* table, const char* name, const char* value,
 
     Macro* macro = &table->macros[table->count];
 
-    macro->name = strdup(name);
-    macro->value = strdup(value);
+    macro->name = u__strdup_safe(name);
+    macro->value = u__strdup_safe(value);
     macro->name_len = strlen(name);
     macro->has_parameters = has_parameters;
     macro->param_count = param_count;
