@@ -22,8 +22,6 @@ typedef enum {
     TOKEN_DO,              /**< `do` keyword */
     TOKEN_BREAK,           /**< `break` keyword */
     TOKEN_CONTINUE,        /**< `continue` keyword */
-    TOKEN_TRY,             /**< `try` keyword */
-    TOKEN_CATCH,           /**< `catch` keyword */
     TOKEN_NOP,             /**< `nop` keyword */
     TOKEN_HALT,            /**< `halt` keyword */
     TOKEN_INTERFLAG,       /**< `interflag` keyword */
