@@ -54,7 +54,7 @@ static ASTNode *parse_nop_statement(ParserState *state);
 static ASTNode *parse_halt_statement(ParserState *state);
 static ASTNode *parse_kill_statement(ParserState *state);
 static ASTNode *parse_try_statement(ParserState *state);
-static ASTNode *parse_else_statement(ParserState *state);   /* Standalone else statement handler */
+static ASTNode *parse_else_statement(ParserState *state);
 static ASTNode *parse_expression(ParserState *state);
 static ASTNode *parse_assignment_expression(ParserState *state);
 static ASTNode *parse_ternary_expression(ParserState *state);
@@ -241,7 +241,6 @@ static bool statement_requires_semicolon(ASTNode *node) {
         case AST_IF_STATEMENT:
         case AST_DO_LOOP:
         case AST_LABEL_DECLARATION:
-        case AST_TRY:
         case AST_ELSE_STATEMENT:   /* Standalone else does not need an extra semicolon (body may have its own). */
             return false;
         case AST_FUNCTION_DECLARATION:
@@ -1585,101 +1584,6 @@ static ASTNode *parse_kill_statement(ParserState *state) {
 }
 
 /*
- * Parses a try-catch-else statement.
- * Syntax: try { ... } catch error_code { ... } [ else { ... } ]
- */
-static ASTNode *parse_try_statement(ParserState *state) {
-    CONSUME_TOKEN(state, TOKEN_TRY);
-    ASTNode *try_block = parse_block(state);
-    if (!try_block) return NULL;
-
-    AST *catch_list = safe_malloc(state, sizeof(AST));
-    catch_list->nodes = NULL;
-    catch_list->count = 0;
-    catch_list->capacity = 0;
-
-    while (CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_CATCH)) {
-        advance_token(state);
-        if (!CURRENT_TOKEN_TYPE_MATCHES(state, TOKEN_NUMBER)) {
-            parser__free_ast(catch_list);
-            parser__free_ast_node(try_block);
-            REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC,
-                               "Expected error code after 'catch'");
-        }
-        Token *num_tok = get_current_token(state);
-        if (strncmp(num_tok->value, "0x", 2) != 0 &&
-            strncmp(num_tok->value, "0X", 2) != 0) {
-            parser__free_ast(catch_list);
-            parser__free_ast_node(try_block);
-            REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC,
-                               "Error code must be a hexadecimal number starting with 0x");
-        }
-        char *error_code_str = safe_strdup(state, num_tok->value);
-        advance_token(state);
-        ASTNode *catch_block = parse_block(state);
-        if (!catch_block) {
-            free(error_code_str);
-            parser__free_ast(catch_list);
-            parser__free_ast_node(try_block);
-            return NULL;
-        }
-        ASTNode *catch_node = create_ast_node(state, AST_CATCH, 0,
-                                              error_code_str, catch_block, NULL, NULL);
-        if (!catch_node) {
-            free(error_code_str);
-            parser__free_ast_node(catch_block);
-            parser__free_ast(catch_list);
-            parser__free_ast_node(try_block);
-            return NULL;
-        }
-        if (!add_ast_node_to_list(catch_list, catch_node)) {
-            parser__ast_node_pool_free(state->pool, catch_node);
-            parser__free_ast(catch_list);
-            parser__free_ast_node(try_block);
-            return NULL;
-        }
-    }
-
-    ASTNode *else_block = NULL;
-    if (ATTEMPT_CONSUME_TOKEN(state, TOKEN_ELSE)) {
-        else_block = parse_block(state);
-        if (!else_block) {
-            parser__free_ast(catch_list);
-            parser__free_ast_node(try_block);
-            REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC,
-                               "Expected '{' after else in try-catch");
-        }
-        ASTNode *default_catch = create_ast_node(state, AST_CATCH, 0, NULL, else_block, NULL, NULL);
-        if (!default_catch) {
-            parser__free_ast_node(else_block);
-            parser__free_ast(catch_list);
-            parser__free_ast_node(try_block);
-            return NULL;
-        }
-        if (!add_ast_node_to_list(catch_list, default_catch)) {
-            parser__ast_node_pool_free(state->pool, default_catch);
-            parser__free_ast(catch_list);
-            parser__free_ast_node(try_block);
-            return NULL;
-        }
-    }
-
-    if (catch_list->count == 0) {
-        parser__free_ast(catch_list);
-        REPORT_PARSE_ERROR(state, ERROR_CODE_SYNTAX_GENERIC,
-                           "try statement must have at least one catch or else block");
-    }
-
-    ASTNode *try_node = create_ast_node(state, AST_TRY, 0, NULL,
-                                        try_block, NULL, (ASTNode*)catch_list);
-    if (!try_node) {
-        parser__free_ast(catch_list);
-        parser__free_ast_node(try_block);
-    }
-    return try_node;
-}
-
-/*
  * Parses a standalone else statement.
  * Syntax: else ( { block } | => statement )
  * This allows 'else' to appear independently when an 'if' or 'do' body used '=>'.
@@ -2357,7 +2261,6 @@ static ASTNode *parse_statement(ParserState *state) {
         case TOKEN_HALT:      return parse_halt_statement(state);
         case TOKEN_KILL:      return parse_kill_statement(state);
         case TOKEN_AT:        return parse_label_declaration(state);
-        case TOKEN_TRY:       return parse_try_statement(state);
         case TOKEN_ELSE:      return parse_else_statement(state);   /* Standalone else */
         default: break;
     }
@@ -2510,17 +2413,6 @@ void parser__free_ast_node(ASTNode *node) {
                 free(decl_list->nodes);
             }
             free(decl_list);
-        } else if (node->type == AST_TRY) {
-            AST *catch_ast = (AST*)node->extra;
-            if (catch_ast->nodes) {
-                for (uint16_t i = 0; i < catch_ast->count; i++) {
-                    parser__free_ast_node(catch_ast->nodes[i]);
-                }
-                free(catch_ast->nodes);
-            }
-            free(catch_ast);
-        } else if (node->type == AST_CATCH) {
-            free(node->value);
         } else {
             parser__free_ast_node(node->extra);
         }
