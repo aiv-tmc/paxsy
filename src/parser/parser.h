@@ -59,8 +59,6 @@ typedef enum {
     AST_TERNARY_OPERATION,      /* Ternary conditional (cond ? {true} : {false}).                  */
     AST_TYPEOF,                 /* Typeof operator.                                                */
     AST_KILL,                   /* Kill statement (kill).                                          */
-    AST_TRY,                    /* Try statement: try { ... } catch ... [else { ... }].           */
-    AST_CATCH,                  /* Catch clause inside a try statement.                            */
     AST_ELSE_STATEMENT          /* Standalone else statement (e.g., else => nop;).                */
 } ASTNodeType;
 
@@ -180,4 +178,4 @@ void parser__free_ast(AST *ast);
  */
 AST *parse(Token *tokens, uint16_t token_count);
 
-#endif
+#endif /* PARSER_H */
