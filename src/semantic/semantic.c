@@ -9,6 +9,7 @@
 
 #define HASH_TABLE_SIZE 64
 
+/* Internal helper functions prototypes. */
 static uint32_t hash_string(const char* str);
 static SymbolTable* create_symbol_table(SymbolTable* parent, ScopeLevel level);
 static void destroy_symbol_table(SymbolTable* table);
@@ -26,16 +27,20 @@ static SymbolEntry* find_member_in_compound(SymbolEntry* compound,
 static DataType determine_numeric_type(const char* value,
                                        bool* is_int_suffix,
                                        bool* is_real_suffix);
-static bool contains_return(ASTNode* node);
 static bool check_prototype_match(SemanticContext* ctx,
                                   SymbolEntry* existing,
                                   FunctionSignature* new_sig,
                                   uint16_t line, uint16_t column);
 static bool final_verification(SemanticContext* ctx);
+static FunctionParam* clone_function_params(FunctionParam* src);
+static bool ast_has_left(const ASTNode* node);
+static bool ast_has_right(const ASTNode* node);
+static bool ast_has_extra(const ASTNode* node);
+static bool ast_is_type(const ASTNode* node, ASTNodeType expected);
+static bool contains_return(ASTNode* node);
+static bool process_variable_declaration(SemanticContext* ctx, ASTNode* node);
 
-/*
- * Safe accessors for ASTNode fields that may be NULL.
- */
+/* Safe accessors for ASTNode fields that may be NULL. */
 static bool ast_has_left(const ASTNode* node) {
     return node != NULL && node->left != NULL;
 }
@@ -52,6 +57,7 @@ static bool ast_is_type(const ASTNode* node, ASTNodeType expected) {
     return node != NULL && node->type == expected;
 }
 
+/* Compute a simple hash for a string using djb2 algorithm. */
 static uint32_t hash_string(const char* str) {
     uint32_t hash = 5381;
     int c;
@@ -61,6 +67,7 @@ static uint32_t hash_string(const char* str) {
     return hash;
 }
 
+/* Create a new symbol table with the given parent and scope level. */
 static SymbolTable* create_symbol_table(SymbolTable* parent, ScopeLevel level) {
     SymbolTable* table = (SymbolTable*)calloc(1, sizeof(SymbolTable));
     if (!table) return NULL;
@@ -83,9 +90,12 @@ static SymbolTable* create_symbol_table(SymbolTable* parent, ScopeLevel level) {
     return table;
 }
 
+/* Recursively destroy a symbol table and all its children.
+ * Frees all associated symbol entries and their data. */
 static void destroy_symbol_table(SymbolTable* table) {
     if (!table) return;
 
+    /* Destroy children first. */
     SymbolTable* child = table->children;
     while (child) {
         SymbolTable* next = child->next_child;
@@ -93,6 +103,7 @@ static void destroy_symbol_table(SymbolTable* table) {
         child = next;
     }
 
+    /* Free all entries in this table. */
     for (size_t i = 0; i < table->capacity; i++) {
         SymbolEntry* entry = table->entries[i];
         while (entry) {
@@ -107,9 +118,7 @@ static void destroy_symbol_table(SymbolTable* table) {
                 while (param) {
                     FunctionParam* next_param = param->next;
                     free(param->name);
-                    if (param->default_value) {
-                        parser__free_ast_node(param->default_value);
-                    }
+                    /* default_value is part of AST and will be freed elsewhere. */
                     free(param);
                     param = next_param;
                 }
@@ -135,6 +144,7 @@ static void destroy_symbol_table(SymbolTable* table) {
     free(table);
 }
 
+/* Look up a symbol by name within a specific symbol table. */
 static SymbolEntry* find_symbol_in_table(SymbolTable* table, const char* name) {
     if (!table || !name) return NULL;
 
@@ -149,6 +159,7 @@ static SymbolEntry* find_symbol_in_table(SymbolTable* table, const char* name) {
     return NULL;
 }
 
+/* Insert a symbol entry into the hash table. */
 static bool add_symbol_to_table(SymbolTable* table, SymbolEntry* entry) {
     if (!table || !entry) return false;
 
@@ -157,6 +168,45 @@ static bool add_symbol_to_table(SymbolTable* table, SymbolEntry* entry) {
     table->entries[idx] = entry;
     table->count++;
     return true;
+}
+
+/* Create a deep copy of a function parameter list.
+ * The caller is responsible for freeing the copy when no longer needed. */
+static FunctionParam* clone_function_params(FunctionParam* src) {
+    if (!src) return NULL;
+
+    FunctionParam* head = NULL;
+    FunctionParam* tail = NULL;
+
+    while (src) {
+        FunctionParam* copy = (FunctionParam*)malloc(sizeof(FunctionParam));
+        if (!copy) {
+            /* Allocation failed: clean up already copied parameters. */
+            while (head) {
+                FunctionParam* tmp = head->next;
+                free(head->name);
+                free(head);
+                head = tmp;
+            }
+            return NULL;
+        }
+
+        copy->name = src->name ? u__strduplic(src->name) : NULL;
+        copy->type = src->type;
+        copy->type_info = src->type_info;
+        copy->default_value = src->default_value;
+        copy->next = NULL;
+
+        if (!head) {
+            head = copy;
+            tail = copy;
+        } else {
+            tail->next = copy;
+            tail = copy;
+        }
+        src = src->next;
+    }
+    return head;
 }
 
 SemanticContext* semantic__create_context(void) {
@@ -235,6 +285,7 @@ void semantic__exit_loop_scope(SemanticContext* ctx) {
     semantic__exit_scope(ctx);
 }
 
+/* Determine the coarse DataType from a detailed Type structure. */
 static DataType type_from_type_info(Type* type_info, SemanticContext* ctx) {
     if (!type_info) return TYPE_UNKNOWN;
 
@@ -255,6 +306,8 @@ static DataType type_from_type_info(Type* type_info, SemanticContext* ctx) {
     return TYPE_UNKNOWN;
 }
 
+/* Check if a name collides with an existing symbol in the current scope.
+ * Reports an error and returns true if a collision is found. */
 static bool check_name_collision_in_current_scope(SemanticContext* ctx,
                                                   const char* name,
                                                   uint16_t line, uint16_t column) {
@@ -270,6 +323,7 @@ static bool check_name_collision_in_current_scope(SemanticContext* ctx,
     return false;
 }
 
+/* Emit a warning if the new declaration shadows an outer symbol. */
 static void warn_if_shadowing(SemanticContext* ctx, const char* name,
                               uint16_t line, uint16_t column) {
     if (!ctx->warnings_enabled) return;
@@ -288,6 +342,7 @@ static void warn_if_shadowing(SemanticContext* ctx, const char* name,
     }
 }
 
+/* Compare two function signatures for equality. */
 static bool signatures_equal(FunctionSignature* a, FunctionSignature* b) {
     if (!a || !b) return false;
     if (a->return_type != b->return_type) return false;
@@ -309,6 +364,8 @@ static bool signatures_equal(FunctionSignature* a, FunctionSignature* b) {
     return (pa == NULL && pb == NULL);
 }
 
+/* Verify that a new function signature matches an existing one.
+ * Reports an error and returns false on mismatch. */
 static bool check_prototype_match(SemanticContext* ctx,
                                   SymbolEntry* existing,
                                   FunctionSignature* new_sig,
@@ -387,6 +444,24 @@ bool semantic__add_function_ex(SemanticContext* ctx, SymbolTable* target_scope,
 
     SymbolTable* scope = target_scope ? target_scope : ctx->current_scope;
 
+    /* Extra safety: manually scan the whole table for a duplicate name.
+     * This guards against any potential hash collision or lookup bug. */
+    for (size_t i = 0; i < scope->capacity; i++) {
+        SymbolEntry* e = scope->entries[i];
+        while (e) {
+            if (strcmp(e->name, name) == 0) {
+                /* If we found a duplicate but existing is NULL, it's an internal error. */
+                errhandler__report_error_ex(ERROR_LEVEL_ERROR,
+                    ERROR_CODE_SEM_REDECLARATION, line, column,
+                    (uint16_t)strlen(name), "semantic",
+                    "Internal error, duplicate name '%s' not found by hash lookup", name);
+                ctx->has_errors = true;
+                return false;
+            }
+            e = e->next;
+        }
+    }
+
     SymbolEntry* existing = find_symbol_in_table(scope, name);
     if (existing) {
         if (existing->type != TYPE_FUNCTION) {
@@ -394,7 +469,7 @@ bool semantic__add_function_ex(SemanticContext* ctx, SymbolTable* target_scope,
                                         line, column, (uint16_t)strlen(name), "semantic",
                                         "Redeclaration of '%s' as a different kind of symbol", name);
             ctx->has_errors = true;
-            goto cleanup_params;
+            return false;
         }
 
         FunctionSignature new_sig = {
@@ -408,7 +483,12 @@ bool semantic__add_function_ex(SemanticContext* ctx, SymbolTable* target_scope,
         };
 
         if (!check_prototype_match(ctx, existing, &new_sig, line, column)) {
-            goto cleanup_params;
+            return false;
+        }
+
+        // *** ИСПРАВЛЕНИЕ: помечаем main как используемую ***
+        if (strcmp(name, "main") == 0) {
+            existing->is_used = true;
         }
 
         FunctionSignature* old_sig = existing->extra.func_sig;
@@ -419,32 +499,39 @@ bool semantic__add_function_ex(SemanticContext* ctx, SymbolTable* target_scope,
                                         line, column, (uint16_t)strlen(name), "semantic",
                                         "Function '%s' already has a body", name);
             ctx->has_errors = true;
-            goto cleanup_params;
+            return false;
         }
 
-        /* Free the new parameter list as it is redundant. */
-        FunctionParam* p = params;
-        while (p) {
-            FunctionParam* next = p->next;
-            free(p->name);
-            if (p->default_value) parser__free_ast_node(p->default_value);
-            free(p);
-            p = next;
-        }
+        /* Prototype merged successfully; do not free params here.
+           The caller retains ownership of the passed parameter list. */
         return true;
     }
 
-    /* No collision – normal insertion. */
+    /* No previous declaration: create a new function symbol. */
     warn_if_shadowing(ctx, name, line, column);
+
+    /* Clone the parameter list so the symbol table owns its copy. */
+    FunctionParam* params_copy = clone_function_params(params);
+    if (!params_copy && params != NULL) {
+        ctx->has_errors = true;
+        return false;
+    }
 
     FunctionSignature* sig = (FunctionSignature*)calloc(1, sizeof(FunctionSignature));
     if (!sig) {
-        goto cleanup_params;
+        FunctionParam* p = params_copy;
+        while (p) {
+            FunctionParam* next = p->next;
+            free(p->name);
+            free(p);
+            p = next;
+        }
+        return false;
     }
 
     sig->return_type = return_type;
     sig->return_type_info = return_type_info;
-    sig->params = params;
+    sig->params = params_copy;
     sig->param_count = param_count;
     sig->required_param_count = required_count;
     sig->is_variadic = is_variadic;
@@ -452,8 +539,15 @@ bool semantic__add_function_ex(SemanticContext* ctx, SymbolTable* target_scope,
 
     SymbolEntry* entry = (SymbolEntry*)calloc(1, sizeof(SymbolEntry));
     if (!entry) {
+        FunctionParam* p = sig->params;
+        while (p) {
+            FunctionParam* next = p->next;
+            free(p->name);
+            free(p);
+            p = next;
+        }
         free(sig);
-        goto cleanup_params;
+        return false;
     }
 
     entry->name = u__strduplic(name);
@@ -468,6 +562,11 @@ bool semantic__add_function_ex(SemanticContext* ctx, SymbolTable* target_scope,
     entry->column = column;
     entry->extra.func_sig = sig;
 
+    // *** ИСПРАВЛЕНИЕ: помечаем main как используемую ***
+    if (strcmp(name, "main") == 0) {
+        entry->is_used = true;
+    }
+
     if (!add_symbol_to_table(scope, entry)) {
         free(entry->name);
         free(entry->state_modifier);
@@ -477,7 +576,6 @@ bool semantic__add_function_ex(SemanticContext* ctx, SymbolTable* target_scope,
         while (p) {
             FunctionParam* next = p->next;
             free(p->name);
-            if (p->default_value) parser__free_ast_node(p->default_value);
             free(p);
             p = next;
         }
@@ -486,19 +584,6 @@ bool semantic__add_function_ex(SemanticContext* ctx, SymbolTable* target_scope,
     }
 
     return true;
-
-cleanup_params:
-    {
-        FunctionParam* p = params;
-        while (p) {
-            FunctionParam* next = p->next;
-            free(p->name);
-            if (p->default_value) parser__free_ast_node(p->default_value);
-            free(p);
-            p = next;
-        }
-    }
-    return false;
 }
 
 bool semantic__add_function(SemanticContext* ctx, const char* name,
@@ -511,6 +596,8 @@ bool semantic__add_function(SemanticContext* ctx, const char* name,
                                     line, column, NULL, false);
 }
 
+/* Recursively search for a member inside a compound type's scope,
+ * following inheritance if necessary. */
 static SymbolEntry* find_member_in_compound(SymbolEntry* compound, const char* member_name) {
     if (!compound || compound->type != TYPE_COMPOUND || !compound->compound_scope) {
         return NULL;
@@ -537,7 +624,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
 
     warn_if_shadowing(ctx, name, line, column);
 
-    /* Resolve base class if provided (only for classes) */
+    /* Resolve base class if provided (only for classes). */
     SymbolEntry* base = NULL;
     if (kind == 1 && base_class_ast) {
         if (!ast_is_type(base_class_ast, AST_IDENTIFIER)) {
@@ -568,7 +655,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
         }
     }
 
-    /* Create symbol entry */
+    /* Create symbol entry for the compound type. */
     SymbolEntry* entry = (SymbolEntry*)calloc(1, sizeof(SymbolEntry));
     if (!entry) return false;
 
@@ -580,7 +667,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
     entry->column = column;
     entry->base_class = base;
 
-    /* Create the scope that will hold members */
+    /* Create the scope that will hold members. */
     SymbolTable* compound_scope = create_symbol_table(ctx->current_scope, SCOPE_COMPOUND);
     if (!compound_scope) {
         free(entry->name);
@@ -589,7 +676,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
     }
     entry->compound_scope = compound_scope;
 
-    /* Add the compound type symbol to the current scope */
+    /* Add the compound type symbol to the current scope. */
     if (!add_symbol_to_table(ctx->current_scope, entry)) {
         destroy_symbol_table(compound_scope);
         free(entry->name);
@@ -597,9 +684,9 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
         return false;
     }
 
-    /* Process member declarations */
+    /* Process member declarations. */
     if (!members_ast) {
-        /* A forward declaration without members is allowed */
+        /* A forward declaration without members is allowed. */
         return true;
     }
 
@@ -608,7 +695,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
                                  "Invalid member list for %s '%s'",
                                  kind ? "class" : "struct", name);
         ctx->has_errors = true;
-        return true; /* The type is declared but has no members; not a fatal error */
+        return true; /* The type is declared but has no members; not a fatal error. */
     }
 
     AST* member_list = (AST*)members_ast->extra;
@@ -651,7 +738,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
                 ctx->has_errors = true;
             }
 
-            /* Build debug list for output */
+            /* Build debug list for output. */
             CompoundMember* dbg = (CompoundMember*)malloc(sizeof(CompoundMember));
             if (dbg) {
                 dbg->name = u__strduplic(member->value);
@@ -706,7 +793,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
                     }
 
                     FunctionParam* fp = (FunctionParam*)malloc(sizeof(FunctionParam));
-                    fp->name = pname ? u__strduplic(pname) : NULL; /* allow NULL name */
+                    fp->name = pname ? u__strduplic(pname) : NULL;
                     fp->type = ptype;
                     fp->type_info = ptype_info;
                     fp->default_value = pnode->default_value;
@@ -742,6 +829,7 @@ bool semantic__add_compound_type(SemanticContext* ctx, const char* name,
                 ctx->has_errors = true;
             }
 
+            /* Add to debug list. */
             CompoundMember* dbg = (CompoundMember*)malloc(sizeof(CompoundMember));
             if (dbg) {
                 dbg->name = u__strduplic(func_name);
@@ -867,6 +955,7 @@ const char* semantic__init_state_to_string(InitState state) {
     }
 }
 
+/* Determine the numeric type of a literal based on its suffix and content. */
 static DataType determine_numeric_type(const char* value,
                                        bool* is_int_suffix,
                                        bool* is_real_suffix) {
@@ -1145,7 +1234,7 @@ TypeCheckResult semantic__check_type(SemanticContext* ctx, ASTNode* node) {
         }
 
         case AST_FUNCTION_DECLARATION: {
-            /* Function call node: left is identifier, extra is argument list */
+            /* Function call node: left is identifier, extra is argument list. */
             if (!ast_has_left(node) || !ast_is_type(node->left, AST_IDENTIFIER)) {
                 errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
                                          node->line, node->column, "semantic",
@@ -1422,6 +1511,7 @@ bool semantic__check_expression(SemanticContext* ctx, ASTNode* node) {
     return true;
 }
 
+/* Check if an AST node (or its subnodes) contains a return statement. */
 static bool contains_return(ASTNode* node) {
     if (!node) return false;
     if (node->type == AST_RETURN) return true;
@@ -1481,110 +1571,136 @@ bool semantic__check_block_ends_with_return(SemanticContext* ctx, AST* block_ast
     return semantic__statement_ensures_return(ctx, last);
 }
 
+/* Process a single variable declaration node (AST_VARIABLE_DECLARATION).
+ * This function handles type inference, constant checking, and symbol insertion.
+ * Returns true on success. */
+static bool process_variable_declaration(SemanticContext* ctx, ASTNode* node) {
+    const char* name = node->value;
+    if (!name) {
+        errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
+                                 node->line, node->column, "semantic",
+                                 "Variable declaration missing name");
+        ctx->has_errors = true;
+        return false;
+    }
+    Type* type_info = node->variable_type;
+    DataType type = TYPE_VOID;
+
+    if (type_info) {
+        type = type_from_type_info(type_info, ctx);
+        if (type == TYPE_UNKNOWN) {
+            errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
+                                     node->line, node->column, "semantic",
+                                     "Unknown type for variable '%s'", name);
+            ctx->has_errors = true;
+            return false;
+        }
+        if (type == TYPE_COMPOUND) {
+            SymbolEntry* comp = semantic__find_symbol(ctx, type_info->name);
+            if (!comp || !comp->compound_scope) {
+                errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
+                                         node->line, node->column, "semantic",
+                                         "Incomplete type '%s' for variable '%s'",
+                                         type_info->name, name);
+                ctx->has_errors = true;
+                return false;
+            }
+        }
+    } else if (node->default_value) {
+        TypeCheckResult init_res = semantic__check_type(ctx, node->default_value);
+        if (init_res.valid) {
+            type = init_res.type;
+        } else {
+            errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
+                                     node->line, node->column, "semantic",
+                                     "Cannot infer type for variable '%s'", name);
+            ctx->has_errors = true;
+            return false;
+        }
+    } else {
+        errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
+                                 node->line, node->column, "semantic",
+                                 "Variable '%s' must have a type or initializer", name);
+        ctx->has_errors = true;
+        return false;
+    }
+
+    bool is_const = false;
+    if (node->modifiers) {
+        for (uint8_t i = 0; i < node->modifier_count; i++) {
+            if (strcmp(node->modifiers[i], "const") == 0) {
+                is_const = true;
+                break;
+            }
+        }
+    }
+    if (is_const && !node->default_value) {
+        errhandler__report_error(ERROR_CODE_SEM_UNINITIALIZED,
+                                 node->line, node->column, "semantic",
+                                 "Constant '%s' must be initialized", name);
+        ctx->has_errors = true;
+        return false;
+    }
+
+    InitState init = node->default_value ? INIT_FULL : INIT_UNINITIALIZED;
+    if (is_const) init = INIT_CONSTANT;
+
+    /* The parser no longer requires 'obj' for compound types; 'var' is acceptable. */
+    const char* access_mod = node->access_modifier;
+    if (!semantic__add_variable_ex(ctx, ctx->current_scope,
+                                   name, type, type_info, is_const,
+                                   node->state_modifier ? node->state_modifier : "var",
+                                   init, node->line, node->column, access_mod)) {
+        return false;
+    }
+
+    if (node->default_value) {
+        TypeCheckResult init_res = semantic__check_type(ctx, node->default_value);
+        if (!init_res.valid) return false;
+        if (!semantic__types_assignable_ex(type, init_res.type,
+                                           INIT_UNINITIALIZED, init_res.init_state)) {
+            errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
+                                     node->line, node->column, "semantic",
+                                     "Initializer type mismatch for variable '%s'", name);
+            ctx->has_errors = true;
+            return false;
+        }
+        SymbolEntry* var = semantic__find_symbol(ctx, name);
+        if (var) var->init_state = INIT_FULL;
+    }
+
+    return true;
+}
+
 bool semantic__check_statement(SemanticContext* ctx, ASTNode* node) {
     if (!node) return true;
 
     switch (node->type) {
-        case AST_VARIABLE_DECLARATION: {
-            const char* name = node->value;
-            if (!name) {
-                errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
-                                         node->line, node->column, "semantic",
-                                         "Variable declaration missing name");
-                ctx->has_errors = true;
-                return false;
-            }
-            Type* type_info = node->variable_type;
-            DataType type = TYPE_VOID;
+        case AST_VARIABLE_DECLARATION:
+            return process_variable_declaration(ctx, node);
 
-            if (type_info) {
-                type = type_from_type_info(type_info, ctx);
-                if (type == TYPE_UNKNOWN) {
-                    errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
-                                             node->line, node->column, "semantic",
-                                             "Unknown type for variable '%s'", name);
-                    ctx->has_errors = true;
-                    return false;
+        case AST_VARIABLE_LIST: {
+            /* A list of variable declarators; process each individually. */
+            if (!node->extra) return true;
+            AST* decl_list = (AST*)node->extra;
+            bool ok = true;
+            for (uint16_t i = 0; i < decl_list->count; i++) {
+                if (!process_variable_declaration(ctx, decl_list->nodes[i])) {
+                    ok = false;
                 }
-                if (type == TYPE_COMPOUND) {
-                    SymbolEntry* comp = semantic__find_symbol(ctx, type_info->name);
-                    if (!comp || !comp->compound_scope) {
-                        errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
-                                                 node->line, node->column, "semantic",
-                                                 "Incomplete type '%s' for variable '%s'",
-                                                 type_info->name, name);
-                        ctx->has_errors = true;
-                        return false;
-                    }
-                }
-            } else if (node->default_value) {
-                TypeCheckResult init_res = semantic__check_type(ctx, node->default_value);
-                if (init_res.valid) {
-                    type = init_res.type;
-                } else {
-                    errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
-                                             node->line, node->column, "semantic",
-                                             "Cannot infer type for variable '%s'", name);
-                    ctx->has_errors = true;
-                    return false;
-                }
-            } else {
-                errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
-                                         node->line, node->column, "semantic",
-                                         "Variable '%s' must have a type or initializer", name);
-                ctx->has_errors = true;
-                return false;
             }
-
-            bool is_const = (node->state_modifier &&
-                             strcmp(node->state_modifier, "const") == 0);
-            if (is_const && !node->default_value) {
-                errhandler__report_error(ERROR_CODE_SEM_UNINITIALIZED,
-                                         node->line, node->column, "semantic",
-                                         "Constant '%s' must be initialized", name);
-                ctx->has_errors = true;
-                return false;
-            }
-
-            InitState init = node->default_value ? INIT_FULL : INIT_UNINITIALIZED;
-            if (is_const) init = INIT_CONSTANT;
-
-            if (type == TYPE_COMPOUND && node->state_modifier &&
-                strcmp(node->state_modifier, "obj") != 0) {
-                errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
-                                         node->line, node->column, "semantic",
-                                         "Variable of compound type must be declared with 'obj' modifier");
-                ctx->has_errors = true;
-                return false;
-            }
-
-            const char* access_mod = node->access_modifier;
-            if (!semantic__add_variable_ex(ctx, ctx->current_scope,
-                                           name, type, type_info, is_const,
-                                           node->state_modifier, init,
-                                           node->line, node->column, access_mod)) {
-                return false;
-            }
-
-            if (node->default_value) {
-                TypeCheckResult init_res = semantic__check_type(ctx, node->default_value);
-                if (!init_res.valid) return false;
-                if (!semantic__types_assignable_ex(type, init_res.type,
-                                                   INIT_UNINITIALIZED, init_res.init_state)) {
-                    errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
-                                             node->line, node->column, "semantic",
-                                             "Initializer type mismatch for variable '%s'", name);
-                    ctx->has_errors = true;
-                    return false;
-                }
-                SymbolEntry* var = semantic__find_symbol(ctx, name);
-                if (var) var->init_state = INIT_FULL;
-            }
-
-            return true;
+            return ok;
         }
 
         case AST_FUNCTION_DECLARATION: {
+            // *** ИСПРАВЛЕНИЕ: различаем объявление функции и вызов ***
+            bool is_decl = (node->variable_type != NULL) ||
+                           (node->state_modifier && strcmp(node->state_modifier, "func") == 0);
+            if (!is_decl) {
+                // Это вызов функции – обрабатываем как выражение
+                return semantic__check_expression(ctx, node);
+            }
+
             const char* name = node->value;
             if (!name) {
                 errhandler__report_error(ERROR_CODE_SEM_TYPE_ERROR,
@@ -1619,9 +1735,15 @@ bool semantic__check_statement(SemanticContext* ctx, ASTNode* node) {
                 AST* param_list = (AST*)params_node->extra;
                 if (param_list->count == 1) {
                     ASTNode* single = param_list->nodes[0];
-                    if (single && single->variable_type && single->variable_type->name &&
-                        strcmp(single->variable_type->name, "Void") == 0) {
-                        param_list_is_void = true;
+                    if (single) {
+                        // *** ИСПРАВЛЕНИЕ: поддержка параметра Void без имени ***
+                        if (single->variable_type && single->variable_type->name &&
+                            strcmp(single->variable_type->name, "Void") == 0) {
+                            param_list_is_void = true;
+                        } else if (single->type == AST_IDENTIFIER && single->value &&
+                                   strcmp(single->value, "Void") == 0) {
+                            param_list_is_void = true;
+                        }
                     }
                 }
 
@@ -1676,10 +1798,14 @@ bool semantic__check_statement(SemanticContext* ctx, ASTNode* node) {
             const char* access_mod = node->access_modifier;
             bool has_body = (body != NULL);
 
-            if (!semantic__add_function_ex(ctx, ctx->current_scope,
-                                           name, ret_type, ret_type_info,
-                                           params, param_count, required_count, false,
-                                           node->line, node->column, access_mod, has_body)) {
+            /* Add function (or prototype) to the symbol table. */
+            bool add_ok = semantic__add_function_ex(ctx, ctx->current_scope,
+                                                    name, ret_type, ret_type_info,
+                                                    params, param_count, required_count, false,
+                                                    node->line, node->column, access_mod, has_body);
+
+            /* Free the local parameter list. The symbol table has its own copy if needed. */
+            {
                 FunctionParam* p = params;
                 while (p) {
                     FunctionParam* next = p->next;
@@ -1687,26 +1813,44 @@ bool semantic__check_statement(SemanticContext* ctx, ASTNode* node) {
                     free(p);
                     p = next;
                 }
+                params = NULL;
+            }
+
+            if (!add_ok) {
                 return false;
             }
 
+            /* If no body, this is just a prototype; we are done. */
             if (!has_body) {
-                return true; /* prototype only */
+                return true;
+            }
+
+            /* Retrieve the stored function signature for further processing. */
+            SymbolEntry* func_entry = semantic__find_symbol(ctx, name);
+            if (!func_entry || func_entry->type != TYPE_FUNCTION) {
+                ctx->has_errors = true;
+                return false;
+            }
+            FunctionSignature* sig = func_entry->extra.func_sig;
+            if (!sig) {
+                ctx->has_errors = true;
+                return false;
             }
 
             semantic__enter_function_scope(ctx, name, ret_type);
 
-            /* Add parameters to function scope (skip unnamed ones) */
-            for (FunctionParam* p = params; p; p = p->next) {
-                if (p->name) { /* only add named parameters to local scope */
+            /* Add parameters to function scope (only named ones). */
+            for (FunctionParam* p = sig->params; p; p = p->next) {
+                if (p->name) {
                     semantic__add_variable_ex(ctx, ctx->current_scope,
-                                             p->name, p->type, p->type_info,
-                                             false, "var", INIT_FULL,
-                                             node->line, node->column, NULL);
+                                              p->name, p->type, p->type_info,
+                                              false, "var", INIT_FULL,
+                                              node->line, node->column, NULL);
                 }
             }
 
-            for (FunctionParam* p = params; p; p = p->next) {
+            /* Check default values. */
+            for (FunctionParam* p = sig->params; p; p = p->next) {
                 if (p->default_value) {
                     TypeCheckResult def_res = semantic__check_type(ctx, p->default_value);
                     if (!def_res.valid) {
@@ -1795,6 +1939,14 @@ bool semantic__check_statement(SemanticContext* ctx, ASTNode* node) {
             }
 
             return then_ok && else_ok;
+        }
+
+        case AST_ELSE_STATEMENT: {
+            /* Standalone else; its body is in the right child. */
+            semantic__enter_scope(ctx);
+            bool ok = semantic__check_statement(ctx, node->right);
+            semantic__exit_scope(ctx);
+            return ok;
         }
 
         case AST_RETURN: {
@@ -1961,6 +2113,8 @@ bool semantic__check_compound_type(SemanticContext* ctx, ASTNode* node) {
                                        node->line, node->column, kind);
 }
 
+/* Perform final verification of the global symbol table.
+ * Checks for undefined functions, incomplete types, unused symbols. */
 static bool final_verification(SemanticContext* ctx) {
     bool ok = true;
 
