@@ -14,7 +14,6 @@ const char* token_names[] = {
     [TOKEN_STRING]       = "STRING",       [TOKEN_IF]           = "IF",
     [TOKEN_ELSE]         = "ELSE",         [TOKEN_DO]           = "DO",
     [TOKEN_BREAK]        = "BREAK",        [TOKEN_CONTINUE]     = "CONTINUE",
-    [TOKEN_TRY]          = "TRY",          [TOKEN_CATCH]        = "CATCH",
     [TOKEN_NOP]          = "NOP",          [TOKEN_HALT]         = "HALT",
     [TOKEN_INTERFLAG]    = "INTERFLAG",    [TOKEN_SIGNAL]       = "SIGNAL",
     [TOKEN_KILL]         = "KILL",         [TOKEN_JUMP]         = "JUMP",
@@ -105,9 +104,7 @@ const char* ast_node_names[] = {
     [AST_CONTINUE]             = "CONTINUE",
     [AST_TERNARY_OPERATION]    = "TERNARY_OPERATION",
     [AST_TYPEOF]               = "TYPEOF",
-    [AST_KILL]                 = "KILL",
-    [AST_TRY]                  = "TRY",
-    [AST_CATCH]                = "CATCH"
+    [AST_KILL]                 = "KILL"
 };
 
 /* Static buffers for indentation to avoid repeated allocation */
@@ -225,10 +222,8 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
             case AST_BLOCK:
             case AST_FUNCTION_DECLARATION:
             case AST_MULTI_INITIALIZER:
-            case AST_TRY:
                 print_node_list((AST*)node->extra, depth + 2, out);
                 break;
-            case AST_CATCH:
             case AST_ELSE_STATEMENT:
                 print_ast_node_recursive((ASTNode*)node->extra, depth + 2, out);
                 break;
@@ -251,8 +246,7 @@ static void count_nodes(ASTNode* node, uint32_t* total_nodes, uint32_t* type_cou
     if (node->extra) {
         /* Handle both AST* and ASTNode* cases for counting */
         if (node->type == AST_VARIABLE_LIST || node->type == AST_BLOCK ||
-            node->type == AST_FUNCTION_DECLARATION || node->type == AST_MULTI_INITIALIZER ||
-            node->type == AST_TRY) {
+            node->type == AST_FUNCTION_DECLARATION || node->type == AST_MULTI_INITIALIZER) {
             AST* list = (AST*)node->extra;
             if (list && list->nodes) {
                 for (uint16_t i = 0; i < list->count; i++) {
@@ -316,8 +310,8 @@ void print_token_statistics(Lexer* lexer, FILE* out) {
         TokenType type = lexer->tokens[i].type;
         if (IS_VALID_TOKEN_TYPE(type)) counts[type]++;
     }
-    fprintf(out, "Total: %u\n", lexer->token_count);
-    fprintf(out, "Non-EOF: %u\n\n", lexer->token_count - counts[TOKEN_EOF]);
+    fprintf(out, "Total: %llu\n", lexer->token_count);
+    fprintf(out, "Non-EOF: %llu\n\n", lexer->token_count - counts[TOKEN_EOF]);
     fputs("Distribution:\n", out);
     for (uint32_t i = 0; i < TOKEN_TYPE_COUNT; i++) {
         if (counts[i]) {
@@ -361,14 +355,16 @@ void print_ast_statistics(AST* ast, FILE* out) {
         return;
     }
     uint32_t total_nodes = 0;
-    uint32_t type_counts[AST_NODE_TYPE_COUNT] = {0};
+    uint32_t type_counts[AST_NODE_TYPE_COUNT];
+    memset(type_counts, 0, sizeof(type_counts));
+
     for (uint16_t i = 0; i < ast->count; i++) {
         count_nodes(ast->nodes[i], &total_nodes, type_counts);
     }
     fprintf(out, "Statements: %u\n", ast->count);
     fprintf(out, "Total nodes: %u\n\n", total_nodes);
     fputs("Distribution:\n", out);
-    for (int i = 0; i < AST_NODE_TYPE_COUNT; i++) {
+    for (size_t i = 0; i < AST_NODE_TYPE_COUNT; i++) {
         if (type_counts[i]) {
             fprintf(out, "  %-30s: %u\n", get_ast_node_type_name(i), type_counts[i]);
         }
@@ -433,8 +429,10 @@ void print_semantic_type_info(SemanticContext* context, FILE* out) {
     SymbolTable* table = semantic__get_global_table(context);
     if (!table) return;
 
-    size_t type_counts[TYPE_COMPOUND + 1] = {0};
-    size_t init_counts[INIT_DEFAULT + 1] = {0};
+    size_t type_counts[TYPE_COMPOUND + 1];
+    size_t init_counts[INIT_DEFAULT + 1];
+    memset(type_counts, 0, sizeof(type_counts));
+    memset(init_counts, 0, sizeof(init_counts));
     size_t total_symbols = 0;
 
     for (size_t i = 0; i < table->capacity; i++) {
@@ -662,14 +660,16 @@ ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast,
     }
     if (ast && ast->nodes) {
         uint32_t total_nodes = 0;
-        uint32_t type_counts[64] = {0};
+        uint32_t type_counts[AST_NODE_TYPE_COUNT];
+        memset(type_counts, 0, sizeof(type_counts));
         for (uint16_t i = 0; i < ast->count; i++) {
             if (ast->nodes[i]) {
                 count_nodes(ast->nodes[i], &total_nodes, type_counts);
             }
         }
         stats->total_nodes = total_nodes;
-        memcpy(stats->node_types, type_counts, sizeof(type_counts));
+        memcpy(stats->node_types, type_counts,
+               sizeof(type_counts) < sizeof(stats->node_types) ? sizeof(type_counts) : sizeof(stats->node_types));
     }
     if (semantic) {
         stats->symbols_count = semantic__get_symbol_count(semantic);
@@ -698,7 +698,7 @@ void print_statistics_report(ParseStatistics* stats, FILE* out) {
         }
     }
     fputs("\nAST node types:\n", out);
-    for (int i = 0; i < 64; i++) {
+    for (size_t i = 0; i < AST_NODE_TYPE_COUNT; i++) {
         if (stats->node_types[i]) {
             fprintf(out, "  %-30s: %u\n", get_ast_node_type_name(i), stats->node_types[i]);
         }
