@@ -61,8 +61,6 @@ static void init_symbol_table(void) {
         {"do",          TOKEN_DO},
         {"break",       TOKEN_BREAK},
         {"continue",    TOKEN_CONTINUE},
-        {"try",         TOKEN_TRY},
-        {"catch",       TOKEN_CATCH},
         {"nop",         TOKEN_NOP},
         {"halt",        TOKEN_HALT},
         {"interflag",   TOKEN_INTERFLAG},
