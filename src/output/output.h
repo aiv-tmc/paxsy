@@ -43,12 +43,15 @@ extern const char* ast_node_names[];
 /* Total number of token types. */
 #define TOKEN_TYPE_COUNT (TOKEN_ERRORCODE + 1)
 
-/* Total number of AST node types. Must match the last enum value + 1. */
-#define AST_NODE_TYPE_COUNT (AST_CATCH + 1)
+/**
+ * Number of AST node types, derived from the size of the name array.
+ * This automatically adjusts when elements are added or removed.
+ */
+#define AST_NODE_TYPE_COUNT (sizeof(ast_node_names) / sizeof(ast_node_names[0]))
 
 /* Helper macros for safe printing and type bounds checking. */
 #define IS_VALID_TOKEN_TYPE(t) (((t) & (TOKEN_TYPE_COUNT - 1)) == (t))
-#define IS_VALID_AST_NODE_TYPE(t) (((t) & (AST_NODE_TYPE_COUNT - 1)) == (t))
+#define IS_VALID_AST_NODE_TYPE(t) ((unsigned int)(t) < AST_NODE_TYPE_COUNT)
 
 /**
  * @brief Print a formatted section header.
