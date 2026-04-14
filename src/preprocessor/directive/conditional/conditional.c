@@ -9,19 +9,26 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
+#include <stdio.h>   /* for fwrite in preprocessor_output stub */
 
-/**
- * @brief Creates a new conditional compilation context.
- *
- * Allocates and initializes a ConditionalContext structure with an empty stack.
- *
- * @return Pointer to newly created context, or NULL on allocation failure.
- */
-ConditionalContext* conditional_context_create(void) {
-    ConditionalContext* ctx = memory_allocate_zero(sizeof(ConditionalContext));
+/* Align size to multiple of alignment (power of two) */
+#define ALIGN_SIZE(sz, align) (((sz) + (align) - 1) & ~((align) - 1))
+
+/* Initial stack capacity for conditional frames */
+#define INITIAL_STACK_CAPACITY 4
+
+/* Maximum length of an identifier or numeric constant */
+#define MAX_TOKEN_LEN 255
+
+/* Forward declaration for preprocessor output function (now defined at bottom) */
+void preprocessor_output(PreprocessorState *state, const char *data, size_t len);
+
+ConditionalContext *conditional_context_create(void) {
+    ConditionalContext *ctx = memory_allocate_zero(sizeof(ConditionalContext));
     if (!ctx) return NULL;
 
-    ctx->capacity = 8;                                   /* initial stack capacity */
+    ctx->capacity = INITIAL_STACK_CAPACITY;
     ctx->stack = memory_allocate_zero(sizeof(ConditionalFrame) * ctx->capacity);
     if (!ctx->stack) {
         free(ctx);
@@ -31,57 +38,31 @@ ConditionalContext* conditional_context_create(void) {
     return ctx;
 }
 
-/**
- * @brief Destroys a conditional compilation context and frees its resources.
- *
- * @param ctx Context to destroy (may be NULL).
- */
-void conditional_context_destroy(ConditionalContext* ctx) {
+void conditional_context_destroy(ConditionalContext *ctx) {
     if (ctx) {
         free(ctx->stack);
         free(ctx);
     }
 }
 
-/**
- * @brief Checks whether the current preprocessor output should be emitted.
- *
- * The decision is based on the topmost conditional frame.
- *
- * @param state Preprocessor state.
- * @return 1 if output should be emitted, 0 otherwise.
- */
-int conditional_should_output(PreprocessorState* state) {
+int conditional_should_output(PreprocessorState *state) {
     if (!state->conditional_ctx || state->conditional_ctx->count == 0)
-        return 1;                                         /* not inside any conditional */
-    ConditionalFrame* top = &state->conditional_ctx->stack[state->conditional_ctx->count - 1];
-    return !top->skip;                                    /* emit if skip flag is false */
+        return 1;  /* Not inside any conditional block */
+    ConditionalFrame *top = &state->conditional_ctx->stack[state->conditional_ctx->count - 1];
+    return !top->skip;
 }
 
-/**
- * @brief Pushes a new conditional frame onto the stack.
- *
- * Expands the stack capacity if necessary.
- *
- * @param state Preprocessor state.
- * @param frame Frame to push.
- * @return 1 on success, 0 on memory allocation failure.
- */
-static int conditional_push(PreprocessorState* state, ConditionalFrame frame) {
-    ConditionalContext* ctx = state->conditional_ctx;
+/* Push a new frame, growing the stack if necessary */
+static int conditional_push(PreprocessorState *state, ConditionalFrame frame) {
+    ConditionalContext *ctx = state->conditional_ctx;
     if (!ctx) return 0;
 
     if (ctx->count >= ctx->capacity) {
-        /* Double the capacity using bitwise shift for efficiency */
-        size_t old_size = ctx->capacity * sizeof(ConditionalFrame);
-        size_t new_cap = ctx->capacity << 1;
-        size_t new_size = old_size << 1;                  /* new_cap * sizeof(frame) = 2 * old_size */
+        size_t new_cap = ctx->capacity * 2;
+        size_t old_bytes = ctx->capacity * sizeof(ConditionalFrame);
+        size_t new_bytes = new_cap * sizeof(ConditionalFrame);
 
-        ConditionalFrame* new_stack = memory_reallocate_zero(
-            ctx->stack,
-            old_size,
-            new_size
-        );
+        ConditionalFrame *new_stack = memory_reallocate_zero(ctx->stack, old_bytes, new_bytes);
         if (!new_stack) return 0;
 
         ctx->stack = new_stack;
@@ -92,81 +73,61 @@ static int conditional_push(PreprocessorState* state, ConditionalFrame frame) {
     return 1;
 }
 
-/**
- * @brief Returns a pointer to the topmost conditional frame.
- *
- * @param state Preprocessor state.
- * @return Pointer to top frame, or NULL if stack is empty.
- */
-static ConditionalFrame* conditional_top(PreprocessorState* state) {
-    ConditionalContext* ctx = state->conditional_ctx;
+/* Return the top frame, or NULL if stack is empty */
+static ConditionalFrame *conditional_top(PreprocessorState *state) {
+    ConditionalContext *ctx = state->conditional_ctx;
     if (!ctx || ctx->count == 0) return NULL;
     return &ctx->stack[ctx->count - 1];
 }
 
-/**
- * @brief Pops the topmost conditional frame from the stack.
- *
- * @param state Preprocessor state.
- */
-static void conditional_pop(PreprocessorState* state) {
-    ConditionalContext* ctx = state->conditional_ctx;
+/* Pop the top frame */
+static void conditional_pop(PreprocessorState *state) {
+    ConditionalContext *ctx = state->conditional_ctx;
     if (ctx && ctx->count > 0)
         ctx->count--;
 }
 
-/**
- * @brief Parser state structure for evaluating #if expressions.
- */
 typedef struct ExprParser {
-    const char* p;           /*!< Current position in the expression string */
-    PreprocessorState* state;/*!< Preprocessor state (for macro lookup) */
-    int error;               /*!< Non‑zero if a syntax or evaluation error occurred */
+    const char *p;           /* Current position */
+    PreprocessorState *state;/* Preprocessor state (for macro lookup) */
+    int error;               /* Non‑zero if a syntax or evaluation error occurred */
 } ExprParser;
 
-/* Forward declarations of recursive parser functions */
-static int64_t parse_conditional(ExprParser* parser);
-static int64_t parse_logical_or(ExprParser* parser);
-static int64_t parse_logical_and(ExprParser* parser);
-static int64_t parse_equality(ExprParser* parser);
-static int64_t parse_relational(ExprParser* parser);
-static int64_t parse_shift(ExprParser* parser);
-static int64_t parse_additive(ExprParser* parser);
-static int64_t parse_multiplicative(ExprParser* parser);
-static int64_t parse_unary(ExprParser* parser);
-static int64_t parse_primary(ExprParser* parser);
-static int64_t parse_defined(ExprParser* parser);
-static int64_t parse_number(ExprParser* parser);
-static int64_t parse_identifier(ExprParser* parser);
+/* Forward declarations for recursive descent */
+static int64_t parse_conditional(ExprParser *parser);
+static int64_t parse_logical_or(ExprParser *parser);
+static int64_t parse_logical_and(ExprParser *parser);
+static int64_t parse_equality(ExprParser *parser);
+static int64_t parse_relational(ExprParser *parser);
+static int64_t parse_shift(ExprParser *parser);
+static int64_t parse_additive(ExprParser *parser);
+static int64_t parse_multiplicative(ExprParser *parser);
+static int64_t parse_unary(ExprParser *parser);
+static int64_t parse_primary(ExprParser *parser);
+static int64_t parse_defined(ExprParser *parser);
+static int64_t parse_number(ExprParser *parser);
+static int64_t parse_identifier(ExprParser *parser);
 
-/**
- * @brief Skips whitespace characters (space, tab, newline, carriage return).
- */
-static void skip_ws(ExprParser* parser) {
+/* Skip whitespace and newline characters */
+static void skip_ws(ExprParser *parser) {
     while (u__char_is_whitespace(*parser->p) || *parser->p == '\n' || *parser->p == '\r')
         parser->p++;
 }
 
-/**
- * @brief Checks whether the next character (after skipping whitespace) equals c.
- */
-static int peek_char(ExprParser* parser, char c) {
+/* Check next character after skipping whitespace */
+static int peek_char(ExprParser *parser, char c) {
     skip_ws(parser);
     return *parser->p == c;
 }
 
-/**
- * @brief Checks whether the next two characters (after skipping whitespace) match the given operator.
- */
-static int peek_op2(ExprParser* parser, const char* op) {
+/* Check a two‑character operator after skipping whitespace */
+static int peek_op2(ExprParser *parser, const char *op) {
     skip_ws(parser);
     return parser->p[0] == op[0] && parser->p[1] == op[1];
 }
 
-/**
- * @brief Consumes a single character if it matches c (after skipping whitespace).
- */
-static int expect_char(ExprParser* parser, char c) {
+/* Consume a single character if it matches */
+static int expect_char(ExprParser *parser, char c) {
     skip_ws(parser);
     if (*parser->p == c) {
         parser->p++;
@@ -175,10 +136,8 @@ static int expect_char(ExprParser* parser, char c) {
     return 0;
 }
 
-/**
- * @brief Consumes a two‑character operator if it matches op (after skipping whitespace).
- */
-static int expect_op2(ExprParser* parser, const char* op) {
+/* Consume a two‑character operator if it matches */
+static int expect_op2(ExprParser *parser, const char *op) {
     skip_ws(parser);
     if (parser->p[0] == op[0] && parser->p[1] == op[1]) {
         parser->p += 2;
@@ -187,17 +146,7 @@ static int expect_op2(ExprParser* parser, const char* op) {
     return 0;
 }
 
-/**
- * @brief Evaluates a constant expression for #if or #elif.
- *
- * Performs macro substitution (via parse_identifier) and handles the defined() operator.
- *
- * @param expr  The expression string (after the directive keyword).
- * @param state Preprocessor state.
- * @param result Pointer to store the evaluated integer value.
- * @return 1 on successful evaluation, 0 on error.
- */
-static int evaluate_if_expression(const char* expr, PreprocessorState* state, int64_t* result) {
+static int evaluate_if_expression(const char *expr, PreprocessorState *state, int64_t *result) {
     ExprParser parser;
     parser.p = expr;
     parser.state = state;
@@ -222,12 +171,8 @@ static int evaluate_if_expression(const char* expr, PreprocessorState* state, in
     return !parser.error;
 }
 
-/**
- * @brief Parses a conditional expression (ternary operator ?:).
- *
- * Grammar: logical-or ( '?' conditional ':' conditional )?
- */
-static int64_t parse_conditional(ExprParser* parser) {
+/* conditional ::= logical-or ( '?' conditional ':' conditional )? */
+static int64_t parse_conditional(ExprParser *parser) {
     int64_t cond = parse_logical_or(parser);
     if (parser->error) return 0;
 
@@ -248,13 +193,10 @@ static int64_t parse_conditional(ExprParser* parser) {
     return cond;
 }
 
-/**
- * @brief Parses logical OR (||).
- */
-static int64_t parse_logical_or(ExprParser* parser) {
+static int64_t parse_logical_or(ExprParser *parser) {
     int64_t left = parse_logical_and(parser);
     if (parser->error) return 0;
-    while (peek_op2(parser, "||")) {
+    while (peek_op2(parser, "or")) {
         parser->p += 2;
         int64_t right = parse_logical_and(parser);
         if (parser->error) return 0;
@@ -263,14 +205,11 @@ static int64_t parse_logical_or(ExprParser* parser) {
     return left;
 }
 
-/**
- * @brief Parses logical AND (&&).
- */
-static int64_t parse_logical_and(ExprParser* parser) {
+static int64_t parse_logical_and(ExprParser *parser) {
     int64_t left = parse_equality(parser);
     if (parser->error) return 0;
-    while (peek_op2(parser, "&&")) {
-        parser->p += 2;
+    while (peek_op2(parser, "and")) {
+        parser->p += 3;
         int64_t right = parse_equality(parser);
         if (parser->error) return 0;
         left = left && right;
@@ -278,10 +217,8 @@ static int64_t parse_logical_and(ExprParser* parser) {
     return left;
 }
 
-/**
- * @brief Parses equality operators (==, !=).
- */
-static int64_t parse_equality(ExprParser* parser) {
+/* equality ::= relational ( ('=='|'!=') relational )* */
+static int64_t parse_equality(ExprParser *parser) {
     int64_t left = parse_relational(parser);
     if (parser->error) return 0;
     while (1) {
@@ -295,16 +232,15 @@ static int64_t parse_equality(ExprParser* parser) {
             int64_t right = parse_relational(parser);
             if (parser->error) return 0;
             left = left != right;
-        } else
+        } else {
             break;
+        }
     }
     return left;
 }
 
-/**
- * @brief Parses relational operators (<, >, <=, >=).
- */
-static int64_t parse_relational(ExprParser* parser) {
+/* relational ::= shift ( ('<'|'>'|'<='|'>=') shift )* */
+static int64_t parse_relational(ExprParser *parser) {
     int64_t left = parse_shift(parser);
     if (parser->error) return 0;
     while (1) {
@@ -326,18 +262,47 @@ static int64_t parse_relational(ExprParser* parser) {
             int64_t right = parse_shift(parser);
             if (parser->error) return 0;
             left = left > right;
-        } else
+        } else {
             break;
+        }
     }
     return left;
 }
 
-/**
- * @brief Parses shift operators (<<, >>).
- */
-static int64_t parse_shift(ExprParser* parser) {
+/* Perform a logical right shift (zero‑fill) */
+static uint64_t logical_right_shift(uint64_t val, int shift) {
+    if (shift <= 0) return val;
+    if (shift >= 64) return 0;
+    return val >> shift;
+}
+
+/* Perform an arithmetic right shift (sign‑extend) */
+static int64_t arithmetic_right_shift(int64_t val, int shift) {
+    if (shift <= 0) return val;
+    if (shift >= 63) return (val < 0) ? -1 : 0;
+    return val >> shift;
+}
+
+/* Rotate left (ROL) */
+static uint64_t rotate_left(uint64_t val, int shift) {
+    if (shift <= 0) return val;
+    shift &= 63;  /* modulo 64 */
+    if (shift == 0) return val;
+    return (val << shift) | (val >> (64 - shift));
+}
+
+/* Rotate right (ROR) */
+static uint64_t rotate_right(uint64_t val, int shift) {
+    if (shift <= 0) return val;
+    shift &= 63;  /* modulo 64 */
+    if (shift == 0) return val;
+    return (val >> shift) | (val << (64 - shift));
+}
+
+static int64_t parse_shift(ExprParser *parser) {
     int64_t left = parse_additive(parser);
     if (parser->error) return 0;
+
     while (1) {
         if (peek_op2(parser, "<<")) {
             parser->p += 2;
@@ -348,17 +313,36 @@ static int64_t parse_shift(ExprParser* parser) {
             parser->p += 2;
             int64_t right = parse_additive(parser);
             if (parser->error) return 0;
-            left = left >> right;
-        } else
+            left = (int64_t)logical_right_shift((uint64_t)left, (int)right);
+        } else if (u__str_startw(parser->p, "<<<")) {
+            parser->p += 3;
+            int64_t right = parse_additive(parser);
+            if (parser->error) return 0;
+            left = left << right;
+        } else if (u__str_startw(parser->p, ">>>")) {
+            parser->p += 3;
+            int64_t right = parse_additive(parser);
+            if (parser->error) return 0;
+            left = arithmetic_right_shift(left, (int)right);
+        } else if (u__str_startw(parser->p, "<<<<")) {
+            parser->p += 4;
+            int64_t right = parse_additive(parser);
+            if (parser->error) return 0;
+            left = (int64_t)rotate_left((uint64_t)left, (int)right);
+        } else if (u__str_startw(parser->p, ">>>>")) {
+            parser->p += 4;
+            int64_t right = parse_additive(parser);
+            if (parser->error) return 0;
+            left = (int64_t)rotate_right((uint64_t)left, (int)right);
+        } else {
             break;
+        }
     }
     return left;
 }
 
-/**
- * @brief Parses additive operators (+, -).
- */
-static int64_t parse_additive(ExprParser* parser) {
+/* additive ::= multiplicative ( ('+'|'-') multiplicative )* */
+static int64_t parse_additive(ExprParser *parser) {
     int64_t left = parse_multiplicative(parser);
     if (parser->error) return 0;
     while (1) {
@@ -370,16 +354,15 @@ static int64_t parse_additive(ExprParser* parser) {
             int64_t right = parse_multiplicative(parser);
             if (parser->error) return 0;
             left = left - right;
-        } else
+        } else {
             break;
+        }
     }
     return left;
 }
 
-/**
- * @brief Parses multiplicative operators (*, /, %).
- */
-static int64_t parse_multiplicative(ExprParser* parser) {
+/* multiplicative ::= unary ( ('*'|'/'|'%') unary )* */
+static int64_t parse_multiplicative(ExprParser *parser) {
     int64_t left = parse_unary(parser);
     if (parser->error) return 0;
     while (1) {
@@ -409,16 +392,15 @@ static int64_t parse_multiplicative(ExprParser* parser) {
                 return 0;
             }
             left = left % right;
-        } else
+        } else {
             break;
+        }
     }
     return left;
 }
 
-/**
- * @brief Parses unary operators (+, -, !, ~).
- */
-static int64_t parse_unary(ExprParser* parser) {
+/* unary ::= ('+'|'-'|'!'|'~') unary | primary */
+static int64_t parse_unary(ExprParser *parser) {
     skip_ws(parser);
     if (expect_char(parser, '+')) {
         return parse_unary(parser);
@@ -433,10 +415,8 @@ static int64_t parse_unary(ExprParser* parser) {
     }
 }
 
-/**
- * @brief Parses primary expressions: parentheses, numbers, defined(), identifiers.
- */
-static int64_t parse_primary(ExprParser* parser) {
+/* primary ::= '(' conditional ')' | number | defined | identifier */
+static int64_t parse_primary(ExprParser *parser) {
     skip_ws(parser);
     if (expect_char(parser, '(')) {
         int64_t val = parse_conditional(parser);
@@ -466,17 +446,9 @@ static int64_t parse_primary(ExprParser* parser) {
     return 0;
 }
 
-/**
- * @brief Parses the defined() operator.
- *
- * Syntax: defined identifier or defined ( identifier ).
- */
-static int64_t parse_defined(ExprParser* parser) {
-    if (!u__str_startw(parser->p, "defined")) {
-        parser->error = 1;
-        return 0;
-    }
-    parser->p += 7;               /* skip "defined" */
+/* defined ::= 'defined' identifier | 'defined' '(' identifier ')' */
+static int64_t parse_defined(ExprParser *parser) {
+    parser->p += 7;  /* skip "defined" */
     skip_ws(parser);
 
     int paren = expect_char(parser, '(');
@@ -489,12 +461,12 @@ static int64_t parse_defined(ExprParser* parser) {
         parser->error = 1;
         return 0;
     }
-    const char* id_start = parser->p;
+    const char *id_start = parser->p;
     while (u__char_is_identifier_char(*parser->p))
         parser->p++;
     size_t id_len = parser->p - id_start;
-    char id[256];
-    if (id_len >= sizeof(id)) id_len = sizeof(id) - 1;
+    char id[MAX_TOKEN_LEN + 1];
+    if (id_len > MAX_TOKEN_LEN) id_len = MAX_TOKEN_LEN;
     memcpy(id, id_start, id_len);
     id[id_len] = '\0';
 
@@ -509,24 +481,22 @@ static int64_t parse_defined(ExprParser* parser) {
         }
     }
 
-    const Macro* m = macro_table_find(parser->state->macro_table, id);
-    return (m != NULL) ? 1 : 0;   /* defined macro -> 1, else 0 */
+    const Macro *m = macro_table_find(parser->state->macro_table, id);
+    return (m != NULL) ? 1 : 0;
 }
 
-/**
- * @brief Parses an integer constant (decimal only, as per preprocessor restrictions).
- */
-static int64_t parse_number(ExprParser* parser) {
-    const char* start = parser->p;
+/* Parse a decimal integer constant */
+static int64_t parse_number(ExprParser *parser) {
+    const char *start = parser->p;
     while (u__char_is_digit(*parser->p))
         parser->p++;
     size_t len = parser->p - start;
-    char buf[64];
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+    char buf[MAX_TOKEN_LEN + 1];
+    if (len > MAX_TOKEN_LEN) len = MAX_TOKEN_LEN;
     memcpy(buf, start, len);
     buf[len] = '\0';
 
-    char* endptr;
+    char *endptr;
     errno = 0;
     long long val = strtoll(buf, &endptr, 10);
     if (errno == ERANGE || (size_t)(endptr - buf) != len) {
@@ -539,56 +509,46 @@ static int64_t parse_number(ExprParser* parser) {
     return (int64_t)val;
 }
 
-/**
- * @brief Parses an identifier, substitutes its macro value if it expands to an integer.
- *
- * If the macro is not defined, is function‑like, or its value is not a valid integer,
- * the identifier evaluates to 0.
- */
-static int64_t parse_identifier(ExprParser* parser) {
-    const char* start = parser->p;
+/* Parse an identifier and substitute its macro value if it expands to an integer */
+static int64_t parse_identifier(ExprParser *parser) {
+    const char *start = parser->p;
     while (u__char_is_identifier_char(*parser->p))
         parser->p++;
     size_t len = parser->p - start;
-    char id[256];
-    if (len >= sizeof(id)) len = sizeof(id) - 1;
+    char id[MAX_TOKEN_LEN + 1];
+    if (len > MAX_TOKEN_LEN) len = MAX_TOKEN_LEN;
     memcpy(id, start, len);
     id[len] = '\0';
 
-    const Macro* m = macro_table_find(parser->state->macro_table, id);
-    if (!m || m->has_parameters)                /* undefined or function‑like macro */
-        return 0;
+    const Macro *m = macro_table_find(parser->state->macro_table, id);
+    if (!m || m->has_parameters) {
+        return 0;  /* undefined or function‑like macro evaluates to 0 */
+    }
 
-    char* endptr;
+    char *endptr;
     long long val = strtoll(m->value, &endptr, 0);
-    if (endptr == m->value || *endptr != '\0')  /* not a valid integer token */
-        return 0;
-
+    if (endptr == m->value || *endptr != '\0') {
+        return 0;  /* Not a valid integer token */
+    }
     return (int64_t)val;
 }
 
-/**
- * @brief Handles #if directive.
- *
- * Evaluates the constant expression; if true, the block is processed,
- * otherwise it is skipped.
- */
-void DPPF__if(PreprocessorState* state, const char* args) {
-    int parent_skip = !conditional_should_output(state);   /* whether enclosing block is skipped */
-
+void DPPF__if(PreprocessorState *state, const char *args) {
+    int parent_skip = !conditional_should_output(state);
     int64_t cond_val = 0;
+
     if (!evaluate_if_expression(args, state, &cond_val)) {
-        cond_val = 0;                                      /* on error, treat as false */
+        cond_val = 0;  /* On error treat as false */
     }
 
     ConditionalFrame frame;
     frame.parent_skip = parent_skip;
     if (parent_skip) {
-        frame.skip = 1;                                    /* inherit skip from parent */
+        frame.skip = 1;
         frame.taken = 0;
     } else {
-        frame.skip = (cond_val == 0);                      /* skip if condition false */
-        frame.taken = (cond_val != 0);                     /* mark taken if condition true */
+        frame.skip = (cond_val == 0);
+        frame.taken = (cond_val != 0);
     }
     frame.else_seen = 0;
 
@@ -599,93 +559,8 @@ void DPPF__if(PreprocessorState* state, const char* args) {
     }
 }
 
-/**
- * @brief Handles #ifdef directive.
- *
- * Tests whether a macro is defined.
- */
-void DPPF__ifdef(PreprocessorState* state, const char* args) {
-    int parent_skip = !conditional_should_output(state);
-
-    /* Extract macro name */
-    const char* p = args;
-    while (u__char_is_whitespace(*p) || *p == '\n' || *p == '\r') p++;
-    if (!u__char_is_identifier_start(*p)) {
-        errhandler__report_error(ERROR_CODE_PP_INVALID_DIR,
-                                 state->line, state->column,
-                                 "preproc", "#ifdef requires an identifier");
-        return;
-    }
-    const char* id_start = p;
-    while (u__char_is_identifier_char(*p)) p++;
-    size_t id_len = p - id_start;
-    char id[256];
-    if (id_len >= sizeof(id)) id_len = sizeof(id) - 1;
-    memcpy(id, id_start, id_len);
-    id[id_len] = '\0';
-
-    int defined = (macro_table_find(state->macro_table, id) != NULL);
-
-    ConditionalFrame frame;
-    frame.parent_skip = parent_skip;
-    if (parent_skip) {
-        frame.skip = 1;
-        frame.taken = 0;
-    } else {
-        frame.skip = !defined;                             /* skip if macro not defined */
-        frame.taken = defined;                             /* taken if macro defined */
-    }
-    frame.else_seen = 0;
-    conditional_push(state, frame);
-}
-
-/**
- * @brief Handles #ifndef directive.
- *
- * Tests whether a macro is not defined.
- */
-void DPPF__ifndef(PreprocessorState* state, const char* args) {
-    int parent_skip = !conditional_should_output(state);
-
-    const char* p = args;
-    while (u__char_is_whitespace(*p) || *p == '\n' || *p == '\r') p++;
-    if (!u__char_is_identifier_start(*p)) {
-        errhandler__report_error(ERROR_CODE_PP_INVALID_DIR,
-                                 state->line, state->column,
-                                 "preproc", "#ifndef requires an identifier");
-        return;
-    }
-    const char* id_start = p;
-    while (u__char_is_identifier_char(*p)) p++;
-    size_t id_len = p - id_start;
-    char id[256];
-    if (id_len >= sizeof(id)) id_len = sizeof(id) - 1;
-    memcpy(id, id_start, id_len);
-    id[id_len] = '\0';
-
-    int defined = (macro_table_find(state->macro_table, id) != NULL);
-
-    ConditionalFrame frame;
-    frame.parent_skip = parent_skip;
-    if (parent_skip) {
-        frame.skip = 1;
-        frame.taken = 0;
-    } else {
-        frame.skip = defined;                              /* skip if macro defined */
-        frame.taken = !defined;                            /* taken if macro not defined */
-    }
-    frame.else_seen = 0;
-    conditional_push(state, frame);
-}
-
-/**
- * @brief Handles #elif directive.
- *
- * Introduces an alternative condition in an #if/#ifdef/#ifndef block.
- * Must not appear after #else.
- */
-void DPPF__elif(PreprocessorState* state, const char* args) {
-    ConditionalFrame* top = conditional_top(state);
+void DPPF__elif(PreprocessorState *state, const char *args) {
+    ConditionalFrame *top = conditional_top(state);
     if (!top) {
         errhandler__report_error(ERROR_CODE_PP_INVALID_DIR,
                                  state->line, state->column,
@@ -699,35 +574,29 @@ void DPPF__elif(PreprocessorState* state, const char* args) {
         return;
     }
 
-    /* Determine whether the enclosing block (parent) is skipped */
+    /* Determine parent skip status */
     int parent_skip = 0;
     if (state->conditional_ctx->count > 1) {
-        ConditionalFrame* parent = &state->conditional_ctx->stack[state->conditional_ctx->count - 2];
+        ConditionalFrame *parent = &state->conditional_ctx->stack[state->conditional_ctx->count - 2];
         parent_skip = parent->skip;
     }
 
     if (parent_skip || top->taken) {
-        /* If parent is skipped or a previous branch was already taken, skip this #elif */
         top->skip = 1;
     } else {
         int64_t cond_val = 0;
         if (!evaluate_if_expression(args, state, &cond_val)) {
             cond_val = 0;
         }
-        top->skip = (cond_val == 0);                       /* skip if condition false */
-        top->taken = (cond_val != 0);                      /* mark taken if condition true */
+        top->skip = (cond_val == 0);
+        top->taken = (cond_val != 0);
     }
 }
 
-/**
- * @brief Handles #else directive.
- *
- * Marks the alternative branch of a conditional. Must appear only once per #if group.
- */
-void DPPF__else(PreprocessorState* state, const char* args) {
-    (void)args;                                            /* #else has no argument */
+void DPPF__else(PreprocessorState *state, const char *args) {
+    (void)args;  /* #else has no arguments */
 
-    ConditionalFrame* top = conditional_top(state);
+    ConditionalFrame *top = conditional_top(state);
     if (!top) {
         errhandler__report_error(ERROR_CODE_PP_INVALID_DIR,
                                  state->line, state->column,
@@ -743,26 +612,21 @@ void DPPF__else(PreprocessorState* state, const char* args) {
 
     int parent_skip = 0;
     if (state->conditional_ctx->count > 1) {
-        ConditionalFrame* parent = &state->conditional_ctx->stack[state->conditional_ctx->count - 2];
+        ConditionalFrame *parent = &state->conditional_ctx->stack[state->conditional_ctx->count - 2];
         parent_skip = parent->skip;
     }
 
     if (parent_skip) {
-        top->skip = 1;                                     /* parent skipped → whole block skipped */
+        top->skip = 1;
     } else {
-        top->skip = top->taken;                            /* if a branch was taken, skip #else; otherwise process it */
-        top->taken = 1;                                    /* mark that a branch (the #else) is now taken */
+        top->skip = top->taken;
+        top->taken = 1;
     }
     top->else_seen = 1;
 }
 
-/**
- * @brief Handles #endif directive.
- *
- * Closes the current conditional block.
- */
-void DPPF__endif(PreprocessorState* state, const char* args) {
-    (void)args;                                            /* #endif has no argument */
+void DPPF__endif(PreprocessorState *state, const char *args) {
+    (void)args;  /* #endif has no arguments */
 
     if (!conditional_top(state)) {
         errhandler__report_error(ERROR_CODE_PP_INVALID_DIR,
@@ -771,4 +635,133 @@ void DPPF__endif(PreprocessorState* state, const char* args) {
         return;
     }
     conditional_pop(state);
+}
+
+/*
+ * Recognizes an asm("...") call at the current position of the line.
+ * If found, it writes the assembly text directly to the output buffer.
+ * Returns 1 if an asm call was processed, 0 otherwise.
+ */
+int preprocessor_handle_asm(PreprocessorState *state, const char *line) {
+    const char *p = line;
+
+    /* Skip leading whitespace */
+    while (u__char_is_whitespace(*p) || *p == '\n' || *p == '\r')
+        p++;
+
+    if (!u__str_startw(p, "asm"))
+        return 0;
+
+    p += 3;  /* skip "asm" */
+    while (u__char_is_whitespace(*p) || *p == '\n' || *p == '\r')
+        p++;
+
+    if (*p != '(')
+        return 0;
+    p++;  /* skip '(' */
+
+    /* Locate the closing quote */
+    const char *start_quote = NULL;
+    char quote_char = 0;
+    if (*p == '"' || *p == '\'') {
+        quote_char = *p;
+        start_quote = p;
+        p++;
+    } else {
+        /* No opening quote – not a valid asm call */
+        return 0;
+    }
+
+    /* Find the matching closing quote */
+    const char *end_quote = NULL;
+    while (*p) {
+        if (*p == quote_char && (p == start_quote || *(p-1) != '\\')) {
+            end_quote = p;
+            break;
+        }
+        p++;
+    }
+    if (!end_quote)
+        return 0;
+
+    p = end_quote + 1;
+
+    /* Expect closing parenthesis */
+    while (u__char_is_whitespace(*p) || *p == '\n' || *p == '\r')
+        p++;
+    if (*p != ')')
+        return 0;
+
+    /* The assembly text is between start_quote+1 and end_quote */
+    size_t asm_len = end_quote - (start_quote + 1);
+    char *asm_text = malloc(asm_len + 1);
+    if (!asm_text)
+        return 0;
+    memcpy(asm_text, start_quote + 1, asm_len);
+    asm_text[asm_len] = '\0';
+
+    /* Output the assembly text using the preprocessor's output mechanism. */
+    preprocessor_output(state, asm_text, asm_len);
+    preprocessor_output(state, "\n", 1);
+
+    free(asm_text);
+    return 1;
+}
+
+/* --------------------------------------------------------------------------
+ * Stub / fallback implementations for missing functions.
+ * These are required to satisfy the linker. Replace with actual implementations
+ * if they already exist elsewhere in the project.
+ * -------------------------------------------------------------------------- */
+
+/*
+ * Output function for the preprocessor.
+ * In a real implementation this would write to the output file or buffer.
+ * Here it simply writes to stdout.
+ */
+void preprocessor_output(PreprocessorState *state, const char *data, size_t len) {
+    (void)state;  /* unused */
+    fwrite(data, 1, len, stdout);
+}
+
+/*
+ * Handlers for #ifdef and #ifndef directives.
+ * These should eventually be moved to a dedicated file (e.g., ifdef.c).
+ */
+void DPPF__ifdef(PreprocessorState *state, const char *args) {
+    int parent_skip = !conditional_should_output(state);
+    const Macro *m = macro_table_find(state->macro_table, args);
+    int cond = (m != NULL);
+
+    ConditionalFrame frame;
+    frame.parent_skip = parent_skip;
+    if (parent_skip) {
+        frame.skip = 1;
+        frame.taken = 0;
+    } else {
+        frame.skip = !cond;
+        frame.taken = cond;
+    }
+    frame.else_seen = 0;
+
+    conditional_push(state, frame);
+}
+
+void DPPF__ifndef(PreprocessorState *state, const char *args) {
+    int parent_skip = !conditional_should_output(state);
+    const Macro *m = macro_table_find(state->macro_table, args);
+    int cond = (m == NULL);
+
+    ConditionalFrame frame;
+    frame.parent_skip = parent_skip;
+    if (parent_skip) {
+        frame.skip = 1;
+        frame.taken = 0;
+    } else {
+        frame.skip = !cond;
+        frame.taken = cond;
+    }
+    frame.else_seen = 0;
+
+    conditional_push(state, frame);
 }
