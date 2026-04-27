@@ -1,0 +1,34 @@
+#using "inout"
+#using "type"
+#using "mathf"
+#using "args"
+
+#entry @start
+
+def calc(Float, ...): Float;
+
+def start(Null): Null {
+    io.println("%" calc(2.0, mth.PI(2):Float));
+
+exit:
+    signal(0x60) 0x80;
+    return Null;
+}
+
+def calc(def num: Float, ...): Float {
+    def result: Float = zero;
+    def factor: VLS = zero;
+
+    va.start(factor, num);
+
+    def i: Byte = zero;
+    do (i < num) {
+        result += va.arg(factor, Float);
+        i++;
+    }
+    del @i;
+
+    va.end(factor);
+    
+    return result;
+}

@@ -1,0 +1,21 @@
+#using "inout"
+#using "type"
+
+#entry @start
+
+def start(Null): Null {
+    def number: Byte = zero;
+    
+    io.print("Enter a number: ");
+    io.scan("%", number);
+    io.print(endl);
+    
+    if (number % 2 == 0) ->
+        io.println("% even number", number);
+    else ->
+        io.println("% odd number", number);
+    
+exit:
+    signal(0x60) 0x80;
+    return Null;
+}

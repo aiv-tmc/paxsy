@@ -1,0 +1,38 @@
+#using "inout"
+#using "type"
+
+#entry @start
+
+pro Person: Struct;
+pro Employee: Struct;
+
+pro calc(Short, Short): Short;
+
+def start(Null): Null {
+    def tom: Employee;
+    
+    io.scan("% % %", tom.name, tom.age, tom.specif);
+    io.println("name:\t%", tom.name);
+    io.println("age:\t%", tom.age);
+    io.println("specif:\t%", tom.specif);
+    
+    if (tom.age < 18 or tom.age > 85) ->
+        io.panic("Tom's age is less than 18 or more than 85");
+    
+    io.println("calc print: %", calc(24, 10));
+
+exit:
+    signal(0x60) 0x80;
+    return Null;
+}
+
+def calc(def num1: Short, def num2: Short): Short ->
+    return (num1 + num2);
+
+def Person: Struct {
+    name: Str;
+    age: Byte;
+    specif: Str;
+};
+
+def Employee: Struct = Person;

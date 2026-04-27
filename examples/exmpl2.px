@@ -1,0 +1,11 @@
+#using "inout"
+
+#entry @start
+
+def start(Null): Null {
+    io.printl("Hello, World!");
+
+exit:
+    signal(0x60) 0x80;
+    return Null;
+}
