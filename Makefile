@@ -7,24 +7,13 @@ SRCDIR = src
 # Version information
 GENERATION = "beta 4"
 NAME = "Rowan"
-VERSION = "0.4.2a"
-DATE = "2026APR13"
+VERSION = "0.4.3a"
+DATE = "2026APR27"
 
-# Compilation flags with version definitions
-CFLAGS = -std=c11 \
-         -DGENERATION=\"$(GENERATION)\" \
-         -DNAME=\"$(NAME)\" \
-         -DVERSION=\"v$(VERSION)\" \
-         -DDATE=\"$(DATE)\"
-
-# Source files
-SRC := $(shell find $(SRCDIR) -type f -name '*.c')
-
-# Determine architecture and OS
+# Determine architecture and OS for library path
 ARCH := $(shell uname -m)
 UNAME_S := $(shell uname -s)
 
-# Convert OS to a short identifier
 ifeq ($(UNAME_S), Linux)
     OS_SUFFIX := gnu_linux
 else ifeq ($(UNAME_S), Darwin)
@@ -33,24 +22,34 @@ else ifeq ($(findstring MINGW32, $(UNAME_S)), MINGW32)
     OS_SUFFIX := mingw32
 else ifeq ($(findstring MINGW64, $(UNAME_S)), MINGW64)
     OS_SUFFIX := mingw64
-else ifeq ($(findstring CYGWIN, $(UNAME_S)), CYGWIN)
-    OS_SUFFIX := cygwin
 else ifeq ($(UNAME_S), FreeBSD)
     OS_SUFFIX := freebsd
 else
     OS_SUFFIX := $(shell echo $(UNAME_S) | tr '[:upper:]' '[:lower:]')
 endif
 
-INSTALL_PATH := /usr/bin
-LIB_BASE := /usr
-
+# Base library installation directory (can be overridden)
+LIB_BASE ?= /usr
 SYS_ARCH := $(ARCH)-$(OS_SUFFIX)
-LIB_HEADER_PATH := $(LIB_BASE)/lib/paxsy/$(SYS_ARCH)/incl
-LIB_INCLUDE_PATH := $(LIB_BASE)/include/paxsy
 
-SHELL := /bin/bash
+# Library directories that will be embedded into compiler
+PAXSY_LIBRARY_DIR = $(LIB_BASE)/lib/paxsy/$(SYS_ARCH)
+PAXSY_INCLUDE_DIR = $(LIB_BASE)/include/paxsy
+
+# Compilation flags with version and library path definitions
+CFLAGS = -std=c11 \
+         -DGENERATION=\"$(GENERATION)\" \
+         -DNAME=\"$(NAME)\" \
+         -DVERSION=\"v$(VERSION)\" \
+         -DDATE=\"$(DATE)\" \
+         -DPAXSY_LIBRARY_DIR=\"$(PAXSY_LIBRARY_DIR)\" \
+         -DPAXSY_INCLUDE_DIR=\"$(PAXSY_INCLUDE_DIR)\"
+
+# Source files
+SRC := $(shell find $(SRCDIR) -type f -name '*.c')
 
 INSTALL_LIBS ?= ask
+SHELL := /bin/bash
 
 # Default target
 all: build install
@@ -89,14 +88,14 @@ endif
 install-libs:
 	@# Install header files (internal) to arch-specific path
 	@if [ -d "$(LIB_SOURCE_PATH)/header" ]; then \
-		echo ":: Installing header files to $(LIB_HEADER_PATH)..."; \
-		if [ -w "$(LIB_HEADER_PATH)" ] 2>/dev/null || mkdir -p "$(LIB_HEADER_PATH)" 2>/dev/null; then \
-			mkdir -p "$(LIB_HEADER_PATH)"; \
-			cp -r $(LIB_SOURCE_PATH)/header/* "$(LIB_HEADER_PATH)"/ 2>/dev/null || true; \
+		echo ":: Installing header files to $(PAXSY_LIBRARY_DIR)/incl..."; \
+		if [ -w "$(PAXSY_LIBRARY_DIR)" ] 2>/dev/null || mkdir -p "$(PAXSY_LIBRARY_DIR)" 2>/dev/null; then \
+			mkdir -p "$(PAXSY_LIBRARY_DIR)/incl"; \
+			cp -r $(LIB_SOURCE_PATH)/header/* "$(PAXSY_LIBRARY_DIR)/incl"/ 2>/dev/null || true; \
 		else \
 			echo "Superuser privileges required for header installation"; \
-			sudo mkdir -p "$(LIB_HEADER_PATH)"; \
-			sudo cp -r $(LIB_SOURCE_PATH)/header/* "$(LIB_HEADER_PATH)"/ 2>/dev/null || true; \
+			sudo mkdir -p "$(PAXSY_LIBRARY_DIR)/incl"; \
+			sudo cp -r $(LIB_SOURCE_PATH)/header/* "$(PAXSY_LIBRARY_DIR)/incl"/ 2>/dev/null || true; \
 		fi; \
 		echo "Header files installed."; \
 	else \
@@ -104,14 +103,14 @@ install-libs:
 	fi
 	@# Install public include files to versioned system include path
 	@if [ -d "$(LIB_SOURCE_PATH)/include" ]; then \
-		echo ":: Installing public include files to $(LIB_INCLUDE_PATH)..."; \
-		if [ -w "$(LIB_INCLUDE_PATH)" ] 2>/dev/null || mkdir -p "$(LIB_INCLUDE_PATH)" 2>/dev/null; then \
-			mkdir -p "$(LIB_INCLUDE_PATH)"; \
-			cp -r $(LIB_SOURCE_PATH)/include/* "$(LIB_INCLUDE_PATH)"/ 2>/dev/null || true; \
+		echo ":: Installing public include files to $(PAXSY_INCLUDE_DIR)..."; \
+		if [ -w "$(PAXSY_INCLUDE_DIR)" ] 2>/dev/null || mkdir -p "$(PAXSY_INCLUDE_DIR)" 2>/dev/null; then \
+			mkdir -p "$(PAXSY_INCLUDE_DIR)"; \
+			cp -r $(LIB_SOURCE_PATH)/include/* "$(PAXSY_INCLUDE_DIR)"/ 2>/dev/null || true; \
 		else \
 			echo "Superuser privileges required for include installation"; \
-			sudo mkdir -p "$(LIB_INCLUDE_PATH)"; \
-			sudo cp -r $(LIB_SOURCE_PATH)/include/* "$(LIB_INCLUDE_PATH)"/ 2>/dev/null || true; \
+			sudo mkdir -p "$(PAXSY_INCLUDE_DIR)"; \
+			sudo cp -r $(LIB_SOURCE_PATH)/include/* "$(PAXSY_INCLUDE_DIR)"/ 2>/dev/null || true; \
 		fi; \
 		echo "Public include files installed."; \
 	else \
@@ -135,28 +134,28 @@ uninstall:
 # Uninstall libraries
 uninstall-libs:
 	@# Remove header files
-	@if [ -d "$(LIB_HEADER_PATH)" ]; then \
-		echo ":: Removing header files from $(LIB_HEADER_PATH)..."; \
-		if [ -w "$(LIB_HEADER_PATH)" ]; then \
-			rm -rf "$(LIB_HEADER_PATH)"; \
+	@if [ -d "$(PAXSY_LIBRARY_DIR)" ]; then \
+		echo ":: Removing header files from $(PAXSY_LIBRARY_DIR)..."; \
+		if [ -w "$(PAXSY_LIBRARY_DIR)" ]; then \
+			rm -rf "$(PAXSY_LIBRARY_DIR)"; \
 		else \
-			sudo rm -rf "$(LIB_HEADER_PATH)"; \
+			sudo rm -rf "$(PAXSY_LIBRARY_DIR)"; \
 		fi; \
 		echo "Header files removed."; \
 	else \
-		echo "Directory $(LIB_HEADER_PATH) not found, skipping."; \
+		echo "Directory $(PAXSY_LIBRARY_DIR) not found, skipping."; \
 	fi
 	@# Remove public include files
-	@if [ -d "$(LIB_INCLUDE_PATH)" ]; then \
-		echo ":: Removing public include files from $(LIB_INCLUDE_PATH)..."; \
-		if [ -w "$(LIB_INCLUDE_PATH)" ]; then \
-			rm -rf "$(LIB_INCLUDE_PATH)"; \
+	@if [ -d "$(PAXSY_INCLUDE_DIR)" ]; then \
+		echo ":: Removing public include files from $(PAXSY_INCLUDE_DIR)..."; \
+		if [ -w "$(PAXSY_INCLUDE_DIR)" ]; then \
+			rm -rf "$(PAXSY_INCLUDE_DIR)"; \
 		else \
-			sudo rm -rf "$(LIB_INCLUDE_PATH)"; \
+			sudo rm -rf "$(PAXSY_INCLUDE_DIR)"; \
 		fi; \
 		echo "Public include files removed."; \
 	else \
-		echo "Directory $(LIB_INCLUDE_PATH) not found, skipping."; \
+		echo "Directory $(PAXSY_INCLUDE_DIR) not found, skipping."; \
 	fi
 
 # Clean everything (remove installed files and binary)
@@ -168,8 +167,8 @@ clean: uninstall uninstall-libs
 print-info:
 	@echo "Target: $(TARGET)"
 	@echo "Install path: $(INSTALL_PATH)"
-	@echo "Header library path: $(LIB_HEADER_PATH)"
-	@echo "Public include path: $(LIB_INCLUDE_PATH)"
+	@echo "Header library path: $(PAXSY_LIBRARY_DIR)/incl"
+	@echo "Public include path: $(PAXSY_INCLUDE_DIR)"
 	@echo "Source libs: $(LIB_SOURCE_PATH)"
 	@echo "Detected architecture: $(SYS_ARCH)"
 	@echo "Version (clean): $(VERSION)"
