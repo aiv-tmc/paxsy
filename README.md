@@ -7,12 +7,15 @@ The **paxsy** project is freely available under the MIT license. You can read it
 You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#dependencies )
 
 1. Clone the repository:
+
 `$ git clone https://github.com/aiv-tmc/Paxsy.git`
 
-2. Go to the directory with the code:
+3. Go to the directory with the code:
+
 `$ cd ~/Download/Paxsy/`
 
-3. Start making the program:
+4. Start making the program:
+
 `$ make`
 
 <!--Syntax highlighting-->
@@ -20,6 +23,7 @@ You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#
 To add syntax highlighting in **vim**:
 
 1. Move the **paxsy.vim** file to: `~/.vim/syntax/`
+
 `$ mv highlight/vim/syntax/paxsy.vim ~/.vim/syntax/paxsy.vim`
 
 2. Move the contents of the **vim_highlight/ftdetect/** file to: `~/.vim/ftdetect/`
@@ -29,6 +33,7 @@ To add syntax highlighting in **vim**:
 To add syntax highlighting in **vim**:
 
 1. Move the **paxsy.vim** file to: `~/.vim/syntax/`
+
 `$ mv highlight/vsc/paxsy/ ~/.vscode/extensions/`
 
 <!--Documentation-->
