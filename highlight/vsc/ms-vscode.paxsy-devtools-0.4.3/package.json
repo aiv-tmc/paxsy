@@ -1,7 +1,7 @@
 {
     "name": "paxsy",
-    "displayName": "Paxsy Language Support",
-    "description": "Syntax highlighting for Paxsy",
+    "displayName": "Paxsy Language",
+    "description": "Syntax highlighting for Paxsy-lang",
     "version": "0.4.3a",
     "engines": {
         "vscode": "^1.70.0"
