@@ -1,7 +1,7 @@
 {
     "name": "Paxsy",
     "scopeName": "source.paxsy",
-    "fileTypes": ["paxsy", "pxs", "pax"],
+    "fileTypes": ["px", "hp"],
     "patterns": [
         { "include": "#comments" },
         { "include": "#strings" },
