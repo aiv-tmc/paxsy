@@ -1,0 +1,568 @@
+#if !defined(VECTOR__LIB)
+#define VECTOR__LIB
+
+/**
+ * 2D vector aliases (default to 32‑bit)
+ */
+#define IVector2 IVector2_b32    // Signed 2D integer vector (32‑bit components)
+#define uIVector2 uIVector2_b32  // Unsigned 2D integer vector (32‑bit components)
+#define Vector2 Vector2_b32      // Signed 2D real vector (32‑bit components)
+#define uVector2 uVector2_b32    // Unsigned 2D real vector (32‑bit components)
+
+/**
+ * Signed 2D integer vectors (various bit widths)
+ */
+def IVector2_b8: Struct {
+    x: Int<1>;
+    y: Int<1>;
+};
+
+def IVector2_b16: Struct {
+    x: Int<2>;
+    y: Int<2>;
+};
+
+def IVector2_b32: Struct {
+    x: Int<4>;
+    y: Int<4>;
+};
+
+def IVector2_b64: Struct {
+    x: Int<8>;
+    y: Int<8>;
+};
+
+/**
+ * Unsigned 2D integer vectors
+ */
+def uIVector2_b8: Struct: Type {
+    x: unsigned Int<1>;
+    y: unsigned Int<1>;
+};
+
+def uIVector2_b16: Struct : Type {
+    x: unsigned Int<2>;
+    y: unsigned Int<2>;
+};
+
+def uIVector2_b32: Struct {
+    x: unsigned Int<4>;
+    y: unsigned Int<4>;
+};
+
+def uIVector2_b64: Struct {
+    x: unsigned Int<8>;
+    y: unsigned Int<8>;
+};
+
+/**
+ * Signed 2D real vectors
+ */
+def Vector2_b8: Struct {
+    x: Real<1>;
+    y: Real<1>;
+};
+
+def Vector2_b16: Struct {
+    x: Real<2>;
+    y: Real<2>;
+};
+
+def Vector2_b32: Struct {
+    x: Real<4>;
+    y: Real<4>;
+};
+
+def Vector2_b64: Struct {
+    x: Real<8>;
+    y: Real<8>;
+};
+
+/**
+ * Unsigned 2D real vectors
+ */
+def uVector2_b8: Struct {
+    x: unsigned Real<1>;
+    y: unsigned Real<1>;
+};
+
+def uVector2_b16: Struct {
+    x: unsigned Real<2>;
+    y: unsigned Real<2>;
+};
+
+def uVector2_b32: Struct {
+    x: unsigned Real<4>;
+    y: unsigned Real<4>;
+};
+
+def uVector2_b64: Struct {
+    x: unsigned Real<8>;
+    y: unsigned Real<8>;
+};
+
+/**
+ * 3D vector aliases (default to 32‑bit)
+ */
+#define IVector3 IVector3_b32    // Signed 3D integer vector
+#define uIVector3 uIVector3_b32  // Unsigned 3D integer vector
+#define Vector3 Vector3          // Signed 3D real vector
+#define uVector3 uVector3        // Unsigned 3D real vector
+
+/**
+ * Signed 3D integer vectors
+ */
+def IVector3_b8: Struct {
+    x: Int<1>;
+    y: Int<1>;
+    z: Int<1>;
+};
+
+def IVector3_b16: Struct {
+    x: Int<2>;
+    y: Int<2>;
+    z: Int<2>;
+};
+
+def IVector3_b32: Struct {
+    x: Int<4>;
+    y: Int<4>;
+    z: Int<4>;
+};
+
+def IVector3_b64: Struct {
+    x: Int<8>;
+    y: Int<8>;
+    z: Int<8>;
+};
+
+/**
+ * Unsigned 3D integer vectors
+ */
+def uIVector3_b8: Struct {
+    x: unsigned Int<1>;
+    y: unsigned Int<1>;
+    z: unsigned Int<1>;
+};
+
+def uIVector3_b16: Struct {
+    x: unsigned Int<2>;
+    y: unsigned Int<2>;
+    z: unsigned Int<2>;
+};
+
+def uIVector3_b32: Struct {
+    x: unsigned Int<4>;
+    y: unsigned Int<4>;
+    z: unsigned Int<4>;
+};
+
+def uIVector3_b64: Struct {
+    x: unsigned Int<8>;
+    y: unsigned Int<8>;
+    z: unsigned Int<8>;
+};
+
+/**
+ * Signed 3D real vectors
+ */
+def Vector3_b8: Struct {
+    x: Real<1>;
+    y: Real<1>;
+    z: Real<1>;
+};
+
+def Vector3_b16: Struct {
+    x: Real<2>;
+    y: Real<2>;
+    z: Real<2>;
+};
+
+def Vector3_b32: Struct {
+    x: Real<4>;
+    y: Real<4>;
+    z: Real<4>;
+};
+
+def Vector3_b64: Struct {
+    x: Real<8>;
+    y: Real<8>;
+    z: Real<8>;
+};
+
+/**
+ * Unsigned 3D real vectors
+ */
+def uVector3_b8: Struct {
+    x: unsigned Real<1>;
+    y: unsigned Real<1>;
+    z: unsigned Real<1>;
+};
+
+def uVector3_b16: Struct {
+    x: unsigned Real<2>;
+    y: unsigned Real<2>;
+    z: unsigned Real<2>;
+};
+
+def uVector3_b32: Struct {
+    x: unsigned Real<4>;
+    y: unsigned Real<4>;
+    z: unsigned Real<4>;
+};
+
+def uVector3_b64: Struct {
+    x: unsigned Real<8>;
+    y: unsigned Real<8>;
+    z: unsigned Real<8>;
+};
+
+/**
+ * Rectangle side sets (four sides) aliases (default 32‑bit)
+ */
+#define Side4 Side4_b32: Struct          // Signed real sides
+#define uSide4 uSide4_b32: Struct        // Unsigned real sides
+#define ISide4 ISide4_b32: Struct        // Signed integer sides
+#define uISide4 uISide4_b32: Struct      // Unsigned integer sides
+
+/**
+ * Signed real sides (4 components)
+ */
+def Side4_b8: Struct {
+    right: Real<1>;
+    left: Real<1>;
+    top: Real<1>;
+    bottom: Real<1>;
+};
+
+def Side4_b16: Struct {
+    right: Real<2>;
+    left: Real<2>;
+    top: Real<2>;
+    bottom: Real<2>;
+};
+
+def Side4_b32: Struct {
+    right: Real<4>;
+    left: Real<4>;
+    top: Real<4>;
+    bottom: Real<4>;
+};
+
+def Side4_b64: Struct {
+    right: Real<8>;
+    left: Real<8>;
+    top: Real<8>;
+    bottom: Real<8>;
+};
+
+/**
+ * Unsigned real sides (4 components)
+ */
+def uSide4_b8: Struct {
+    right: unsigned Real<1>;
+    left: unsigned Real<1>;
+    top: unsigned Real<1>;
+    bottom: unsigned Real<1>;
+};
+
+def uSide4_b16: Struct {
+    right: unsigned Real<2>;
+    left: unsigned Real<2>;
+    top: unsigned Real<2>;
+    bottom: unsigned Real<2>;
+};
+
+def uSide4_b32: Struct {
+    right: unsigned Real<4>;
+    left: unsigned Real<4>;
+    top: unsigned Real<4>;
+    bottom: unsigned Real<4>;
+};
+
+def uSide4_b64: Struct {
+    right: unsigned Real<8>;
+    left: unsigned Real<8>;
+    top: unsigned Real<8>;
+    bottom: unsigned Real<8>;
+};
+
+/**
+ * Signed integer sides (4 components)
+ */
+def ISide4_b8: Struct {
+    right: Int<1>;
+    left: Int<1>;
+    top: Int<1>;
+    bottom: Int<1>;
+};
+
+def ISide4_b16: Struct {
+    right: Int<2>;
+    left: Int<2>;
+    top: Int<2>;
+    bottom: Int<2>;
+};
+
+def ISide4_b32: Struct {
+    right: Int<4>;
+    left: Int<4>;
+    top: Int<4>;
+    bottom: Int<4>;
+};
+
+def ISide4_b64: Struct {
+    right: Int<8>;
+    left: Int<8>;
+    top: Int<8>;
+    bottom: Int<8>;
+};
+
+/**
+ * Unsigned integer sides (4 components)
+ */
+def uISide4_b8: Struct {
+    right: unsigned Int<1>;
+    left: unsigned Int<1>;
+    top: unsigned Int<1>;
+    bottom: unsigned Int<1>;
+};
+
+def uISide4_b16: Struct {
+    right: unsigned Int<2>;
+    left: unsigned Int<2>;
+    top: unsigned Int<2>;
+    bottom: unsigned Int<2>;
+};
+
+def uISide4_b32: Struct {
+    right: unsigned Int<4>;
+    left: unsigned Int<4>;
+    top: unsigned Int<4>;
+    bottom: unsigned Int<4>;
+};
+
+def uISide4_b64: Struct {
+    right: unsigned Int<8>;
+    var lift    : unsigned Int<8>;
+    top: unsigned Int<8>;
+    bottom: unsigned Int<8>;
+};
+
+/**
+ * Top‑bottom side pairs (default 32‑bit)
+ */
+#define SideTB SideTB_b32: Struct          // Signed real top/bottom
+#define uSideTB uSideTB_b32: Struct        // Unsigned real top/bottom
+#define ISideTB ISideTB_b32: Struct        // Signed integer top/bottom
+#define uISideTB uISideTB_b32: Struct      // Unsigned integer top/bottom
+
+/**
+ * Signed real top‑bottom
+ */
+def SideTB_b8: Struct {
+    top: Real<1>;
+    bottom: Real<1>;
+};
+
+def SideTB_b16: Struct {
+    top: Real<2>;
+    bottom: Real<2>;
+};
+
+def SideTB_b32: Struct {
+    top: Real<4>;
+    bottom: Real<4>;
+};
+
+def SideTB_b64: Struct {
+    top: Real<8>;
+    bottom: Real<8>;
+};
+
+/**
+ * Unsigned real top‑bottom
+ */
+def uSideTB_b8: Struct {
+    top: unsigned Real<1>;
+    bottom: unsigned Real<1>;
+};
+
+def uSideTB_b16: Struct {
+    top: unsigned Real<2>;
+    bottom: unsigned Real<2>;
+};
+
+def uSideTB_b32: Struct {
+    top: unsigned Real<4>;
+    bottom: unsigned Real<4>;
+};
+
+def uSideTB_b64: Struct {
+    top: unsigned Real<8>;
+    bottom: unsigned Real<8>;
+};
+
+/**
+ * Signed integer top‑bottom
+ */
+def ISideTB_b8: Struct {
+    top: Int<1>;
+    bottom: Int<1>;
+};
+
+def ISideTB_b16: Struct {
+    top: Int<2>;
+    bottom: Int<2>;
+};
+
+def ISideTB_b32: Struct {
+    top: Int<4>;
+    bottom: Int<4>;
+};
+
+def ISideTB_b64: Struct {
+    top: Int<8>;
+    bottom: Int<8>;
+};
+
+/**
+ * unsigned integer top‑bottom
+ */
+def uISideTB_b8: Struct {
+    top: unsigned Int<1>;
+    bottom: unsigned Int<1>;
+};
+
+def uISideTB_b16: Struct {
+    top: unsigned Int<2>;
+    bottom: unsigned Int<2>;
+};
+
+def uISideTB_b32: Struct {
+    top: unsigned Int<4>;
+    bottom: unsigned Int<4>;
+};
+
+def uISideTB_b64: Struct {
+    top: unsigned Int<8>;
+    bottom: unsigned Int<8>;
+};
+
+/**
+ * Right‑left side pairs (default 32‑bit)
+ */
+#define SideRL SideRL_b32          // Signed real right/left
+#define uSideRL uSideRL_b32        // Unsigned real right/left
+#define ISideRL ISideRL_b32        // Signed integer right/left
+#define uISideRL uISideRL_b32      // Unsigned integer right/left
+
+/**
+ * Signed real right‑left
+ */
+def SideRL_b8: Struct {
+    right: Real<1>;
+    left: Real<1>;
+};
+
+def SideRL_b16: Struct {
+    right: Real<2>;
+    left: Real<2>;
+};
+
+def SideRL_b32: Struct {
+    right: Real<4>;
+    left: Real<4>;
+};
+
+def SideRL_b64: Struct {
+    right: Real<8>;
+    left: Real<8>;
+};
+
+/**
+ * unsigned real right‑left
+ */
+def uSideRL_b8: Struct {
+    right: unsigned Real<1>;
+    left: unsigned Real<1>;
+};
+
+def uSideRL_b16: Struct {
+    right: unsigned Real<2>;
+    left: unsigned Real<2>;
+};
+
+def uSideRL_b32: Struct {
+    right: unsigned Real<4>;
+    left: unsigned Real<4>;
+};
+
+def uSideRL_b64: Struct {
+    right: unsigned Real<8>;
+    left: unsigned Real<8>;
+};
+
+/**
+ * Signed integer right‑left
+ */
+def ISideRL_b8: Struct {
+    right: Int<1>
+    left: Int<1>;
+};
+
+def ISideRL_b16: Struct {
+    right: Int<2>
+    left: Int<2>;
+};
+
+def ISideRL_b32: Struct {
+    right: Int<4>
+    left: Int<4>;
+};
+
+def ISideRL_b64: Struct {
+    right: Int<8>
+    left: Int<8>;
+};
+
+/**
+ * unsigned integer right‑left
+ */
+de uISideRL_b8: Struct {
+    right: unsigned Int<1>;
+    left: unsigned Int<1>;
+};
+
+def uISideRL_b16: Struct {
+    right: unsigned Int<2>;
+    left: unsigned Int<2>;
+};
+
+def uISideRL_b32: Struct {
+    right: unsigned Int<4>;
+    left: unsigned Int<4>;
+};
+
+def uISideRL_b64: Struct {
+    right: unsigned Int<8>;
+    left: unsigned Int<8>;
+};
+
+/**
+ * color (8 bits per component)
+ */
+def RGB: Struct {
+    g: Int<1>;
+    b: Int<1>;
+    a: Int<1>;
+};
+
+def RGBA: Struct {
+    r: Int<1>;
+    g: Int<1>;
+    b: Int<1>;
+    a: Int<1>;
+};
+
+#endif /* VECTOR__LIB */

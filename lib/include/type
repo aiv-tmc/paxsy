@@ -1,0 +1,22 @@
+#if !defined(TYPE__LIB)
+#define TYPE__LIB
+
+/**
+ * Integer types with explicit bit widths
+ */
+#define Byte    Int < 1>    //  8-bit unsigned integer
+#define Short   Int < 2>    // 16-bit unsigned integer
+#define Rune    Int < 4>    // 32-bit unsigned integer (Unicode code point)
+#define Word    Int < 8>    // 64-bit unsigned integer
+#define Long    Int <16>    // 128-bit unsigned integer
+#define Size    Int <64>    // Void type with 512‑bit size (used for size information)
+
+/**
+ * Floating‑point types with explicit bit widths
+ */
+#define Float   Real< 2>    // 16-bit half‑precision float
+#define Double  Real< 4>    // 32-bit single‑precision float
+#define Noi80   Real<10>    // 80-bit extended precision float (x86 long double)
+#define Decimal Real<16>    // 128-bit quadruple‑precision float
+
+#endif /* TYPE__LIB */

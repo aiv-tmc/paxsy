@@ -1,0 +1,60 @@
+#if !defined(LIST__LIB)
+#defne LIST__LIB
+
+pro static Llist__new(uInt<8>, Int<4>): Null;
+pro static Llist__end(Null): Null;
+pro static Llist__isEmpty(Null): Bool;
+pro static Llist__head(Null): uInt<4>;
+pro static Llist__tail(Null): uInt<4>;
+pro static Llist__size(Null): uInt<8>;
+pro static Llist__at(uInt): Null;
+
+def static data: @uInt<4> = none;
+def static size:  uInt<8> = zero;
+
+def extern close List: Struct {
+    const @new(uInt<8>, Int<4>): Null = @Llist__new(uInt<8>, Int<4>);
+    const @end(Null): Null = @Llist__end(Null);
+
+    const @isEmpty(Null): Bool = @Llist__isEmpty(Null);
+    const @head(Null): uInt<4> = @Llist__head(Null);
+    const @tail(Null): uInt<4> = @Llist__tail(Null);
+    const @size(Null): uInt<8> = @Llist__size(Null);
+    const @at(uInt<8>): Null = @Llist__at(uInt<8>);
+};
+
+def static Llist__new(def size: uInt<8>=zero, def value: Int<4>=zero): Null {
+    List.size = size;
+    def i: Int<4> = 0;
+    do (i < size) {
+        List.data[i] = value;
+        i++;
+    }
+    return Null;
+}
+
+def static Llist__end(Null): Null {
+    def i: Int<4> = 0;
+    do (i < List.size) {
+        free(List.date[i]);
+        i++;
+    }
+    return Null;
+}
+
+def static Llist__isEmpty(Null): Bool ->
+    return !List.size ? {true} : {false};
+
+def static Llist__head(Null): uInt<4> ->
+    return List.data[0];
+
+def static Llist__tail(Null): uInt<4> ->
+    return List.data[List.size];
+
+def static Llist__size(Null): uInt<8> ->
+    return List.size;
+
+def static @Llist__at(index: uInt<8>=zero): Null ->
+    return List.data[index];
+
+#endif

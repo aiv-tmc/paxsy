@@ -1,0 +1,115 @@
+#if !defined(STACK__LIB)
+#define STACK__LIB
+
+pro static Lstack__new(uInt<8>, Int<4>): Null;
+pro static Lstack__end(Null): Null;
+pro static Lstack__isEmpty(Null): Bool;
+pro static Lstack__top(Null): uInt<4>;
+pro static Lstack__size(Null): uInt<8>;
+pro static Lstack__push(Int<4>): Null;
+pro static Lstack__pop(Null); Int<4>;
+pro static Lstack__at(uInt<8>): uInt<8>;
+
+def static data: @uInt<4> = none;
+def static size:  uInt<8> = zero;
+
+def extern close Stack: Struct {
+    const @new(uInt<8>, Int<4>): Null = @Lstack__new(uInt<8>, Int<4>);
+    const @end(Null): Null = @Lstack__end(Null);
+
+    const @isEmpty(Null): Bool = @Lstack__isEmpty(Null);
+    const @top(Null): uInt<4> = @Lstack__top(Null);
+    const @size(Null): uInt<8> = @Lstack__size(Null);
+    const @push(Int<4>): Null = @Lstack__push(Int<4>);
+    const @pop(Null): Int<4> = @Lstack__pop(Null);
+    const @at(uInt<8>): uInt<8> = @Lstack__at(uInt<8>);
+};
+
+def static Lstack__new(size: uInt<8>=zero, value: Int<4>=none): Null {
+    Stack.size = size;
+    {
+        i: Int<4> = zero;
+        do (i < size) {
+            Stack.data[i] = value;
+            i++;
+        }
+    }
+
+    return Null;
+}
+
+def static Lstack__end(Null): Null {
+    {
+        i: Int<4> = zero;
+        do (i < Stack.size) {
+            free(Stack.data[i]);
+            i++;
+        }
+    }
+
+    return Null;
+}
+
+def static Lstack__isEmpty(Null): Bool ->
+    return !Stack.size ? {true} : {false};
+
+def static Lstack__top(Null): uInt<4> ->
+    return Stack.data[Stack.size];
+
+def static Lstack__size(Null): uInt<8> ->
+    return Stack.size;
+
+def static Lstack__push(value: Int<4>=zero): Null {
+    Stack.size++;
+
+    data: @Int<4> = calloc(size, uInt<4>): Int<4>;
+    {
+        i: Int<4> = zero;
+        do (i < --Stack.size) {
+            data[i] = Stack.data[i];
+            i++;
+        }
+    }
+
+    data[Stack.size] = value;
+    @Stack.data = @data;
+    {
+        i: Int<4> = zero;
+        do (i < Stack.size) {
+            free(data[i]);
+            i++;
+        }
+    }
+
+    return Null;
+}
+
+def static Lstack__pop(Null): Int<4> {
+    Stack.size--;
+
+    data: @Int<4> = calloc(size, uInt<4>): Int<4>;
+    {
+        i: Int<4> = zero;
+        do (i < --Stack.size) {
+            data[i] = Stack.data[i];
+            i++;
+        }
+    }
+
+    result: Int<4> = Stack.data[Stack.size];
+    @Stack.data = @data;
+    {
+        i: Int<4> = zero;
+        do (i < Stack.size) {
+            free(data[i]);
+            i++;
+        }
+    }
+
+    return result;
+}
+
+def static @Lstack__at(index: uInt<8>=zero): uInt<8> ->
+    return Stack.data[index];
+
+#endif
