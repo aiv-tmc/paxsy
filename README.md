@@ -12,7 +12,7 @@ You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#
 
 3. Go to the directory with the code:
 
-`$ cd ~/Download/Paxsy/`
+`$ cd ~/Download/paxsy/`
 
 4. Start making the program:
 
