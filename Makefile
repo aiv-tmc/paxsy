@@ -33,8 +33,8 @@ LIB_BASE ?= /usr
 SYS_ARCH := $(ARCH)-$(OS_SUFFIX)
 
 # Library directories that will be embedded into compiler
-PAXSY_LIBRARY_DIR = $(LIB_BASE)/lib/paxsy/$(SYS_ARCH)
-PAXSY_INCLUDE_DIR = $(LIB_BASE)/include/paxsy
+PAXSY_LIBRARY_DIR = $(LIB_BASE)/include/paxsy
+PAXSY_INCLUDE_DIR = $(LIB_BASE)/lib/paxsy/include
 
 # Compilation flags with version and library path definitions
 CFLAGS = -std=c11 \
@@ -84,22 +84,22 @@ else
 	@echo "Skipping library installation (INSTALL_LIBS=$(INSTALL_LIBS))."
 endif
 
-# Install libraries (header files and public includes)
+# Install libraries (shared files and public includes)
 install-libs:
-	@# Install header files (internal) to arch-specific path
-	@if [ -d "$(LIB_SOURCE_PATH)/header" ]; then \
-		echo ":: Installing header files to $(PAXSY_LIBRARY_DIR)/incl..."; \
+	@# Install shared files (internal) to arch-specific path
+	@if [ -d "$(LIB_SOURCE_PATH)/shared" ]; then \
+		echo ":: Installing shared files to $(PAXSY_LIBRARY_DIR)..."; \
 		if [ -w "$(PAXSY_LIBRARY_DIR)" ] 2>/dev/null || mkdir -p "$(PAXSY_LIBRARY_DIR)" 2>/dev/null; then \
-			mkdir -p "$(PAXSY_LIBRARY_DIR)/incl"; \
-			cp -r $(LIB_SOURCE_PATH)/header/* "$(PAXSY_LIBRARY_DIR)/incl"/ 2>/dev/null || true; \
+			mkdir -p "$(PAXSY_LIBRARY_DIR)"; \
+			cp -r $(LIB_SOURCE_PATH)/shared/* "$(PAXSY_LIBRARY_DIR)"/ 2>/dev/null || true; \
 		else \
-			echo "Superuser privileges required for header installation"; \
-			sudo mkdir -p "$(PAXSY_LIBRARY_DIR)/incl"; \
-			sudo cp -r $(LIB_SOURCE_PATH)/header/* "$(PAXSY_LIBRARY_DIR)/incl"/ 2>/dev/null || true; \
+			echo "Superuser privileges required for shared installation"; \
+			sudo mkdir -p "$(PAXSY_LIBRARY_DIR)"; \
+			sudo cp -r $(LIB_SOURCE_PATH)/shared/* "$(PAXSY_LIBRARY_DIR)"/ 2>/dev/null || true; \
 		fi; \
-		echo "Header files installed."; \
+		echo "Shared files installed."; \
 	else \
-		echo "!! Directory $(LIB_SOURCE_PATH)/header not found, skipping header installation."; \
+		echo "!! Directory $(LIB_SOURCE_PATH)/shared not found, skipping shared installation."; \
 	fi
 	@# Install public include files to versioned system include path
 	@if [ -d "$(LIB_SOURCE_PATH)/include" ]; then \
@@ -133,15 +133,15 @@ uninstall:
 
 # Uninstall libraries
 uninstall-libs:
-	@# Remove header files
+	@# Remove shared files
 	@if [ -d "$(PAXSY_LIBRARY_DIR)" ]; then \
-		echo ":: Removing header files from $(PAXSY_LIBRARY_DIR)..."; \
+		echo ":: Removing shared files from $(PAXSY_LIBRARY_DIR)..."; \
 		if [ -w "$(PAXSY_LIBRARY_DIR)" ]; then \
 			rm -rf "$(PAXSY_LIBRARY_DIR)"; \
 		else \
 			sudo rm -rf "$(PAXSY_LIBRARY_DIR)"; \
 		fi; \
-		echo "Header files removed."; \
+		echo "Shared files removed."; \
 	else \
 		echo "Directory $(PAXSY_LIBRARY_DIR) not found, skipping."; \
 	fi
@@ -167,7 +167,7 @@ clean: uninstall uninstall-libs
 print-info:
 	@echo "Target: $(TARGET)"
 	@echo "Install path: $(INSTALL_PATH)"
-	@echo "Header library path: $(PAXSY_LIBRARY_DIR)/incl"
+	@echo "Shared library path: $(PAXSY_LIBRARY_DIR)/incl"
 	@echo "Public include path: $(PAXSY_INCLUDE_DIR)"
 	@echo "Source libs: $(LIB_SOURCE_PATH)"
 	@echo "Detected architecture: $(SYS_ARCH)"
