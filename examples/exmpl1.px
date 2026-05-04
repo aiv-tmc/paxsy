@@ -3,15 +3,13 @@
 #using "mathf"
 #using "args"
 
-#entry @start
-
 def calc(Float, ...): Float;
 
-def start(Null): Null {
+def main(Null): Null {
     io.println("%" calc(2.0, mth.PI(2):Float));
 
 exit:
-    signal(0x60) 0x80;
+    signal 93 << 64;
     return Null;
 }
 

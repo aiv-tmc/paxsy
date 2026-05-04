@@ -1,9 +1,7 @@
 #using "inout"
 #using "type"
 
-#entry @start
-
-def start(Null): Null {
+def main(Null): Null {
     def low: Byte = zero;
     def hight: Byte = zero;
     
@@ -29,6 +27,6 @@ def start(Null): Null {
     io.print(endl);
     
 exit:
-    signal(0x60) 0x80;
+    signal 93 << 64;
     return Null;
 }

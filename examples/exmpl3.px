@@ -1,9 +1,7 @@
 #using "inout"
 #using "type"
 
-#entry @start
-
-def start(Null): Null {
+def main(Null): Null {
     def number: Byte = zero;
     
     io.print("Enter a number: ");
@@ -16,6 +14,6 @@ def start(Null): Null {
         io.println("% odd number", number);
     
 exit:
-    signal(0x60) 0x80;
+    signal 93 << 64;
     return Null;
 }

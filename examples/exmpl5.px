@@ -1,14 +1,12 @@
 #using "inout"
 #using "type"
 
-#entry @start
-
 pro Person: Struct;
 pro Employee: Struct;
 
 pro calc(Short, Short): Short;
 
-def start(Null): Null {
+def main(Null): Null {
     def tom: Employee;
     
     io.scan("% % %", tom.name, tom.age, tom.specif);
@@ -22,7 +20,7 @@ def start(Null): Null {
     io.println("calc print: %", calc(24, 10));
 
 exit:
-    signal(0x60) 0x80;
+    signal 93 << 64;
     return Null;
 }
 
