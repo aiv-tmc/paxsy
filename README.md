@@ -10,11 +10,11 @@ You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#
 
 `$ git clone https://github.com/aiv-tmc/Paxsy.git`
 
-3. Go to the directory with the code:
+2. Go to the directory with the code:
 
 `$ cd ~/Download/paxsy/`
 
-4. Start making the program:
+3. Start making the program:
 
 `$ make`
 
