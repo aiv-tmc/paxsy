@@ -1,9 +1,0 @@
-#using "inout"
-
-def main(Null): Null {
-    io.printl("Hello, World!");
-
-exit:
-    signal 93 << 64;
-    return Null;
-}
