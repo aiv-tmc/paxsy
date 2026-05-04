@@ -13,8 +13,7 @@ syn keyword pxLogOper   or and
 syn keyword pxKeyword   if else elif
 syn keyword pxKeyword   do break continue
 syn keyword pxKeyword   try catch
-syn keyword pxKeyword   nop
-syn keyword pxKeyword   halt interflag signal kill
+syn keyword pxKeyword   nop asm signal
 syn keyword pxKeyword   jump return
 syn keyword pxKeyword   sizeof typeof
 syn keyword pxKeyword   realloc alloc free calloc memset memcpy memcmp
@@ -27,13 +26,13 @@ syn keyword pxNumber    none zero
 syn keyword pxNumber    true false
 
 " State
-syn keyword pxState def del pro
+syn keyword pxState     def del pro
 
 " Type
-syn keyword pxType  Int Real Char Void Auto Struct
-syn keyword pxType  uInt uReal
-syn keyword pxType  unsigned signed volatile const fixed close open extern static regis inline
-syn keyword pxType  Byte Short Rune Word Long Float Double Noi80 Decimal Size Time Bool Str VLS Null
+syn keyword pxType      Int Real Char Void Auto Struct
+syn keyword pxType      uInt uReal
+syn keyword pxType      unsigned signed volatile const fixed close open extern static regis inline
+syn keyword pxType      Byte Short Rune Word Long Float Double Noi80 Decimal Size Time Bool Str VLS Null
 
 " Comments
 syn match   pxComment   "\/\/.*$"                       contains=pxTodo,@Spell
