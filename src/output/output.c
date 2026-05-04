@@ -10,104 +10,134 @@ static FILE* trace_file          = NULL;
 
 /* Mapping from token type to printable name */
 const char* token_names[] = {
-    [TOKEN_NUMBER]       = "NUMBER",       [TOKEN_CHAR]         = "CHAR",
-    [TOKEN_STRING]       = "STRING",       [TOKEN_IF]           = "IF",
-    [TOKEN_ELSE]         = "ELSE",         [TOKEN_DO]           = "DO",
-    [TOKEN_BREAK]        = "BREAK",        [TOKEN_CONTINUE]     = "CONTINUE",
-    [TOKEN_NOP]          = "NOP",          [TOKEN_HALT]         = "HALT",
-    [TOKEN_INTERFLAG]    = "INTERFLAG",    [TOKEN_SIGNAL]       = "SIGNAL",
-    [TOKEN_KILL]         = "KILL",         [TOKEN_JUMP]         = "JUMP",
-    [TOKEN_RETURN]       = "RETURN",       [TOKEN_SIZEOF]       = "SIZEOF",
-    [TOKEN_TYPEOF]       = "TYPEOF",       [TOKEN_ALLOC]        = "ALLOC",
-    [TOKEN_CALLOC]       = "CALLOC",       [TOKEN_REALLOC]      = "REALLOC",
-    [TOKEN_FREE]         = "FREE",         [TOKEN_NONE]         = "NONE",
-    [TOKEN_EXTENDS]      = "EXTENDS",      [TOKEN_TYPE]         = "TYPE",
-    [TOKEN_CONSTMOD]     = "CONSTMOD",     [TOKEN_ACCMOD]       = "ACCMOD",
-    [TOKEN_SIGNEDMOD]    = "SIGNEDMOD",    [TOKEN_MEMMOD]       = "MEMMOD",
-    [TOKEN_LOGICAL]      = "LOGICAL",      [TOKEN_ID]           = "ID",
-    [TOKEN_PERCENT]      = "PERCENT",      [TOKEN_COLON]        = "COLON",
-    [TOKEN_DOT]          = "DOT",          [TOKEN_SEMICOLON]    = "SEMICOLON",
-    [TOKEN_EQUAL]        = "EQUAL",        [TOKEN_COMMA]        = "COMMA",
-    [TOKEN_PLUS]         = "PLUS",         [TOKEN_MINUS]        = "MINUS",
-    [TOKEN_STAR]         = "STAR",         [TOKEN_SLASH]        = "SLASH",
-    [TOKEN_QUESTION]     = "QUESTION",     [TOKEN_TILDE]        = "TILDE",
-    [TOKEN_NE_TILDE]     = "NE_TILDE",     [TOKEN_PIPE]         = "PIPE",
-    [TOKEN_AMPERSAND]    = "AMPERSAND",    [TOKEN_BANG]         = "BANG",
-    [TOKEN_CARET]        = "CARET",        [TOKEN_AT]           = "AT",
-    [TOKEN_GT]           = "GT",           [TOKEN_LT]           = "LT",
-    [TOKEN_SHR]          = "SHR",          [TOKEN_SHL]          = "SHL",
-    [TOKEN_SAR]          = "SAR",          [TOKEN_SAL]          = "SAL",
-    [TOKEN_ROR]          = "ROR",          [TOKEN_ROL]          = "ROL",
-    [TOKEN_GE]           = "GE",           [TOKEN_LE]           = "LE",
-    [TOKEN_DOUBLE_EQ]    = "DOUBLE_EQ",    [TOKEN_NE]           = "NE",
-    [TOKEN_PLUS_EQ]      = "PLUS_EQ",      [TOKEN_MINUS_EQ]     = "MINUS_EQ",
-    [TOKEN_STAR_EQ]      = "STAR_EQ",      [TOKEN_SLASH_EQ]     = "SLASH_EQ",
-    [TOKEN_PERCENT_EQ]   = "PERCENT_EQ",   [TOKEN_PIPE_EQ]      = "PIPE_EQ",
-    [TOKEN_AMPERSAND_EQ] = "AMPERSAND_EQ", [TOKEN_CARET_EQ]     = "CARET_EQ",
-    [TOKEN_SHL_EQ]       = "SHL_EQ",       [TOKEN_SHR_EQ]       = "SHR_EQ",
-    [TOKEN_SAR_EQ]       = "SAR_EQ",       [TOKEN_SAL_EQ]       = "SAL_EQ",
-    [TOKEN_ROL_EQ]       = "ROL_EQ",       [TOKEN_ROR_EQ]       = "ROR_EQ",
-    [TOKEN_DOUBLE_PLUS]  = "DOUBLE_PLUS",  [TOKEN_DOUBLE_MINUS] = "DOUBLE_MINUS",
-    [TOKEN_THEN]         = "THEN",         [TOKEN_LCURLY]       = "LCURLY",
-    [TOKEN_RCURLY]       = "RCURLY",       [TOKEN_LBRACE]       = "LBRACE",
-    [TOKEN_RBRACE]       = "RBRACE",       [TOKEN_LPAREN]       = "LPAREN",
-    [TOKEN_RPAREN]       = "RPAREN",       [TOKEN_EOF]          = "EOF",
-    [TOKEN_ERRORCODE]    = "ERRORCODE"
+    [TOKEN_NUMBER]          = "NUMBER",
+    [TOKEN_CHAR]            = "CHAR",
+    [TOKEN_STRING]          = "STRING",
+    [TOKEN_IF]              = "IF",
+    [TOKEN_ELSE]            = "ELSE",
+    [TOKEN_DO]              = "DO",
+    [TOKEN_BREAK]           = "BREAK",
+    [TOKEN_CONTINUE]        = "CONTINUE",
+    [TOKEN_NOP]             = "NOP",
+    [TOKEN_SIGNAL]          = "SIGNAL",
+    [TOKEN_ASM]             = "ASM",
+    [TOKEN_JUMP]            = "JUMP",
+    [TOKEN_RETURN]          = "RETURN",
+    [TOKEN_SIZEOF]          = "SIZEOF",
+    [TOKEN_TYPEOF]          = "TYPEOF",
+    [TOKEN_ALLOC]           = "ALLOC",
+    [TOKEN_REALLOC]         = "REALLOC",
+    [TOKEN_FREE]            = "FREE",
+    [TOKEN_NONE]            = "NONE",
+    [TOKEN_STATE]           = "STATE",
+    [TOKEN_TYPE]            = "TYPE",
+    [TOKEN_TYPEMOD]         = "TYPEMOD",
+    [TOKEN_STATEMOD]        = "STATEMOD",
+    [TOKEN_LOGICAL]         = "LOGICAL",
+    [TOKEN_ID]              = "ID",
+    [TOKEN_PERCENT]         = "PERCENT",
+    [TOKEN_COLON]           = "COLON",
+    [TOKEN_DOT]             = "DOT",
+    [TOKEN_SEMICOLON]       = "SEMICOLON",
+    [TOKEN_EQUAL]           = "EQUAL",
+    [TOKEN_COMMA]           = "COMMA",
+    [TOKEN_PLUS]            = "PLUS",
+    [TOKEN_MINUS]           = "MINUS",
+    [TOKEN_STAR]            = "STAR",
+    [TOKEN_SLASH]           = "SLASH",
+    [TOKEN_QUESTION]        = "QUESTION",
+    [TOKEN_TILDE]           = "TILDE",
+    [TOKEN_PIPE]            = "PIPE",
+    [TOKEN_AMPERSAND]       = "AMPERSAND",
+    [TOKEN_BANG]            = "BANG",
+    [TOKEN_CARET]           = "CARET",
+    [TOKEN_AT]              = "AT",
+    [TOKEN_DOLLAR]          = "DOLLAR",
+    [TOKEN_GT]              = "GT",
+    [TOKEN_LT]              = "LT",
+    [TOKEN_SHR]             = "SHR",
+    [TOKEN_SHL]             = "SHL",
+    [TOKEN_SAR]             = "SAR",
+    [TOKEN_SAL]             = "SAL",
+    [TOKEN_ROR]             = "ROR",
+    [TOKEN_ROL]             = "ROL",
+    [TOKEN_GE]              = "GE",
+    [TOKEN_LE]              = "LE",
+    [TOKEN_DOUBLE_EQ]       = "DOUBLE_EQ",
+    [TOKEN_NE]              = "NE",
+    [TOKEN_PLUS_EQ]         = "PLUS_EQ",
+    [TOKEN_MINUS_EQ]        = "MINUS_EQ",
+    [TOKEN_STAR_EQ]         = "STAR_EQ",
+    [TOKEN_SLASH_EQ]        = "SLASH_EQ",
+    [TOKEN_PERCENT_EQ]      = "PERCENT_EQ",
+    [TOKEN_PIPE_EQ]         = "PIPE_EQ",
+    [TOKEN_AMPERSAND_EQ]    = "AMPERSAND_EQ",
+    [TOKEN_CARET_EQ]        = "CARET_EQ",
+    [TOKEN_SHL_EQ]          = "SHL_EQ",
+    [TOKEN_SHR_EQ]          = "SHR_EQ",
+    [TOKEN_SAR_EQ]          = "SAR_EQ",
+    [TOKEN_SAL_EQ]          = "SAL_EQ",
+    [TOKEN_ROL_EQ]          = "ROL_EQ",
+    [TOKEN_ROR_EQ]          = "ROR_EQ",
+    [TOKEN_DOUBLE_PLUS]     = "DOUBLE_PLUS",
+    [TOKEN_DOUBLE_MINUS]    = "DOUBLE_MINUS",
+    [TOKEN_THEN]            = "THEN",
+    [TOKEN_LCURLY]          = "LCURLY",
+    [TOKEN_RCURLY]          = "RCURLY",
+    [TOKEN_LBRACE]          = "LBRACE",
+    [TOKEN_RBRACE]          = "RBRACE",
+    [TOKEN_LPAREN]          = "LPAREN",
+    [TOKEN_RPAREN]          = "RPAREN",
+    [TOKEN_EOF]             = "EOF",
+    [TOKEN_ERRORCODE]       = "ERRORCODE"
 };
 
 /* Mapping from AST node type to printable name */
 const char* ast_node_names[] = {
-    [AST_VARIABLE_DECLARATION] = "VARIABLE_DECLARATION",
-    [AST_VARIABLE_WITH_BODY]   = "VARIABLE_WITH_BODY",
-    [AST_VARIABLE_LIST]        = "VARIABLE_LIST",
-    [AST_FUNCTION_DECLARATION] = "FUNCTION_DECLARATION",
-    [AST_ARRAY_ACCESS]         = "ARRAY_ACCESS",
-    [AST_BINARY_OPERATION]     = "BINARY_OPERATION",
-    [AST_UNARY_OPERATION]      = "UNARY_OPERATION",
-    [AST_LITERAL_VALUE]        = "LITERAL_VALUE",
-    [AST_IDENTIFIER]           = "IDENTIFIER",
-    [AST_REGISTER]             = "REGISTER",
-    [AST_ASSIGNMENT]           = "ASSIGNMENT",
-    [AST_COMPOUND_ASSIGNMENT]  = "COMPOUND_ASSIGNMENT",
-    [AST_BLOCK]                = "BLOCK",
-    [AST_IF_STATEMENT]         = "IF_STATEMENT",
-    [AST_ELSE_STATEMENT]       = "ELSE_STATEMENT",
-    [AST_RETURN]               = "RETURN",
-    [AST_FREE]                 = "FREE",
-    [AST_SIZEOF]               = "SIZEOF",
-    [AST_STACK]                = "STACK",
-    [AST_PUSH]                 = "PUSH",
-    [AST_POP]                  = "POP",
-    [AST_CAST]                 = "CAST",
-    [AST_SIGNAL]               = "SIGNAL",
-    [AST_INTERFLAG]            = "INTERFLAG",
-    [AST_MULTI_INITIALIZER]    = "MULTI_INITIALIZER",
-    [AST_LABEL_DECLARATION]    = "LABEL_DECLARATION",
-    [AST_JUMP]                 = "JUMP",
-    [AST_POSTFIX_CAST]         = "POSTFIX_CAST",
-    [AST_FIELD_ACCESS]         = "FIELD_ACCESS",
-    [AST_NOP]                  = "NOP",
-    [AST_ARRAY_DECLARATION]    = "ARRAY_DECLARATION",
-    [AST_HALT]                 = "HALT",
-    [AST_TYPE_CHANGE]          = "TYPE_CHANGE",
-    [AST_MULTI_ASSIGNMENT]     = "MULTI_ASSIGNMENT",
-    [AST_COMPOUND_TYPE]        = "COMPOUND_TYPE",
-    [AST_PREFIX_INCREMENT]     = "PREFIX_INCREMENT",
-    [AST_PREFIX_DECREMENT]     = "PREFIX_DECREMENT",
-    [AST_POSTFIX_INCREMENT]    = "POSTFIX_INCREMENT",
-    [AST_POSTFIX_DECREMENT]    = "POSTFIX_DECREMENT",
-    [AST_LABEL_VALUE]          = "LABEL_VALUE",
-    [AST_ALLOC]                = "ALLOC",
-    [AST_REALLOC]              = "REALLOC",
-    [AST_DO_LOOP]              = "DO_LOOP",
-    [AST_BREAK]                = "BREAK",
-    [AST_CONTINUE]             = "CONTINUE",
-    [AST_TERNARY_OPERATION]    = "TERNARY_OPERATION",
-    [AST_TYPEOF]               = "TYPEOF",
-    [AST_KILL]                 = "KILL"
+    [AST_VARIABLE_DECLARATION]  = "VARIABLE_DECLARATION",
+    [AST_VARIABLE_LIST]         = "VARIABLE_LIST",
+    [AST_FUNCTION_DECLARATION]  = "FUNCTION_DECLARATION",
+    [AST_BLOCK]                 = "BLOCK",
+    [AST_IF_STATEMENT]          = "IF_STATEMENT",
+    [AST_ELSE_STATEMENT]        = "ELSE_STATEMENT",
+    [AST_LABEL_DECLARATION]     = "LABEL_DECLARATION",
+    [AST_DO_LOOP]               = "DO_LOOP",
+    [AST_BREAK]                 = "BREAK",
+    [AST_CONTINUE]              = "CONTINUE",
+    [AST_NOP]                   = "NOP",
+    [AST_SIGNAL]                = "SIGNAL",
+    [AST_ASM]                   = "ASM",
+    [AST_JUMP]                  = "JUMP",
+    [AST_RETURN]                = "RETURN",
+    [AST_SIZEOF]                = "SIZEOF",
+    [AST_TYPEOF]                = "TYPEOF",
+    [AST_ALLOC]                 = "ALLOC",
+    [AST_REALLOC]               = "REALLOC",
+    [AST_FREE]                  = "FREE",
+    [AST_DEF]                   = "DEF",
+    [AST_DEL]                   = "DEL",
+    [AST_PRO]                   = "PRO",
+    [AST_IDENTIFIER]            = "IDEINTIFIER",
+    [AST_LITERAL_VALUE]         = "LITERAL_VALUE",
+    [AST_BINARY_OPERATION]      = "BINARY_OPERATION",
+    [AST_UNARY_OPERATION]       = "UNARY_OPERATION",
+    [AST_TERNARY_OPERATION]     = "TERNARY_OPERATION",
+    [AST_ASSIGNMENT]            = "ASSIGNMENT",
+    [AST_COMPOUND_ASSIGNMENT]   = "COMPOUND_ASSIGNMENT",
+    [AST_POSTFIX_INCREMENT]     = "POSTFIX_INCREMENT",
+    [AST_POSTFIX_DECREMENT]     = "POSTFIX_DECREMENT",
+    [AST_PREFIX_INCREMENT]      = "PREFIX_INCREMENT",
+    [AST_PREFIX_DECREMENT]      = "PREFIX_DECREMENT",
+    [AST_FIELD_ACCESS]          = "FIELD_ACCESS",
+    [AST_ARRAY_ACCESS]          = "ARRAY_ACCESS",
+    [AST_FUNCTION_CALL]         = "FUNCTION_CALL",
+    [AST_CAST]                  = "CAST",
+    [AST_MULTI_INITIALIZER]     = "MULTI_INITIALIZER",
+    [AST_MULTI_ASSIGNMENT]      = "MULTI_ASSIGNMENT",
+    [AST_ERROR]                 = "ERROR"
 };
 
-/* Static buffers for indentation to avoid repeated allocation */
+/* Static buffer for indentation to avoid repeated allocation */
 static char indent_buffer[64];
 
 /* Forward declaration for recursive AST printing */
@@ -177,7 +207,6 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
     }
     fputc('\n', out);
 
-    /* Print modifiers if present */
     if (node->state_modifier) {
         print_indent(depth + 1, out);
         fprintf(out, "State Modifier: %s\n", node->state_modifier);
@@ -186,21 +215,16 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
         print_indent(depth + 1, out);
         fprintf(out, "Access Modifier: %s\n", node->access_modifier);
     }
-    if (node->parent_struct) {
-        print_indent(depth + 1, out);
-        fprintf(out, "Parent Struct: %s\n", node->parent_struct);
-    }
     if (node->variable_type) {
         print_indent(depth + 1, out);
         print_type_info(node->variable_type, out);
     }
     if (node->default_value) {
         print_indent(depth + 1, out);
-        fputs("Default Value:\n", out);
+        fputs("Default Value (or body):\n", out);
         print_ast_node_recursive(node->default_value, depth + 2, out);
     }
 
-    /* Print children */
     if (node->left) {
         print_indent(depth + 1, out);
         fputs("Left:\n", out);
@@ -212,7 +236,6 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
         print_ast_node_recursive(node->right, depth + 2, out);
     }
 
-    /* Handle 'extra' field based on node type */
     if (node->extra) {
         print_indent(depth + 1, out);
         fputs("Extra:\n", out);
@@ -221,6 +244,9 @@ static void print_ast_node_recursive(ASTNode* node, uint8_t depth, FILE* out) {
             case AST_VARIABLE_LIST:
             case AST_BLOCK:
             case AST_FUNCTION_DECLARATION:
+            case AST_FUNCTION_CALL:
+            case AST_ALLOC:
+            case AST_REALLOC:
             case AST_MULTI_INITIALIZER:
                 print_node_list((AST*)node->extra, depth + 2, out);
                 break;
@@ -243,10 +269,12 @@ static void count_nodes(ASTNode* node, uint32_t* total_nodes, uint32_t* type_cou
     }
     count_nodes(node->left, total_nodes, type_counts);
     count_nodes(node->right, total_nodes, type_counts);
+    count_nodes(node->default_value, total_nodes, type_counts);
     if (node->extra) {
-        /* Handle both AST* and ASTNode* cases for counting */
         if (node->type == AST_VARIABLE_LIST || node->type == AST_BLOCK ||
-            node->type == AST_FUNCTION_DECLARATION || node->type == AST_MULTI_INITIALIZER) {
+            node->type == AST_FUNCTION_DECLARATION || node->type == AST_FUNCTION_CALL ||
+            node->type == AST_ALLOC || node->type == AST_REALLOC ||
+            node->type == AST_MULTI_INITIALIZER) {
             AST* list = (AST*)node->extra;
             if (list && list->nodes) {
                 for (uint16_t i = 0; i < list->count; i++) {
@@ -257,7 +285,6 @@ static void count_nodes(ASTNode* node, uint32_t* total_nodes, uint32_t* type_cou
             count_nodes((ASTNode*)node->extra, total_nodes, type_counts);
         }
     }
-    count_nodes(node->default_value, total_nodes, type_counts);
 }
 
 void print_section_header(const char* title, FILE* out) {
@@ -326,8 +353,6 @@ void print_parser_trace(ParserState* parser, FILE* out) {
         return;
     }
     fprintf(out, "Position: %u/%u\n", parser->current_token_position, parser->total_tokens);
-    fprintf(out, "In declaration context: %s\n",
-            parser->in_declaration_context ? "yes" : "no");
     if (parser->current_token_position < parser->total_tokens) {
         Token* token = &parser->token_stream[parser->current_token_position];
         fprintf(out, "\nCurrent token:\n  Type: %s\n", get_token_type_name(token->type));
@@ -407,7 +432,8 @@ void print_semantic_symbol_table(SemanticContext* context, FILE* out) {
         fputs("No semantic context to display\n", out);
         return;
     }
-    SymbolTable* table = semantic__get_global_table(context);
+    /* Direct access to global_scope instead of semantic__get_global_table */
+    SymbolTable* table = context->global_scope;
     if (!table) {
         fputs("No symbol table available\n", out);
         return;
@@ -426,7 +452,8 @@ void print_semantic_symbol_table(SemanticContext* context, FILE* out) {
 
 void print_semantic_type_info(SemanticContext* context, FILE* out) {
     if (!context || !out) return;
-    SymbolTable* table = semantic__get_global_table(context);
+    /* Direct access to global_scope */
+    SymbolTable* table = context->global_scope;
     if (!table) return;
 
     size_t type_counts[TYPE_COMPOUND + 1];
@@ -477,7 +504,8 @@ void print_semantic_summary(SemanticContext* context, FILE* out) {
     if (!context || !out) return;
     fprintf(out, "SEMANTIC ANALYSIS SUMMARY:\n");
     fprintf(out, "  Status: %s\n", semantic__has_errors(context) ? "FAILED" : "PASSED");
-    fprintf(out, "  Warnings enabled: %s\n", semantic__warnings_enabled(context) ? "yes" : "no");
+    /* Direct access to warnings_enabled */
+    fprintf(out, "  Warnings enabled: %s\n", context->warnings_enabled ? "yes" : "no");
     fprintf(out, "  Total symbols: %zu\n", semantic__get_symbol_count(context));
     fprintf(out, "  Exit on error: %s\n", context->exit_on_error ? "yes" : "no");
 
@@ -524,6 +552,7 @@ void print_semantic_log(SemanticContext* context, FILE* out) {
     fprintf(out, "  In loop: %s\n", context->in_loop ? "yes" : "no");
     fprintf(out, "\nANALYSIS SETTINGS:\n");
     fprintf(out, "  Exit on error: %s\n", context->exit_on_error ? "enabled" : "disabled");
+    /* Direct access to warnings_enabled */
     fprintf(out, "  Warnings: %s\n", context->warnings_enabled ? "enabled" : "disabled");
 }
 
@@ -542,16 +571,6 @@ void print_type_info(Type* type, FILE* out) {
         fprintf(out, "%s ", type->modifiers[i]);
     }
     if (type->pointer_level) fprintf(out, "@%d", type->pointer_level);
-    if (type->is_reference) fprintf(out, "&%d", type->is_reference);
-    if (type->prefix_number) fprintf(out, "%d", type->prefix_number);
-    if (type->compound_count) {
-        fputc('(', out);
-        for (uint8_t i = 0; i < type->compound_count; i++) {
-            if (type->compound_types[i]) fprintf(out, "%s", type->compound_types[i]->name);
-            if (i < type->compound_count - 1) fputs(", ", out);
-        }
-        fputc(')', out);
-    }
     if (type->angle_expression) {
         fputc('<', out);
         fputs(get_ast_node_type_name(type->angle_expression->type), out);
@@ -674,7 +693,8 @@ ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast,
     if (semantic) {
         stats->symbols_count = semantic__get_symbol_count(semantic);
         stats->semantic_errors = semantic__has_errors(semantic) ? 1 : 0;
-        stats->semantic_warnings = semantic__warnings_enabled(semantic) ? 1 : 0;
+        /* Direct access to warnings_enabled */
+        stats->semantic_warnings = semantic->warnings_enabled ? 1 : 0;
     }
     return stats;
 }
@@ -723,4 +743,14 @@ void log_parser_step(ParserState* parser, const char* action, ASTNode* node) {
         if (token->value) fprintf(out, " '%s'", token->value);
     }
     fputc('\n', out);
+}
+
+/*
+ * Print the AST after optimization.  This is a debug helper intended to be
+ * called when the user requests debugging of the optimizer phase.
+ */
+void print_optimized_ast(AST* ast, FILE* out) {
+    if (!ast || !out) return;
+    print_section_header("OPTIMIZED AST", out);
+    print_ast_detailed(ast, out);
 }

@@ -41,8 +41,10 @@ void macro_table_destroy(MacroTable* table);
 
 /*
  * Add a new macro definition or update an existing one.
- * For function-like macros, the caller must supply an array of parameter names.
- * The table takes ownership of the 'param_names' array and its strings.
+ *
+ * For function-like macros, a deep copy of the parameter names array and
+ * each individual name string is made.  The table takes ownership of these
+ * copies; the caller retains ownership of the original strings.
  *
  * @param table          Macro table.
  * @param name           Macro name (will be copied).
@@ -53,7 +55,7 @@ void macro_table_destroy(MacroTable* table);
  * @return               1 on success, 0 on failure (out of memory).
  */
 int macro_table_add(MacroTable* table, const char* name, const char* value,
-                    int has_parameters, char** param_names, size_t param_count);
+                    int has_parameters, const char** param_names, size_t param_count);
 
 /*
  * Find a macro by name.

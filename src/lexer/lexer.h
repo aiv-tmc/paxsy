@@ -12,113 +12,108 @@
  */
 typedef enum {
     /* Literals */
-    TOKEN_NUMBER,          /**< Numeric literal (integer or real) */
-    TOKEN_CHAR,            /**< Character literal, e.g. 'a' */
-    TOKEN_STRING,          /**< String literal, e.g. "hello" */
+    TOKEN_NUMBER,           /**< Numeric literal (integer or real) */
+    TOKEN_CHAR,             /**< Character literal, e.g. 'a' */
+    TOKEN_STRING,           /**< String literal, e.g. "hello" */
     
     /* Keywords */
-    TOKEN_IF,              /**< `if` keyword */
-    TOKEN_ELSE,            /**< `else` keyword */
-    TOKEN_DO,              /**< `do` keyword */
-    TOKEN_BREAK,           /**< `break` keyword */
-    TOKEN_CONTINUE,        /**< `continue` keyword */
-    TOKEN_NOP,             /**< `nop` keyword */
-    TOKEN_HALT,            /**< `halt` keyword */
-    TOKEN_INTERFLAG,       /**< `interflag` keyword */
-    TOKEN_SIGNAL,          /**< `signal` keyword */
-    TOKEN_KILL,            /**< `kill` keyword */
-    TOKEN_JUMP,            /**< `jump` keyword */
-    TOKEN_RETURN,          /**< `return` keyword */
-    TOKEN_SIZEOF,          /**< `sizeof` keyword */
-    TOKEN_TYPEOF,          /**< `typeof` keyword */
-    TOKEN_ALLOC,           /**< `alloc` keyword */
-    TOKEN_CALLOC,          /**< `realloc` keyword */
-    TOKEN_REALLOC,         /**< `alloc` keyword */
-    TOKEN_FREE,            /**< `free` keyword */
-    TOKEN_NONE,            /**< `none` keyword */
-    TOKEN_EXTENDS,         /**< `extends` keyword */
+    TOKEN_IF,               /**< `if` keyword */
+    TOKEN_ELSE,             /**< `else` keyword */
+    TOKEN_DO,               /**< `do` keyword */
+    TOKEN_BREAK,            /**< `break` keyword */
+    TOKEN_CONTINUE,         /**< `continue` keyword */
+    TOKEN_NOP,              /**< `nop` keyword */
+    TOKEN_SIGNAL,           /**< `signal` keyword */
+    TOKEN_ASM,              /**< `asm` keyword */
+    TOKEN_JUMP,             /**< `jump` keyword */
+    TOKEN_RETURN,           /**< `return` keyword */
+    TOKEN_SIZEOF,           /**< `sizeof` keyword */
+    TOKEN_TYPEOF,           /**< `typeof` keyword */
+    TOKEN_ALLOC,            /**< `alloc` keyword */
+    TOKEN_REALLOC,          /**< `realloc` keyword */
+    TOKEN_FREE,             /**< `free` keyword */
+    TOKEN_NONE,             /**< `none` keyword */
     
     /* Token categories (used for symbols that belong to a group) */
-    TOKEN_TYPE,            /**< Type keyword: Int, Real, Char, Void */
-    TOKEN_CONSTMOD,        /**< Const modifier: const */
-    TOKEN_ACCMOD,          /**< Access modifier: extern static */
-    TOKEN_SIGNEDMOD,       /**< Type modifier: unsigned, signed */
-    TOKEN_MEMMOD,          /**< Memory modifier: volatile, register */
-    TOKEN_LOGICAL,         /**< Logical operator keyword: or, and */
-    TOKEN_ID,              /**< Identifier (variable/function name) */
+    TOKEN_STATE,            /**< State keyword: def, del, pro */
+    TOKEN_TYPE,             /**< Type keyword: Int, Real, Char, Void */
+    TOKEN_TYPEMOD,          /**< Type modifier: unsigned, signed, volatile, ... */
+    TOKEN_STATEMOD,         /**< State modifier: fixed, close, open, extern, ... */
+    TOKEN_LOGICAL,          /**< Logical operator keyword: or, and */
+    TOKEN_ID,               /**< Identifier (variable/function name) */
      
     /* Punctuation */
-    TOKEN_PERCENT,         /**< `%` */
-    TOKEN_COLON,           /**< `:` */
-    TOKEN_DOT,             /**< `.` */
-    TOKEN_SEMICOLON,       /**< `;` */
-    TOKEN_EQUAL,           /**< `=` */
-    TOKEN_COMMA,           /**< `,` */
+    TOKEN_PERCENT,          /**< `%` */
+    TOKEN_COLON,            /**< `:` */
+    TOKEN_DOT,              /**< `.` */
+    TOKEN_SEMICOLON,        /**< `;` */
+    TOKEN_EQUAL,            /**< `=` */
+    TOKEN_COMMA,            /**< `,` */
     
     /* Arithmetic operators */
-    TOKEN_PLUS,            /**< `+` */
-    TOKEN_MINUS,           /**< `-` */
-    TOKEN_STAR,            /**< `*` */
-    TOKEN_SLASH,           /**< `/` */
+    TOKEN_PLUS,             /**< `+` */
+    TOKEN_MINUS,            /**< `-` */
+    TOKEN_STAR,             /**< `*` */
+    TOKEN_SLASH,            /**< `/` */
     
     /* Special symbols */
-    TOKEN_QUESTION,        /**< `?` */
-    TOKEN_TILDE,           /**< `~` */
-    TOKEN_NE_TILDE,        /**< `!~` (not‑tilde) */
-    TOKEN_PIPE,            /**< `|` */
-    TOKEN_AMPERSAND,       /**< `&` */
-    TOKEN_BANG,            /**< `!` */
-    TOKEN_CARET,           /**< `^` */
-    TOKEN_AT,              /**< `@` */
-    TOKEN_GT,              /**< `>` */
-    TOKEN_LT,              /**< `<` */
+    TOKEN_QUESTION,         /**< `?` */
+    TOKEN_TILDE,            /**< `~` */
+    TOKEN_PIPE,             /**< `|` */
+    TOKEN_AMPERSAND,        /**< `&` */
+    TOKEN_BANG,             /**< `!` */
+    TOKEN_CARET,            /**< `^` */
+    TOKEN_AT,               /**< `@` */
+    TOKEN_DOLLAR,           /**< `$` */
+    TOKEN_GT,               /**< `>` */
+    TOKEN_LT,               /**< `<` */
     
     /* Bitwise shift operators */
-    TOKEN_SHR,             /**< `>>` shift right */
-    TOKEN_SHL,             /**< `<<` shift left */
-    TOKEN_SAR,             /**< `>>>` arithmetic shift right */
-    TOKEN_SAL,             /**< `<<<` arithmetic shift left */
-    TOKEN_ROR,             /**< `>>>>` rotate right */
-    TOKEN_ROL,             /**< `<<<<` rotate left */
+    TOKEN_SHR,              /**< `>>` shift right */
+    TOKEN_SHL,              /**< `<<` shift left */
+    TOKEN_SAR,              /**< `>>>` arithmetic shift right */
+    TOKEN_SAL,              /**< `<<<` arithmetic shift left */
+    TOKEN_ROR,              /**< `>>>>` rotate right */
+    TOKEN_ROL,              /**< `<<<<` rotate left */
     
     /* Comparison operators */
-    TOKEN_GE,              /**< `>=` greater or equal */
-    TOKEN_LE,              /**< `<=` less or equal */
-    TOKEN_DOUBLE_EQ,       /**< `==` equal */
-    TOKEN_NE,              /**< `!=` not equal */
+    TOKEN_GE,               /**< `>=` greater or equal */
+    TOKEN_LE,               /**< `<=` less or equal */
+    TOKEN_DOUBLE_EQ,        /**< `==` equal */
+    TOKEN_NE,               /**< `!=` not equal */
     
     /* Compound assignment operators */
-    TOKEN_PLUS_EQ,         /**< `+=` */
-    TOKEN_MINUS_EQ,        /**< `-=` */
-    TOKEN_STAR_EQ,         /**< `*=` */
-    TOKEN_SLASH_EQ,        /**< `/=` */
-    TOKEN_PERCENT_EQ,      /**< `%=` */
-    TOKEN_PIPE_EQ,         /**< `|=` */
-    TOKEN_AMPERSAND_EQ,    /**< `&=` */
-    TOKEN_CARET_EQ,        /**< `^=` */
-    TOKEN_SHL_EQ,          /**< `<<=` */
-    TOKEN_SHR_EQ,          /**< `>>=` */
-    TOKEN_SAL_EQ,          /**< `<<<=` (shift arithmetic left assign) */
-    TOKEN_SAR_EQ,          /**< `>>>=` (shift arithmetic right assign) */
-    TOKEN_ROL_EQ,          /**< `<<<<=` (rotate left assign) */
-    TOKEN_ROR_EQ,          /**< `>>>>=` (rotate right assign) */
+    TOKEN_PLUS_EQ,          /**< `+=` */
+    TOKEN_MINUS_EQ,         /**< `-=` */
+    TOKEN_STAR_EQ,          /**< `*=` */
+    TOKEN_SLASH_EQ,         /**< `/=` */
+    TOKEN_PERCENT_EQ,       /**< `%=` */
+    TOKEN_PIPE_EQ,          /**< `|=` */
+    TOKEN_AMPERSAND_EQ,     /**< `&=` */
+    TOKEN_CARET_EQ,         /**< `^=` */
+    TOKEN_SHL_EQ,           /**< `<<=` */
+    TOKEN_SHR_EQ,           /**< `>>=` */
+    TOKEN_SAL_EQ,           /**< `<<<=` (shift arithmetic left assign) */
+    TOKEN_SAR_EQ,           /**< `>>>=` (shift arithmetic right assign) */
+    TOKEN_ROL_EQ,           /**< `<<<<=` (rotate left assign) */
+    TOKEN_ROR_EQ,           /**< `>>>>=` (rotate right assign) */
     
     /* Multi-character operators */
-    TOKEN_DOUBLE_PLUS,     /**< `++` increment */
-    TOKEN_DOUBLE_MINUS,    /**< `--` decrement */
-    TOKEN_THEN,            /**< `=>` (then arrow) */
+    TOKEN_DOUBLE_PLUS,      /**< `++` increment */
+    TOKEN_DOUBLE_MINUS,     /**< `--` decrement */
+    TOKEN_THEN,             /**< `->` (then arrow) */
     
     /* Brackets and braces */
-    TOKEN_LCURLY,          /**< `{` */
-    TOKEN_RCURLY,          /**< `}` */
-    TOKEN_LBRACE,          /**< `[` */
-    TOKEN_RBRACE,          /**< `]` */
-    TOKEN_LPAREN,          /**< `(` */
-    TOKEN_RPAREN,          /**< `)` */
+    TOKEN_LCURLY,           /**< `{` */
+    TOKEN_RCURLY,           /**< `}` */
+    TOKEN_LBRACE,           /**< `[` */
+    TOKEN_RBRACE,           /**< `]` */
+    TOKEN_LPAREN,           /**< `(` */
+    TOKEN_RPAREN,           /**< `)` */
     
     /* Special tokens */
-    TOKEN_EOF,             /**< End‑of‑file marker */
-    TOKEN_ERRORCODE        /**< Error token (unrecognised input) */
+    TOKEN_EOF,              /**< End‑of‑file marker */
+    TOKEN_ERRORCODE         /**< Error token (unrecognised input) */
 } TokenType;
 
 /**
@@ -126,11 +121,11 @@ typedef enum {
  * @brief Represents a single token produced by the lexer.
  */
 typedef struct {
-    TokenType type;        /**< Type of the token (see TokenType) */
-    char* value;           /**< Dynamically allocated string holding the token's text */
-    uint16_t line;         /**< Line number where the token starts (1‑based) */
-    uint16_t column;       /**< Column number where the token starts (1‑based) */
-    uint16_t length;       /**< Length of the token's text in characters */
+    TokenType type;         /**< Type of the token (see TokenType) */
+    char* value;            /**< Dynamically allocated string holding the token's text */
+    uint16_t line;          /**< Line number where the token starts (1‑based) */
+    uint16_t column;        /**< Column number where the token starts (1‑based) */
+    uint16_t length;        /**< Length of the token's text in characters */
 } Token;
 
 /**
@@ -138,13 +133,13 @@ typedef struct {
  * @brief Main lexer state, holds the source code and the list of tokens.
  */
 typedef struct {
-    const char* source;    /**< Pointer to the entire source code string */
-    uint32_t source_length;/**< Length of the source code */
-    uint32_t position;     /**< Current scanning position (byte index) */
-    uint16_t line;         /**< Current line number (for error reporting) */
-    uint16_t column;       /**< Current column number (for error reporting) */
-    Token* tokens;         /**< Dynamically allocated array of tokens */
-    uint64_t token_count;  /**< Number of tokens currently stored */
+    const char* source;     /**< Pointer to the entire source code string */
+    uint32_t source_length; /**< Length of the source code */
+    uint32_t position;      /**< Current scanning position (byte index) */
+    uint16_t line;          /**< Current line number (for error reporting) */
+    uint16_t column;        /**< Current column number (for error reporting) */
+    Token* tokens;          /**< Dynamically allocated array of tokens */
+    uint64_t token_count;   /**< Number of tokens currently stored */
     uint16_t token_capacity;/**< Allocated capacity of the tokens array */
 } Lexer;
 

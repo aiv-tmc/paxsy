@@ -76,6 +76,22 @@ static inline void skip_underscores(Lexer* lexer) {
 }
 
 /*
+ * Ensures that the given buffer has at least required_capacity bytes.
+ * If the current buffer is too small, it is reallocated.
+ * Returns true on success, false on memory allocation failure.
+ */
+static bool ensure_buffer_capacity(char** buffer, uint32_t* buf_size, uint32_t required_capacity) {
+    if (*buf_size >= required_capacity) return true;
+    uint32_t new_size = *buf_size;
+    while (new_size < required_capacity) new_size *= 2;
+    char* new_buf = (char*)realloc(*buffer, new_size);
+    if (!new_buf) return false;
+    *buffer = new_buf;
+    *buf_size = new_size;
+    return true;
+}
+
+/*
  * Parses the integer part of a numeric literal in the specified base.
  * Returns true if at least one valid digit was consumed.
  */
@@ -345,17 +361,12 @@ static bool parse_quoted_content(Lexer* lexer,
             return true;
         }
 
-        /* Ensure buffer capacity */
-        if (write_pos + 1 >= *buf_size) {
-            *buf_size = (*buf_size) * 2;
-            char* new_buf = (char*)realloc(*buffer, *buf_size);
-            if (!new_buf) {
-                errhandler__report_error(ERROR_CODE_MEMORY_ALLOCATION,
-                                         lexer->line, lexer->column, "syntax",
-                                         "Memory allocation failed");
-                return false;
-            }
-            *buffer = new_buf;
+        /* Ensure buffer capacity (need room for next char plus null) */
+        if (!ensure_buffer_capacity(buffer, buf_size, write_pos + 2)) {
+            errhandler__report_error(ERROR_CODE_MEMORY_ALLOCATION,
+                                     lexer->line, lexer->column, "syntax",
+                                     "Memory allocation failed");
+            return false;
         }
 
         if (c == '\\') {
@@ -537,16 +548,11 @@ Token literal__parse_concatenated(Lexer* lexer) {
             }
             if (ct.value) {
                 /* Append the single character */
-                if (total_len + 1 >= buf_size) {
-                    buf_size *= 2;
-                    char* new_buf = (char*)realloc(buffer, buf_size);
-                    if (!new_buf) {
-                        free(buffer);
-                        free(ct.value);
-                        combined.type = TOKEN_ERRORCODE;
-                        return combined;
-                    }
-                    buffer = new_buf;
+                if (!ensure_buffer_capacity(&buffer, &buf_size, total_len + 2)) {
+                    free(ct.value);
+                    free(buffer);
+                    combined.type = TOKEN_ERRORCODE;
+                    return combined;
                 }
                 buffer[total_len++] = ct.value[0];
                 free(ct.value);
@@ -559,17 +565,12 @@ Token literal__parse_concatenated(Lexer* lexer) {
             }
             if (st.value) {
                 uint32_t add_len = st.length;
-                while (total_len + add_len >= buf_size) {
-                    buf_size *= 2;
-                }
-                char* new_buf = (char*)realloc(buffer, buf_size);
-                if (!new_buf) {
-                    free(buffer);
+                if (!ensure_buffer_capacity(&buffer, &buf_size, total_len + add_len + 1)) {
                     free(st.value);
+                    free(buffer);
                     combined.type = TOKEN_ERRORCODE;
                     return combined;
                 }
-                buffer = new_buf;
                 memcpy(buffer + total_len, st.value, add_len);
                 total_len += add_len;
                 free(st.value);

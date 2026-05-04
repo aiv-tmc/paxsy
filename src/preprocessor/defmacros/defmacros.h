@@ -3,16 +3,16 @@
 
 #include "../directive/define/macro.h"
 
-/* Target OS and architecture strings.
-   These should be set by the caller before calling builtin_macros_init.
-   Examples:
-     builtin_target_os = "linux", "windows", "darwin", "freebsd", "solaris", "msdos"
-     builtin_target_arch = "i386", "i486", "i586", "i686", "x86_64", "amd64", "armv7", "aarch64", etc.
-   If not set, no OS/architecture macros will be defined (except __CPU__ = "unknown").
-*/
+/* Target platform globals - must be set by the driver before calling
+ * builtin_macros_init() to reflect the compilation target. */
 extern const char* builtin_target_os;
 extern const char* builtin_target_arch;
+extern const char* builtin_target_bits;
 
+/* Initialize the macro table with all built-in macros.
+ * Parameters:
+ *   table    - pointer to the macro table to populate
+ *   filename - current source file name (for __file__ macro) */
 void builtin_macros_init(MacroTable* table, const char* filename);
 
 #endif

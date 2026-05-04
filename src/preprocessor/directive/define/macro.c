@@ -73,9 +73,13 @@ static int ensure_table_capacity(MacroTable* table) {
 
 /*
  * Add or update a macro.
+ *
+ * For function-like macros, a deep copy of the parameter name strings and the
+ * parameter names array is made.  This isolates the table from the caller's
+ * memory and avoids double‑free scenarios.
  */
 int macro_table_add(MacroTable* table, const char* name, const char* value,
-                    int has_parameters, char** param_names, size_t param_count) {
+                    int has_parameters, const char** param_names, size_t param_count) {
     if (!table || !name || !value) return 0;
 
     /* Linear search for an existing macro with the same name (O(n)). */
@@ -93,13 +97,32 @@ int macro_table_add(MacroTable* table, const char* name, const char* value,
                 free(macro->param_names);
             }
 
-            /* Set new values. */
+            /* Set new value (deep copy). */
             macro->value = u__strdup_safe(value);
             macro->has_parameters = has_parameters;
-            macro->param_count = param_count;
-            macro->param_names = param_names;   /* Takes ownership. */
+            macro->param_count = 0;  /* will be set below */
+            macro->param_names = NULL;
 
-            return macro->value ? 1 : 0;
+            /* Deep copy parameter names if any. */
+            if (has_parameters && param_count > 0) {
+                macro->param_names = malloc(param_count * sizeof(char*));
+                if (!macro->param_names) {
+                    free(macro->value);
+                    return 0;
+                }
+                for (size_t j = 0; j < param_count; j++) {
+                    macro->param_names[j] = u__strdup_safe(param_names[j]);
+                    if (!macro->param_names[j]) {
+                        for (size_t k = 0; k < j; k++) free(macro->param_names[k]);
+                        free(macro->param_names);
+                        free(macro->value);
+                        return 0;
+                    }
+                }
+                macro->param_count = param_count;
+            }
+
+            return 1;
         }
     }
 
@@ -112,14 +135,38 @@ int macro_table_add(MacroTable* table, const char* name, const char* value,
     macro->value = u__strdup_safe(value);
     macro->name_len = strlen(name);
     macro->has_parameters = has_parameters;
-    macro->param_count = param_count;
-    macro->param_names = param_names;           /* Takes ownership. */
+    macro->param_count = 0;
+    macro->param_names = NULL;
+
+    /* Deep copy parameter names for new entry. */
+    if (has_parameters && param_count > 0) {
+        macro->param_names = malloc(param_count * sizeof(char*));
+        if (!macro->param_names) {
+            free(macro->name);
+            free(macro->value);
+            return 0;
+        }
+        for (size_t j = 0; j < param_count; j++) {
+            macro->param_names[j] = u__strdup_safe(param_names[j]);
+            if (!macro->param_names[j]) {
+                for (size_t k = 0; k < j; k++) free(macro->param_names[k]);
+                free(macro->param_names);
+                free(macro->name);
+                free(macro->value);
+                return 0;
+            }
+        }
+        macro->param_count = param_count;
+    }
 
     if (!macro->name || !macro->value) {
         /* Allocation failed – clean up partially allocated resources. */
         free(macro->name);
         free(macro->value);
-        free(macro->param_names);
+        if (macro->param_names) {
+            for (size_t j = 0; j < param_count; j++) free(macro->param_names[j]);
+            free(macro->param_names);
+        }
         return 0;
     }
 

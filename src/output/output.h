@@ -200,4 +200,11 @@ void enable_parser_trace(bool enabled);
  */
 void log_parser_step(ParserState* parser, const char* action, ASTNode* node);
 
+/**
+ * @brief Print the AST after optimization (for debug output).
+ * @param ast Optimized AST to print.
+ * @param out Output file stream.
+ */
+void print_optimized_ast(AST* ast, FILE* out);
+
 #endif

@@ -62,42 +62,42 @@ static void init_symbol_table(void) {
         {"break",       TOKEN_BREAK},
         {"continue",    TOKEN_CONTINUE},
         {"nop",         TOKEN_NOP},
-        {"halt",        TOKEN_HALT},
-        {"interflag",   TOKEN_INTERFLAG},
         {"signal",      TOKEN_SIGNAL},
-        {"kill",        TOKEN_KILL},
+        {"asm",         TOKEN_ASM},
         {"jump",        TOKEN_JUMP},
         {"return",      TOKEN_RETURN},
         {"sizeof",      TOKEN_SIZEOF},
         {"typeof",      TOKEN_TYPEOF},
         {"alloc",       TOKEN_ALLOC}, 
-        {"Calloc",      TOKEN_CALLOC},
         {"realloc",     TOKEN_REALLOC},
         {"free",        TOKEN_FREE},
         {"none",        TOKEN_NONE},
-        {"extends",     TOKEN_EXTENDS}, 
-        
+
+        /* State keywords */
+        {"def",         TOKEN_STATE},
+        {"del",         TOKEN_STATE},
+        {"pro",         TOKEN_STATE},
+
         /* Type keywords */
         {"Int",         TOKEN_TYPE},
         {"Real",        TOKEN_TYPE},
         {"Char",        TOKEN_TYPE},
         {"Void",        TOKEN_TYPE},
-        {"Type",        TOKEN_TYPE},
+        {"Auto",        TOKEN_TYPE},
+        {"Struct",      TOKEN_TYPE},
         
-        /* Const modifier */
-        {"const",       TOKEN_CONSTMOD},
-        
-        /* Access modifiers */
-        {"extern",      TOKEN_ACCMOD},
-        {"static",      TOKEN_ACCMOD},
-        
-        /* Signed modifiers */
-        {"unsigned",    TOKEN_SIGNEDMOD},
-        {"signed",      TOKEN_SIGNEDMOD},
-
-        /* Memmory midifiers */
-        {"volatile",    TOKEN_MEMMOD},
-        {"regis",       TOKEN_MEMMOD},
+        /* Modifier keyword */
+        {"unsigned",    TOKEN_TYPEMOD},
+        {"signed",      TOKEN_TYPEMOD},
+        {"volatile",    TOKEN_TYPEMOD},
+        {"const",       TOKEN_TYPEMOD},
+        {"fixed",       TOKEN_STATEMOD},
+        {"close",       TOKEN_STATEMOD},
+        {"open",        TOKEN_STATEMOD},
+        {"extern",      TOKEN_STATEMOD},
+        {"static",      TOKEN_STATEMOD},
+        {"regis",       TOKEN_STATEMOD},
+        {"inline",      TOKEN_STATEMOD},
         
         /* Logical operator keywords */
         {"or",          TOKEN_LOGICAL},
@@ -119,9 +119,9 @@ static void init_symbol_table(void) {
         {"|",           TOKEN_PIPE},
         {"&",           TOKEN_AMPERSAND},
         {"!",           TOKEN_BANG},
-        {"!~",          TOKEN_NE_TILDE},
         {"^",           TOKEN_CARET},
         {"@",           TOKEN_AT},
+        {"$",           TOKEN_DOLLAR},
         {">",           TOKEN_GT},
         {"<",           TOKEN_LT},
         {">>",          TOKEN_SHR},
@@ -150,7 +150,7 @@ static void init_symbol_table(void) {
         {">>>>=",       TOKEN_ROR_EQ},
         {"++",          TOKEN_DOUBLE_PLUS},
         {"--",          TOKEN_DOUBLE_MINUS},
-        {"=>",          TOKEN_THEN},
+        {"->",          TOKEN_THEN},
          
         /* Brackets */
         {"{",           TOKEN_LCURLY},

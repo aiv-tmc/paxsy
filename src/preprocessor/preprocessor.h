@@ -5,8 +5,7 @@
 
 struct PreprocessorState;
 
-/**
- * Preprocess source code by removing comments and preprocessing directives.
+/* Preprocess source code by removing comments and preprocessing directives.
  * 
  * @param input    Source code to preprocess
  * @param filename Name of the file being processed (for error reporting)
@@ -15,8 +14,7 @@ struct PreprocessorState;
  */
 char* preprocess(const char* input, const char* filename, int* error);
 
-/**
- * Preprocess a buffer of source code using an existing preprocessor state.
+/* Preprocess a buffer of source code using an existing preprocessor state.
  * The output is appended to the state's output buffer.
  * 
  * @param state    Preprocessor state (must be initialized)
