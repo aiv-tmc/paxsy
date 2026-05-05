@@ -28,9 +28,9 @@ def calc(def num1: Short, def num2: Short): Short ->
     return (num1 + num2);
 
 def Person: Struct {
-    name: Str;
-    age: Byte;
-    specif: Str;
+    pro name: Str;
+    pro age: Byte;
+    pro specif: Str;
 };
 
 def Employee: Struct = Person;
