@@ -1,13 +1,14 @@
-#using "inout"
-#using "type"
+#using "inout.hp"
+#using "type.hp"
+#using "svc.hp"
 
 pro Person: Struct;
 pro Employee: Struct;
 
 pro calc(Short, Short): Short;
 
-def main(Null): Null {
-    def tom: Employee;
+def main(Void): Void {
+    def tom: Employee=none;
     
     io.scan("% % %", tom.name, tom.age, tom.specif);
     io.println("name:\t%", tom.name);
@@ -20,17 +21,17 @@ def main(Null): Null {
     io.println("calc print: %", calc(24, 10));
 
 exit:
-    signal 93 << 64;
-    return Null;
+    signal exit(0);
+    return Void;
 }
 
-def calc(def num1: Short, def num2: Short): Short ->
+def calc(def num1: Short=0, def num2: Short=0): Short ->
     return (num1 + num2);
 
 def Person: Struct {
-    pro name: Str;
-    pro age: Byte;
-    pro specif: Str;
+    def name: Str;
+    def age: Byte;
+    def specif: Str;
 };
 
 def Employee: Struct = Person;

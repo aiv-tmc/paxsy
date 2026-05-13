@@ -1,32 +1,10 @@
-#using "inout"
-#using "type"
-#using "mathf"
-#using "args"
+#using "inout.hp"
+#using "svc.hp"
 
-def calc(Float, ...): Float;
-
-def main(Null): Null {
-    io.println("%" calc(2.0, mth.PI(2):Float));
+def main(Void): Void {
+    io.printl("Hello, World!");
 
 exit:
-    signal 93 << 64;
-    return Null;
-}
-
-def calc(def num: Float, ...): Float {
-    def result: Float = zero;
-    def factor: VLS = zero;
-
-    va.start(factor, num);
-
-    def i: Byte = zero;
-    do (i < num) {
-        result += va.arg(factor, Float);
-        i++;
-    }
-    del @i;
-
-    va.end(factor);
-    
-    return result;
+    signal exit(0);
+    return Void;
 }

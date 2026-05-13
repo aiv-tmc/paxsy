@@ -1,9 +1,20 @@
-#using "inout"
+#using "inout.hp"
+#using "type.hp"
+#using "svc.hp"
 
-def main(Null): Null {
-    io.printl("Hello, World!");
-
+def main(Void): Void {
+    def number: Byte = zero;
+    
+    io.print("Enter a number: ");
+    io.scan("%", number);
+    io.print(endl);
+    
+    if (number % 2 == 0) ->
+        io.println("% even number", number);
+    else ->
+        io.println("% odd number", number);
+    
 exit:
-    signal 93 << 64;
-    return Null;
+    signal exit(0);
+    return Void;
 }

@@ -1,19 +1,27 @@
-#using "inout"
-#using "type"
+#using "inout.hp"
+#using "mathf.hp"
+#using "type.hp"
+#using "svc.hp"
 
-def main(Null): Null {
-    def number: Byte = zero;
-    
-    io.print("Enter a number: ");
-    io.scan("%", number);
-    io.print(endl);
-    
-    if (number % 2 == 0) ->
-        io.println("% even number", number);
-    else ->
-        io.println("% odd number", number);
-    
+pro calc(@Float): Noi80;
+
+def main(Void): Void {
+    io.println("%" calc({2.0, mth.PI(2):Float}));
+
 exit:
-    signal 93 << 64;
-    return Null;
+    signal exit(0);
+    return Void;
+}
+
+def calc(def nums[]: Float=none): Noi80 {
+    def result: Noi80 = zero;
+
+    def i: Byte = zero;
+    do (i < (sizeof(nums)/sizeof(Float)) {
+        result += nums[i];
+        i++;
+    }
+    del @i;
+
+    return result;
 }

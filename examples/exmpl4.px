@@ -1,7 +1,8 @@
-#using "inout"
-#using "type"
+#using "inout.hp"
+#using "type.hp"
+#using "svc.hp"
 
-def main(Null): Null {
+def main(Void): Void {
     def low: Byte = zero;
     def hight: Byte = zero;
     
@@ -27,6 +28,6 @@ def main(Null): Null {
     io.print(endl);
     
 exit:
-    signal 93 << 64;
-    return Null;
+    signal exit(0);
+    return Void;
 }
