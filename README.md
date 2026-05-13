@@ -1,47 +1,51 @@
-# Paxsy
+# Paxsy  
 
-The **paxsy** project is freely available under the MIT license. You can read it at [this link](https://github.com/aiv-tmc/Paxsi/blob/main/LICENSE).
+The **paxsy** project is freely available under the MIT license. You can read it at [this link](https://github.com/aiv-tmc/Paxsi/blob/main/LICENSE).  
 
 <!--Install-->
-## Install on UNIX-Like (GNU/Linux, macOS, ...)
-You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#dependencies )
+## Install on UNIX-Like (GNU/Linux, macOS, ...)  
 
-1. Clone the repository:
+You must have [project dependencies] installed(https://github.com/aiv-tmc/Paxsy#dependencies )  
 
-`$ git clone https://github.com/aiv-tmc/Paxsy.git`
+1. Clone the repository:  
 
-2. Go to the directory with the code:
+`$ git clone https://github.com/aiv-tmc/Paxsy.git`  
 
-`$ cd ~/Download/paxsy/`
+2. Go to the directory with the code:  
 
-3. Start making the program:
+`$ cd ~/Download/paxsy/`  
 
-`$ make`
+3. Start making the program:  
 
-<!--Syntax highlighting-->
-## Syntax Highlighting (vim)
-To add syntax highlighting in **vim**:
+`$ make`  
 
-1. Move the **paxsy.vim** file to: `~/.vim/syntax/`
+<!--Syntax highlighting-->  
+## Syntax Highlighting (vim)  
 
-`$ mv highlight/vim/syntax/paxsy.vim ~/.vim/syntax/paxsy.vim`
+To add syntax highlighting in **vim**:  
 
-2. Move the contents of the **vim_highlight/ftdetect/** file to: `~/.vim/ftdetect/`
+1. Move the **paxsy.vim** file to: `~/.vim/syntax/`  
 
-`$ mv highlight/vim/ftdetect/paxsy.vim ~/.vim/ftdetect/paxsy.vim`
+`$ mv highlight/vim/syntax/paxsy.vim ~/.vim/syntax/paxsy.vim`  
 
-## Syntax Highlighting (VSCode)
-To add syntax highlighting in **vim**:
+2. Move the contents of the **vim_highlight/ftdetect/** file to: `~/.vim/ftdetect/`  
 
-1. Move the **paxsy.vim** file to: `~/.vim/syntax/`
+`$ mv highlight/vim/ftdetect/paxsy.vim ~/.vim/ftdetect/paxsy.vim`  
 
-`$ mv highlight/vsc/paxsy/ ~/.vscode/extensions/`
+## Syntax Highlighting (VSCode)  
 
-<!--Documentation-->
-## Documentation
-The documentation can be obtained at [this link](https://github.com/aiv-tmc/paxsy/wiki/Paxsy-Documentation)
+To add syntax highlighting in **vim**:  
 
-<!--Dependencies-->
-## Dependencies 
-This program depends on the version of the interpreter **gcc** **3.2** or later.
+1. Move the **paxsy.vim** file to: `~/.vim/syntax/`  
 
+`$ mv highlight/vsc/paxsy/ ~/.vscode/extensions/`  
+
+<!--Documentation-->  
+## Documentation  
+
+The documentation can be obtained at [this link](https://github.com/aiv-tmc/paxsy/wiki/Paxsy-Documentation)  
+
+<!--Dependencies-->  
+## Dependencies  
+
+This program depends on the version of the compiler **fasm** **1.73.35** or later.  
