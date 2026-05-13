@@ -1,0 +1,60 @@
+/*
+ * Copyright (c) 2026 aiv-tmc
+ *
+ * This software is released under the MIT License.
+ * opensource.org
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#if !defined(INOUT__LIB)
+#define INOUT__LIB
+
+#using "args"
+#using "string"
+
+#define _stdout (0:Int<1>)
+#define _stdin  (1:Int<1>)
+#define _stderr (2:Int<1>)
+
+#define endl '\n'
+
+pro static inout__scan(Str<8>, const &Auto, ...): Int<1>;
+pro static inout__scanln(Str<8>, const &Auto, ...): Int<1>;
+pro static inout__scanch(Str<8>, const &Auto): Int<1>;
+pro static inout__print(Str<8>, Auto, ...): Int<1>;
+pro static inout__println(Str<8>, Auto, ...): Int<1>;
+pro static inout__printch(Str<8>, Auto, ...): Int<1>;
+pro static inout__error(Str<8>, Auto, ...): Int<1>;
+pro static inout__panic(Str<8>, Auto, ...): Int<1>;
+
+def extern io: {
+    def const @scan(Str, const &Auto, ...): Int<1> = @inout__scan(Str, const &Auto, ...);
+    def const @scanln(Str, const &Auto, ...): Int<1> = @inout__scanln(Str, const &Auto, ...);
+    def const @scanch(Str, const &Auto, ...): Int<1> = @inout__scanch(Str, const &Auto, ...);
+
+    def const @print(Str, Auto, ...): Int<1> = @inout__print(Str, Auto, ...);
+    def const @println(Str, Auto, ...): Int<1> = @inout__println(Str, Auto, ...);
+    def const @printch(Str, Auto, ...): Int<1> = @inout__printch(Str, Auto, ...);
+
+    def const @error(Str, Auto, ...): Int<1> = @inout__error(Str, Auto, ...);
+    def const @panic(Str, Auto, ...): Int<1> = @inout__panic(Str, Auto, ...);
+}: Struct=none;
+
+#endif /* INOUT__LIB */

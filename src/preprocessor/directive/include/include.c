@@ -273,8 +273,8 @@ static char *find_library_file(const char *libname, PreprocessorState *state) {
     return NULL;
 }
 
-/* Implementation of the #import directive. */
-void DPPF__import(PreprocessorState *state, char *args) {
+/* Implementation of the #include directive. */
+void DPPF__include(PreprocessorState *state, char *args) {
     char *relative = parse_filename_argument(args, state);
     if (!relative) return;
     char *full_path = build_full_path(state->current_file, relative);
@@ -284,7 +284,7 @@ void DPPF__import(PreprocessorState *state, char *args) {
                                  state->directive_start_line,
                                  state->directive_start_column,
                                  "memory",
-                                 "Out of memory building #import path");
+                                 "Out of memory building #include path");
         return;
     }
     if (is_file_included(full_path)) {

@@ -1,3 +1,5 @@
+// TODO: Figure out how to implement the OS definition
+
 #include "defmacros.h"
 #include <time.h>
 #include <string.h>
@@ -57,21 +59,24 @@ static int extract_arm_version(const char* arch) {
    No C‑specific macros (e.g. sizeof(void*)) are used. */
 void builtin_macros_init(MacroTable* table, const char* filename) {
     /* Core language macros (object-like) */
-    add_macro(table, "zero",    "(0:@Void<1>)");
+    add_macro(table, "zero",    "(0:@Void)");
     add_macro(table, "elif",    "else->if");
     add_macro(table, "uInt",    "unsigned Int");
     add_macro(table, "uReal",   "unsigned Real");
+    add_macro(table, "uChar",   "unsigned Char");
+    add_macro(table, "uVoid",   "unsigned Void");
+    add_macro(table, "uAuto",   "unsigned Auto");
     add_macro(table, "Str",     "const @Char");
-    add_macro(table, "Bool",    "Int<1>");
-    add_macro(table, "true",    "(Int<1>)(1)");
-    add_macro(table, "false",   "(Int<1>)(0)");
+    add_macro(table, "Bool",    "unsigned Int<1>");
+    add_macro(table, "true",    "(unsigned Int<1>)(1)");
+    add_macro(table, "false",   "(unsigned Int<1>)(0)");
 
     /* OS identification macros (based on builtin_target_os) */
     if (builtin_target_os) {
         if (strcmp(builtin_target_os, "windows") == 0 ||
             strcmp(builtin_target_os, "win32") == 0 ||
             strcmp(builtin_target_os, "win64") == 0) {
-            add_int_macro(table, "__win__", 1);
+            add_int_macro(table, "__windows__", 1);
         }
         else if (strcmp(builtin_target_os, "linux") == 0) {
             add_int_macro(table, "__Linux__", 1);

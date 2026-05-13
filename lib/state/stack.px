@@ -1,0 +1,117 @@
+/*
+ * Copyright (c) 2026 aiv-tmc
+ *
+ * This software is released under the MIT License.
+ * opensource.org
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#include "/usr/lib/paxsy/include/stack.hp"
+
+def static stack__new
+    ( def p_size: uInt<8>=zero
+    , def p_value: Int<8>=none
+): Void {
+    size = p_size;
+    
+    def i: uInt<8>=zero;
+    do (i < p_size) {
+        data[i] = p_value;
+        i++;
+    }
+    del @i;
+
+    return Void;
+}
+
+def static stack__end(Void): Void {
+    def i: Int<8>=zero;
+    do (i < size) {
+        free(data[i]);
+        i++;
+    }
+    del @i;
+
+    return Void;
+}
+
+def static stack__isEmpty(Void): Bool ->
+    return size == 0;
+
+def static stack__top(Void): uInt<8> ->
+    return data[Stack.size];
+
+def static stack__size(Void): uInt<8> ->
+    return size;
+
+def static stack__push
+    ( def p_value: Int<8>=zero
+): Void {
+    size++;
+    def l_data: @Int<8> = calloc(size, uInt<8>): Int<8>;
+
+    def i: uInt<8>=zero;
+    do (i < --size) {
+        l_data[i] = data[i];
+        i++;
+    }
+    del @i;
+
+    l_data[size] = p_value;
+    @data = @l_data;
+
+    def i: uInt<8>=zero;
+    do (i < size) {
+        free(l_data[i]);
+        i++;
+    }
+    del @i;
+
+    return Void;
+}
+
+def static stack__pop(Void): Int<8> {
+    size--;
+    def l_data: @Int<8> = calloc(size, uInt<8>): Int<8>;
+
+    def i: Int<8>=zero;
+    do (i < --Stack.size) {
+        l_data[i] = data[i];
+        i++;
+    }
+    del @i;
+
+    def result: Int<8> = data[size];
+    @data = @l_data;
+
+    def i: Int<8>=zero;
+    do (i < Stack.size) {
+        free(data[i]);
+        i++;
+    }
+    del @i;
+
+    return result;
+}
+
+def static @stack__at
+    ( def index: uInt<8>=zero
+): uInt<8> ->
+    return data[index];

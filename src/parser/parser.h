@@ -3,150 +3,139 @@
 
 #include "../lexer/lexer.h"
 #include "../errhandler/errhandler.h"
-#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Enumeration of all possible AST node types.
- * Every construct of the language is represented by exactly one value. */
 typedef enum {
-    /* Declarations */
-    AST_VARIABLE_DECLARATION,
-    AST_VARIABLE_LIST,
-    AST_FUNCTION_DECLARATION,
-
-    /* Statements */
-    AST_BLOCK,
-    AST_IF_STATEMENT,
-    AST_ELSE_STATEMENT,
-    AST_LABEL_DECLARATION,
-    AST_DO_LOOP,
-    AST_BREAK,
-    AST_CONTINUE,
-    AST_NOP,
-    AST_SIGNAL,
-    AST_ASM,
-    AST_JUMP,
-    AST_RETURN,
-    AST_SIZEOF,
-    AST_TYPEOF,
-    AST_ALLOC,
-    AST_REALLOC,
-    AST_FREE,
-    AST_DEF,
-    AST_DEL,
-    AST_PRO,
-
-    /* Expressions */
-    AST_IDENTIFIER,
-    AST_LITERAL_VALUE,
-    AST_BINARY_OPERATION,
-    AST_UNARY_OPERATION,
-    AST_TERNARY_OPERATION,
-    AST_ASSIGNMENT,
-    AST_COMPOUND_ASSIGNMENT,
-    AST_POSTFIX_INCREMENT,
-    AST_POSTFIX_DECREMENT,
-    AST_PREFIX_INCREMENT,
-    AST_PREFIX_DECREMENT,
-    AST_FIELD_ACCESS,
-    AST_ARRAY_ACCESS,
-    AST_FUNCTION_CALL,
-    AST_CAST,
-    AST_MULTI_INITIALIZER,
-    AST_MULTI_ASSIGNMENT,
-
-    AST_ERROR
+    AST_VARIABLE_DECLARATION,       /* Variable / constant / field declaration  */
+    AST_FUNCTION_DECLARATION,       /* Function declaration / definition        */
+    AST_BLOCK,                      /* Brace‑delimited statement list           */
+    AST_IF_STATEMENT,               /* if(cond) then … [else …]                 */
+    AST_ELSE_STATEMENT,             /* standalone else block                    */
+    AST_LABEL_DECLARATION,          /* identifier :                             */
+    AST_DO_LOOP,                    /* do(cond) body [else body]                */
+    AST_BREAK,                      /* break                                    */
+    AST_CONTINUE,                   /* continue                                 */
+    AST_NOP,                        /* nop                                      */
+    AST_SIGNAL,                     /* signal(expr, …)                          */
+    AST_HALT,                       /* halt                                     */
+    AST_ASM,                        /* asm("string")                            */
+    AST_JUMP,                       /* jump target                              */
+    AST_RETURN,                     /* return [expr, …]                         */
+    AST_SIZEOF,                     /* sizeof(expr)                             */
+    AST_TYPEOF,                     /* typeof(expr)                             */
+    AST_ALLOC,                      /* alloc(size, align, type)                 */
+    AST_REALLOC,                    /* realloc(ptr, size)                       */
+    AST_FREE,                       /* free(expr)                               */
+    AST_DEL,                        /* del identifier                           */
+    AST_IDENTIFIER,                 /* simple identifier                        */
+    AST_LITERAL_VALUE,              /* numeric, string, char, none, type, $     */
+    AST_BINARY_OPERATION,           /* e.g. a + b, a && b                       */
+    AST_UNARY_OPERATION,            /* e.g. -a, !a, *a                          */
+    AST_TERNARY_OPERATION,          /* cond ? true_expr : false_expr            */
+    AST_ASSIGNMENT,                 /* plain =                                  */
+    AST_COMPOUND_ASSIGNMENT,        /* +=, -=, etc.                             */
+    AST_POSTFIX_INCREMENT,          /* a++                                      */
+    AST_POSTFIX_DECREMENT,          /* a--                                      */
+    AST_PREFIX_INCREMENT,           /* ++a                                      */
+    AST_PREFIX_DECREMENT,           /* --a                                      */
+    AST_FIELD_ACCESS,               /* a.b                                      */
+    AST_ARRAY_ACCESS,               /* a[i]                                     */
+    AST_FUNCTION_CALL,              /* f(args)                                  */
+    AST_CAST,                       /* expr : Type                              */
+    AST_MULTI_INITIALIZER,          /* { e1, e2, … }                            */
+    AST_MULTI_ASSIGNMENT,           /* { a, b } = rhs                           */
+    AST_STRUCT_INITIALIZER          /* expr { .field = value, … }               */
 } ASTNodeType;
 
-/* Comprehensive type descriptor – encodes all static type information.
- * The '$' (dollar) prefix has been removed from the language. */
+/* Type descriptor – describes a type annotation in the AST */
 typedef struct Type {
-    char *name;                     /* base type name (e.g., "Int") */
-    char *access_modifier;          /* reserved for future use */
-    char **modifiers;               /* array of type modifiers */
-    uint8_t modifier_count;
-    uint8_t pointer_level;          /* number of '@' indirections */
-    uint8_t is_reference;           /* 1 if '&' present */
-    uint8_t is_array;               /* 1 if array dimensions are set */
-    bool is_const;                  /* const qualifier */
-    uint8_t size_in_bytes;          /* explicit size from <N> (0 = default) */
-    struct ASTNode *array_dimensions;   /* MULTI_INITIALIZER of dimension sizes */
-    struct ASTNode *angle_expression;   /* generic or size expression in < > */
-    struct ASTNode *typeof_expression;  /* expression inside typeof() */
+    char *name;                     /* Base type name (e.g. "Int", "String")    */
+    char **modifiers;               /* Modifier strings ("unsigned","const"…)   */
+    uint8_t modifier_count;         /* Number of modifier strings allocated     */
+    uint8_t pointer_level;          /* Depth of '@' pointers                    */
+    uint8_t is_reference;           /* Whether '&' reference was specified      */
+    uint8_t is_array;               /* Whether array brackets were used         */
+    uint8_t size_in_bytes;          /* Explicit width from angle brackets       */
+    struct ASTNode *array_dimensions; /* Expressions inside [ ]                 */
+    struct ASTNode *angle_expression; /* Generic expression inside < >          */
+    struct ASTNode *typeof_expression; /* Expression for typeof(type)           */
+    struct ASTNode *struct_definition; /* Block describing an inline struct     */
 } Type;
 
-/* A single node in the abstract syntax tree.
- * Union-like usage: different fields are active for different types.
- * - left / right: typical binary structure
- * - extra:         used for lists (BLOCK, MULTI_INITIALIZER, FUNCTION_CALL, …)
- * - default_value: initializer expression for variables
- * - variable_type: target type for declarations, casts, etc. */
+/* AST node – the fundamental tree element */
 typedef struct ASTNode {
-    ASTNodeType type;
-    TokenType operation_type;       /* token type for operators */
-    char *value;                    /* identifier / literal / label */
-    uint16_t line;
-    uint16_t column;
-    struct ASTNode *left;
-    struct ASTNode *right;          /* also used as variable body (struct definition) */
-    struct ASTNode *extra;          /* additional child or list */
-    Type *variable_type;            /* type attached to this node */
-    struct ASTNode *default_value;  /* initializer (kept for backward compat.) */
-    char *state_modifier;           /* "def", "del", "pro", "func", … */
-    char *access_modifier;          /* public / private (future) */
-    bool is_const;
+    ASTNodeType type;               /* Node kind                                */
+    TokenType   operation_type;     /* Token type for operators / assignments   */
+    char       *value;              /* String value (lexeme)                    */
+    uint16_t    line;               /* Source line (1‑based)                    */
+    uint16_t    column;             /* Source column (1‑based)                  */
+    struct ASTNode *left;           /* Left child                               */
+    struct ASTNode *right;          /* Right child                              */
+    struct ASTNode *extra;          /* Extra data (AST* list or single node)    */
+    Type        *variable_type;     /* Type annotation (declarations, casts)    */
+    struct ASTNode *default_value;  /* Default initialiser / body               */
+    char        *state_modifier;    /* "var", "def", "del", …                   */
+    char        *access_modifier;   /* Access modifier ("public", "private")    */
+    bool         is_const;          /* Constant flag                            */
 } ASTNode;
 
-/* Arena‑like memory pool for ASTNode structures.
- * Automatically expands on demand to avoid out‑of‑memory situations. */
+/* Fast pool allocator for AST nodes – all nodes of one AST live in the pool */
 typedef struct ASTNodePool {
-    ASTNode *nodes;                 /* contiguous array */
-    uint16_t capacity;
-    uint16_t *free_list;            /* stack of free indices */
-    uint16_t free_top;
+    ASTNode  *free_head;            /* Singly‑linked free list                  */
+    ASTNode **chunks;               /* Array of large allocated blocks          */
+    uint16_t  chunk_count;          /* Number of chunks                         */
+    uint16_t  chunk_capacity;       /* Capacity of the chunks array             */
 } ASTNodePool;
 
-/* Top‑level AST – a dynamic array of statements. */
+/* Top‑level AST produced by parse() */
 typedef struct AST {
-    ASTNode **nodes;
-    uint16_t count;
-    uint16_t capacity;
-    ASTNodePool *pool;              /* pool from which all nodes are taken */
-    bool had_errors;
+    ASTNode    **nodes;             /* Array of top‑level statements            */
+    uint16_t     count;             /* Number of statements                     */
+    uint16_t     capacity;          /* Allocated size of the array              */
+    ASTNodePool *pool;              /* Pool that owns all nodes                 */
+    bool         had_errors;        /* True if any syntax error was reported    */
 } AST;
 
-/* Parser state – holds the stream, position, pool and error flags. */
+/* Parser state – holds token stream, pool, error flags and pushback buffer */
 typedef struct ParserState {
-    uint16_t current_token_position;
-    Token *token_stream;
-    uint16_t total_tokens;
-    ASTNodePool *pool;
-    bool panic_mode;                /* set during error recovery */
-    bool fatal_error;               /* set on unrecoverable memory / logic error */
+    uint16_t     current_token_position; /* Index into token_stream            */
+    Token       *token_stream;       /* Array of tokens (lexer output)          */
+    uint16_t     total_tokens;       /* Number of tokens in the stream          */
+    ASTNodePool *pool;               /* Current node pool                       */
+    bool         panic_mode;         /* Set when performing error recovery      */
+    bool         fatal_error;        /* Set on memory allocation failure        */
+    Token        pushback_token;     /* One‑token pushback storage              */
+    bool         has_pushback;       /* True if pushback_token is valid         */
 } ParserState;
 
-/* Helper macros for building AST nodes (type‑safe shorthands). */
-#define AST_NEW_BINARY(state, op, left, right) \
-    create_ast_node(state, AST_BINARY_OPERATION, op, NULL, left, right, NULL)
-#define AST_NEW_UNARY(state, op, operand) \
-    create_ast_node(state, AST_UNARY_OPERATION, op, NULL, NULL, operand, NULL)
-#define AST_NEW_ASSIGNMENT(state, op, left, right) \
-    create_ast_node(state, ((op) == TOKEN_EQUAL) ? AST_ASSIGNMENT : AST_COMPOUND_ASSIGNMENT, op, NULL, left, right, NULL)
-#define AST_NEW_TERNARY(state, cond, t, f) \
-    create_ast_node(state, AST_TERNARY_OPERATION, 0, NULL, cond, t, f)
-
-/* Public API – pool management, cleanup and main entry point. */
+/* Pool interface */
 ASTNodePool *parser__ast_node_pool_create(uint16_t initial_capacity);
-void parser__ast_node_pool_destroy(ASTNodePool *pool);
-ASTNode *parser__ast_node_pool_alloc(ASTNodePool *pool);
-ASTNode *parser__ast_node_pool_alloc_or_expand(ParserState *state);
-void parser__ast_node_pool_free(ASTNodePool *pool, ASTNode *node);   /* <-- added to resolve implicit declaration */
+void         parser__ast_node_pool_destroy(ASTNodePool *pool);
 
-void parser__free_type(Type *type);
-void parser__free_ast_node(ASTNode *node);
-void parser__free_ast(AST *ast);
+/* Non‑expanding allocator – returns NULL when pool exhausted.
+   Used by passes that must not trigger parser fatal errors. */
+ASTNode     *parser__ast_node_pool_alloc(ASTNodePool *pool);
 
+/* Expanding allocator – calls expand_pool() and may report fatal error.
+   Used inside the recursive descent parser. */
+ASTNode     *parser__ast_node_pool_alloc_or_expand(ParserState *state);
+
+void         parser__ast_node_pool_free(ASTNodePool *pool, ASTNode *node);
+
+/* Recursively free a subtree, returning nodes to the pool */
+void         parser__free_ast_node(ASTNode *node, ASTNodePool *pool);
+
+/* Free an entire AST including its pool */
+void         parser__free_ast(AST *ast);
+
+/* Release memory occupied by a Type descriptor */
+void         parser__free_type(Type *type);
+
+/* Main entry point – returns a fully parsed AST (or NULL on fatal error) */
 AST *parse(Token *tokens, uint16_t token_count);
+
+/* Special error code for empty parentheses in function calls etc. */
+#define ERROR_CODE_SYNTAX_EMPTY_PARENS  0x7A08
 
 #endif

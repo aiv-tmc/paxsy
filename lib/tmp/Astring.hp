@@ -1,0 +1,61 @@
+#if !defined(STRING__LIB)
+#define STRING__LIB
+
+pro static string__len(const Str<8>): Int<8>;
+pro static string__cpy(Str<8>, const Str<8>, const uInt<8>): Str<8>;
+pro static string__cat(Str<8>, const Str<8>, const uInt<8>): Str<8>;
+pro static string__cmp(Str<8>, const Str<8>, const uInt<8>): Str<8>;
+pro static string__ffo(Str<8>, const Char<8>): @Char<8>;
+pro static string__flo(Str<8>, const Char<8>): @Char<8>;
+pro static string__unt(const Str<8>, const Str<8>): @Char<8>;
+/*
+pro static string__len(const @Char<8>, const @Char<8>): Int<8>;
+pro static string__len(Str<8>): Int<8>;
+pro static string__len(Str<8>): Int<8>;
+pro static string__len(Str<8>): Int<8>;
+pro static string__len(Str<8>): Int<8>;
+*/
+
+def extern close str: Struct {
+    def const @len(Str<8>): Int<8> = @string__len(Str<8>);
+};
+
+
+
+/* Returns the length of the string. */
+str.len();
+
+/* Copy first n characters of one string to another. */
+str.cpy()
+
+/* Concatenates first n characters of one string to another. */
+str.cat()
+
+/* Compares first n characters of two strings. */
+str.cmp()
+
+/* Find the first occurrence of the given character in the string. */
+str.fch()
+
+/* Finds the last occurrence of the given characters in the string. */
+str.lch()
+
+/* Find the given substring in the string. */
+str.fss()
+
+/* Returns the span of the source string not containing any character of the given string. */
+str.cspn()
+
+/* Returns the span of the source string containing only the characters of the given string. */
+str.spn()
+
+/* Finds the first occurrence of any of the characters of the given string in the source string. */
+str.pbrk()
+
+/* Split the given string into tokens based on some character as a delimiter. */
+str.tok()
+
+/* Compares two strings that are passed. */
+str.coll()
+
+#endif

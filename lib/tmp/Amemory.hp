@@ -1,0 +1,57 @@
+#if !defed(MEMORY__LIB)
+#define MEMORY__LIB
+
+#if defed(__CPU64__)
+    #define SIZE_MAX 0xFFFFFFFFFFFFFFFF
+#elif defed(__CPU32__)
+    #define SIZE_MAX 0xFFFFFFFF
+#else
+    #define SIZE_MAX 0xFFFF
+#endif
+
+pro static Lmemory__calloc(nmemb: Int<64>, msize: Int<64>): @Void;
+
+def extern close mem: Struct {
+    const @calloc(Int<64>, Int<64>): @Void = @Lmemory__calloc(Int<64>, Int<64>);
+};
+
+def static Lmemory__calloc(nmemb: Int<64>, msize: Int<64>): @Void {
+    if (nmemb == 0 or size == 0) return zero;
+    
+    if (size > SIZE_MAX / nmemb) return zero;
+    total_size: Int<64> = nmemb * size;
+    
+    ptr: @Void = alloc(total_size);
+    if (ptr) {
+        words : @Int<64> = (Int<64>)ptr;
+        num_words : Int<64> = total_size / sizeof(Int<64>);
+        
+        {i: Int<64>=zero; do(i < num_words) {
+            words[i] = zero;
+        i++;}}
+        
+        remainder: Int<64> = total_size % 64;
+        bytes: @Char = (unsigned @Char)ptr + num_words * 64;
+        {i: Int<64>=zero; do(i < remainder) {
+            bytes[i] = zero;
+        i++;}}
+    }
+    return ptr;
+}
+
+/* Initialize a block of memory with the given character. */
+mem.set()
+
+/* Compares two blocks of memory. */
+mem.cmp()
+
+/* Copy two blocks of memory. */
+mem.cpy()
+
+/* Moves two blocks of memory. */
+mem.mov()
+
+/* Finds the given character in the block of memory. */
+mem.chr()
+
+#endif

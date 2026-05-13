@@ -24,6 +24,7 @@ typedef enum {
     TOKEN_CONTINUE,         /**< `continue` keyword */
     TOKEN_NOP,              /**< `nop` keyword */
     TOKEN_SIGNAL,           /**< `signal` keyword */
+    TOKEN_HALT,             /**< `halt` keyword */
     TOKEN_ASM,              /**< `asm` keyword */
     TOKEN_JUMP,             /**< `jump` keyword */
     TOKEN_RETURN,           /**< `return` keyword */

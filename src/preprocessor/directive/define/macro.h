@@ -6,82 +6,88 @@
 
 /*
  * Structure representing a single macro definition.
+ *
+ * name              – macro name (null‑terminated).
+ * value             – replacement text (null‑terminated).
+ * name_len          – length of the macro name (excluding null).
+ * has_parameters    – 0 = object‑like, 1 = function‑like.
+ * param_names       – array of parameter name strings (NULL if none).
+ * param_count       – number of parameters (0 for object‑like).
  */
 typedef struct {
-    char* name;                    /* Macro name (null-terminated) */
-    char* value;                   /* Replacement text (null-terminated) */
-    size_t name_len;               /* Length of macro name (excluding null) */
-    int has_parameters;            /* 0 = object-like, 1 = function-like */
-    char** param_names;            /* Array of parameter names (if function-like) */
-    size_t param_count;            /* Number of parameters */
+    char*   name;
+    char*   value;
+    size_t  name_len;
+    int     has_parameters;
+    char**  param_names;
+    size_t  param_count;
 } Macro;
 
 /*
- * Structure holding a table (dynamic array) of macros.
+ * Opaque handle to a macro table.  The internal implementation uses
+ * a hash table with separate chaining; all access is through the
+ * functions declared below.
  */
-typedef struct {
-    Macro* macros;                 /* Array of macro entries */
-    size_t count;                  /* Current number of macros */
-    size_t capacity;               /* Allocated capacity (in entries) */
+typedef struct MacroTable {
+    void*   internal;   /* pointer to hidden implementation */
 } MacroTable;
 
 /*
- * Create and initialize a new macro table.
+ * Create and initialise a new, empty macro table.
  *
- * @return  Pointer to newly allocated table, or NULL on failure.
+ * Returns a pointer to the table on success, or NULL if memory
+ * allocation fails.
  */
 MacroTable* macro_table_create(void);
 
 /*
- * Destroy a macro table and free all associated memory.
+ * Destroy a macro table and free all associated resources.
  *
- * @param table  Table to destroy (may be NULL).
+ * table – table to destroy (may be NULL, in which case the call is a no‑op).
  */
 void macro_table_destroy(MacroTable* table);
 
 /*
  * Add a new macro definition or update an existing one.
  *
- * For function-like macros, a deep copy of the parameter names array and
- * each individual name string is made.  The table takes ownership of these
- * copies; the caller retains ownership of the original strings.
+ * For function‑like macros, a deep copy of the parameter name strings
+ * is made.  The table takes ownership of these copies; the caller retains
+ * ownership of the original strings.
  *
- * @param table          Macro table.
- * @param name           Macro name (will be copied).
- * @param value          Replacement text (will be copied).
- * @param has_parameters 1 for function-like, 0 for object-like.
- * @param param_names    Array of parameter names (can be NULL if count == 0).
- * @param param_count    Number of parameters.
- * @return               1 on success, 0 on failure (out of memory).
+ * table          – macro table.
+ * name           – macro name (will be copied).
+ * value          – replacement text (will be copied).
+ * has_parameters – 1 for function‑like, 0 for object‑like.
+ * param_names    – array of parameter names (can be NULL if count == 0).
+ * param_count    – number of parameters.
+ *
+ * Returns 1 on success, 0 on failure (out of memory).
  */
-int macro_table_add(MacroTable* table, const char* name, const char* value,
-                    int has_parameters, const char** param_names, size_t param_count);
+int macro_table_add(MacroTable* table,
+                    const char* name,
+                    const char* value,
+                    int has_parameters,
+                    const char** param_names,
+                    size_t param_count);
 
 /*
- * Find a macro by name.
+ * Look up a macro by name.
  *
- * @param table  Macro table.
- * @param name   Macro name to look for.
- * @return       Pointer to the macro entry, or NULL if not found.
+ * table – macro table.
+ * name  – macro name to search for.
+ *
+ * Returns a pointer to the (constant) macro entry, or NULL if not found.
  */
 const Macro* macro_table_find(const MacroTable* table, const char* name);
 
 /*
  * Remove a macro definition by name.
  *
- * @param table  Macro table.
- * @param name   Name of macro to remove.
- * @return       1 if found and removed, 0 otherwise.
+ * table – macro table.
+ * name  – name of the macro to remove.
+ *
+ * Returns 1 if the macro was found and removed, 0 otherwise.
  */
 int macro_table_remove(MacroTable* table, const char* name);
-
-/*
- * Check whether a macro with the given name exists.
- *
- * @param table  Macro table.
- * @param name   Macro name.
- * @return       1 if exists, 0 otherwise.
- */
-int macro_table_exists(const MacroTable* table, const char* name);
 
 #endif

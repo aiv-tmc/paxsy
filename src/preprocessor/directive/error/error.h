@@ -1,5 +1,5 @@
-#ifndef ERROR_H
-#define ERROR_H
+#ifndef DIR__ERROR_H
+#define DIR__ERROR_H
 
 #include "../../preprocessor_state.h"
 

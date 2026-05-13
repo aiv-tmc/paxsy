@@ -25,6 +25,7 @@ typedef struct PreprocessorState {
     uint8_t in_char : 1;
     uint8_t in_preprocessor_directive : 1;
     uint8_t in_macro_expansion : 1;
+    uint8_t macro_expansion_enabled : 1;
     uint8_t bracket_depth;
 
     char directive_buffer[256];

@@ -27,6 +27,7 @@ To add syntax highlighting in **vim**:
 `$ mv highlight/vim/syntax/paxsy.vim ~/.vim/syntax/paxsy.vim`
 
 2. Move the contents of the **vim_highlight/ftdetect/** file to: `~/.vim/ftdetect/`
+
 `$ mv highlight/vim/ftdetect/paxsy.vim ~/.vim/ftdetect/paxsy.vim`
 
 ## Syntax Highlighting (VSCode)
@@ -43,3 +44,4 @@ The documentation can be obtained at [this link](https://github.com/aiv-tmc/paxs
 <!--Dependencies-->
 ## Dependencies 
 This program depends on the version of the interpreter **gcc** **3.2** or later.
+

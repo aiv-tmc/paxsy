@@ -1,0 +1,112 @@
+#if !defined(STACK__IB)
+#define STACK__IB
+
+pro static stack__new(uInt<8>, Int<8>): Void;
+pro static stack__end(Void): Void;
+pro static stack__isEmpty(Void): Bool;
+pro static stack__top(Void): uInt<8>;
+pro static stack__size(Void): uInt<8>;
+pro static stack__push(Int<8>): Void;
+pro static stack__pop(Void): Int<8>;
+pro static stack__at(uInt<8>): uInt<8>;
+
+def static data: @uInt<8> = none;
+def static size:  uInt<8> = zero;
+
+def extern close Stack: Struct {
+    def const @new(uInt<8>, Int<8>): Void = @stack__new(uInt<8>, Int<8>);
+    def const @end(Void): Void = @stack__end(Void);
+
+    def const @isEmpty(Void): Bool = @stack__isEmpty(Void);
+    def const @top(Void): uInt<8> = @stack__top(Void);
+    def const @size(Void): uInt<8> = @stack__size(Void);
+    def const @push(Int<8>): Void = @stack__push(Int<8>);
+    def const @pop(Void): Int<8> = @stack__pop(Void);
+    def const @at(uInt<8>): uInt<8> = @stack__at(uInt<8>);
+};
+
+def static stack__new(def p_size: uInt<8>=zero, def p_value: Int<8>=none): Void {
+    size = p_size;
+    
+    def i: uInt<8>=zero;
+    do (i < p_size) {
+        data[i] = p_value;
+        i++;
+    }
+    del @i;
+
+    return Void;
+}
+
+def static stack__end(Void): Void {
+    def i: Int<8>=zero;
+    do (i < size) {
+        free(data[i]);
+        i++;
+    }
+    del @i;
+
+    return Void;
+}
+
+def static stack__isEmpty(Void): Bool ->
+    return size == 0;
+
+def static stack__top(Void): uInt<8> ->
+    return data[Stack.size];
+
+def static stack__size(Void): uInt<8> ->
+    return size;
+
+def static stack__push(def p_value: Int<8>=zero): Void {
+    size++;
+    def l_data: @Int<8> = calloc(size, uInt<8>): Int<8>;
+
+    def i: uInt<8>=zero;
+    do (i < --size) {
+        l_data[i] = data[i];
+        i++;
+    }
+    del @i;
+
+    l_data[size] = p_value;
+    @data = @l_data;
+
+    def i: uInt<8>=zero;
+    do (i < size) {
+        free(l_data[i]);
+        i++;
+    }
+    del @i;
+
+    return Void;
+}
+
+def static stack__pop(Void): Int<8> {
+    size--;
+    def l_data: @Int<8> = calloc(size, uInt<8>): Int<8>;
+
+    def i: Int<8>=zero;
+    do (i < --Stack.size) {
+        l_data[i] = data[i];
+        i++;
+    }
+    del @i;
+
+    def result: Int<8> = data[size];
+    @data = @l_data;
+
+    def i: Int<8>=zero;
+    do (i < Stack.size) {
+        free(data[i]);
+        i++;
+    }
+    del @i;
+
+    return result;
+}
+
+def static @stack__at(def index: uInt<8>=zero): uInt<8> ->
+    return data[index];
+
+#endif

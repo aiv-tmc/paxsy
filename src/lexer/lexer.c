@@ -58,11 +58,12 @@ static void init_symbol_table(void) {
         /* Keywords */
         {"if",          TOKEN_IF},
         {"else",        TOKEN_ELSE},
-        {"do",          TOKEN_DO},
+        {"DO",          TOKEN_DO},
         {"break",       TOKEN_BREAK},
         {"continue",    TOKEN_CONTINUE},
         {"nop",         TOKEN_NOP},
         {"signal",      TOKEN_SIGNAL},
+        {"halt",        TOKEN_HALT},
         {"asm",         TOKEN_ASM},
         {"jump",        TOKEN_JUMP},
         {"return",      TOKEN_RETURN},
@@ -85,18 +86,16 @@ static void init_symbol_table(void) {
         {"Void",        TOKEN_TYPE},
         {"Auto",        TOKEN_TYPE},
         {"Struct",      TOKEN_TYPE},
+        {"Union",       TOKEN_TYPE},
         
         /* Modifier keyword */
         {"unsigned",    TOKEN_TYPEMOD},
         {"signed",      TOKEN_TYPEMOD},
-        {"volatile",    TOKEN_TYPEMOD},
         {"const",       TOKEN_TYPEMOD},
-        {"fixed",       TOKEN_STATEMOD},
-        {"close",       TOKEN_STATEMOD},
-        {"open",        TOKEN_STATEMOD},
-        {"extern",      TOKEN_STATEMOD},
-        {"static",      TOKEN_STATEMOD},
-        {"regis",       TOKEN_STATEMOD},
+        {"volatile",    TOKEN_TYPEMOD},
+        {"regis",       TOKEN_TYPEMOD},
+        {"extern",      TOKEN_STATEMOD}, // tmp
+        {"static",      TOKEN_STATEMOD}, // tmp
         {"inline",      TOKEN_STATEMOD},
         
         /* Logical operator keywords */

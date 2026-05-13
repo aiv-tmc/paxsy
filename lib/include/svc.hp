@@ -1,0 +1,1266 @@
+/*
+ * Copyright (c) 2026 aiv-tmc
+ *
+ * This software is released under the MIT License.
+ * opensource.org
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#if !defined(SVC__LIB)
+#define SVC__LIB
+
+#if defined(__Aarch64__) or defined(__ARM__)
+
+def extern svc: {
+    def raw[72]: uChar=none;
+    def u64[9]: uInt<8>=none;
+    def: Struct {
+        def x0: Int<8>=0;
+        def x1: Int<8>=0;
+        def x2: Int<8>=0;
+        def x3: Int<8>=0;
+        def x4: Int<8>=0;
+        def x5: Int<8>=0;
+        def x6: Int<8>=0;
+        def x7: Int<8>=0;
+        def x8: Int<8>=0;
+    };
+}: Union;
+
+#define svc__vhangup        58
+#define svc__sync           81
+#define svc__sched_yield    124
+#define svc__restart        128
+#define svc__rt_sigreturn   139
+#define svc__setsid         157
+#define svc__getpid         172
+#define svc__getppid        173
+#define svc__getuid         174
+#define svc__geteuid        175
+#define svc__getgid         176
+#define svc__getegid        177
+#define svc__gettid         178
+#define svc__munlockall     231
+
+#define io_setup(nr_events, ctx) \
+            ((svc){ .x0=((nr_events):uInt<8>), .x1=((ctx):uInt<8>), .x8=0 })
+#define io_destroy(ctx) \
+            ((svc){ .x0=((ctx):uInt<8>), .x8=1 })
+#define io_submit(ctx_id, nr, iocbpp) \
+            ((svc){ .x0=((ctx_id):uInt<8>), .x1=((nr):uInt<8>), .x2=((iocbpp):uInt<8>), .x8=2 })
+#define io_cancel(ctx_id, iocb, result) \
+            ((svc){ .x0=((ctx_id):uInt<8>), .x1=((iocb):uInt<8>), .x2=((result):uInt<8>), .x8=3 })
+#define io_getevents(ctx_id, min_nr, nr, events, timeout) \
+            ((svc){ .x0=((ctx_id):uInt<8>), .x1=((min_nr):uInt<8>), .x2=((nr):uInt<8>), .x3=((events):uInt<8>), .x4=((timeout):uInt<8>), .x8=4 })
+#define setxattr(path, name, value, size, flags) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((name):uInt<8>), .x2=((value):uInt<8>), .x3=((size):uInt<8>), .x4=((flags):uInt<8>), .x8=5 })
+#define lsetxattr(path, name, value, size, flags) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((name):uInt<8>), .x2=((value):uInt<8>), .x3=((size):uInt<8>), .x4=((flags):uInt<8>), .x8=6 })
+#define fsetxattr(fd, name, value, size, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((name):uInt<8>), .x2=((value):uInt<8>), .x3=((size):uInt<8>), .x4=((flags):uInt<8>), .x8=7 })
+#define getxattr(path, name, value, size) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((name):uInt<8>), .x2=((value):uInt<8>), .x3=((size):uInt<8>), .x8=8 })
+#define lgetxattr(path, name, value, size) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((name):uInt<8>), .x2=((value):uInt<8>), .x3=((size):uInt<8>), .x8=9 })
+#define fgetxattr(fd, name, value, size) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((name):uInt<8>), .x2=((value):uInt<8>), .x3=((size):uInt<8>), .x8=10 })
+#define listxattr(path, list, size) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((list):uInt<8>), .x2=((size):uInt<8>), .x8=11 })
+#define llistxattr(path, list, size) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((list):uInt<8>), .x2=((size):uInt<8>), .x8=12 })
+#define flistxattr(fd, list, size) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((list):uInt<8>), .x2=((size):uInt<8>), .x8=13 })
+#define removexattr(path, name) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((name):uInt<8>), .x8=14 })
+#define lremovexattr(path, name) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((name):uInt<8>), .x8=15 })
+#define fremovexattr(fd, name) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((name):uInt<8>), .x8=16 })
+#define getcwd(buf, size) \
+            ((svc){ .x0=((buf):uInt<8>), .x1=((size):uInt<8>), .x8=17 })
+#define lookup_dcookie(cookie, buf, len) \
+            ((svc){ .x0=((cookie):uInt<8>), .x1=((buf):uInt<8>), .x2=((len):uInt<8>), .x8=18 })
+#define eventfd2(count, flags) \
+            ((svc){ .x0=((count):uInt<8>), .x1=((flags):uInt<8>), .x8=19 })
+#define epoll_create1(flags) \
+            ((svc){ .x0=((flags):uInt<8>), .x8=20 })
+#define epoll_ctl(epfd, op, fd, event) \
+            ((svc){ .x0=((epfd):uInt<8>), .x1=((op):uInt<8>), .x2=((fd):uInt<8>), .x3=((event):uInt<8>), .x8=21 })
+#define epoll_pwait(epfd, events, maxevents, timeout, sigmask, sigsetsize) \
+            ((svc){ .x0=((epfd):uInt<8>), .x1=((events):uInt<8>), .x2=((maxevents):uInt<8>), .x3=((timeout):uInt<8>), .x4=((sigmask):uInt<8>), .x5=((sigsetsize):uInt<8>), .x8=22 })
+#define dup(oldfd) \
+            ((svc){ .x0=((oldfd):uInt<8>), .x8=23 })
+#define dup3(oldfd, newfd, flags) \
+            ((svc){ .x0=((oldfd):uInt<8>), .x1=((newfd):uInt<8>), .x2=((flags):uInt<8>), .x8=24 })
+#define fcntl(fd, cmd, arg) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((cmd):uInt<8>), .x2=((arg):uInt<8>), .x8=25 })
+#define inotify_init1(flags) \
+            ((svc){ .x0=((flags):uInt<8>), .x8=26 })
+#define inotify_add_watch(fd, pathname, mask) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((mask):uInt<8>), .x8=27 })
+#define inotify_rm_watch(fd, wd) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((wd):uInt<8>), .x8=28 })
+#define ioctl(fd, request, arg) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((request):uInt<8>), .x2=((arg):uInt<8>), .x8=29 })
+#define ioprio_set(which, who, ioprio) \
+            ((svc){ .x0=((which):uInt<8>), .x1=((who):uInt<8>), .x2=((ioprio):uInt<8>), .x8=30 })
+#define ioprio_get(which, who) \
+            ((svc){ .x0=((which):uInt<8>), .x1=((who):uInt<8>), .x8=31 })
+#define flock(fd, operation) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((operation):uInt<8>), .x8=32 })
+#define mknodat(dirfd, pathname, mode, dev) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((mode):uInt<8>), .x3=((dev):uInt<8>), .x8=33 })
+#define mkdirat(dirfd, pathname, mode) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((mode):uInt<8>), .x8=34 })
+#define unlinkat(dirfd, pathname, flags) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((flags):uInt<8>), .x8=35 })
+#define symlinkat(target, newdirfd, linkpath) \
+            ((svc){ .x0=((target):uInt<8>), .x1=((newdirfd):uInt<8>), .x2=((linkpath):uInt<8>), .x8=36 })
+#define linkat(olddirfd, oldpath, newdirfd, newpath, flags) \
+            ((svc){ .x0=((olddirfd):uInt<8>), .x1=((oldpath):uInt<8>), .x2=((newdirfd):uInt<8>), .x3=((newpath):uInt<8>), .x4=((flags):uInt<8>), .x8=37 })
+#define renameat(olddirfd, oldpath, newdirfd, newpath) \
+            ((svc){ .x0=((olddirfd):uInt<8>), .x1=((oldpath):uInt<8>), .x2=((newdirfd):uInt<8>), .x3=((newpath):uInt<8>), .x8=38 })
+#define umount2(target, flags) \
+            ((svc){ .x0=((target):uInt<8>), .x1=((flags):uInt<8>), .x8=39 })
+#define mount(source, target, filesystemtype, mountflags, data) \
+            ((svc){ .x0=((source):uInt<8>), .x1=((target):uInt<8>), .x2=((filesystemtype):uInt<8>), .x3=((mountflags):uInt<8>), .x4=((data):uInt<8>), .x8=40 })
+#define pivot_root(new_root, put_old) \
+            ((svc){ .x0=((new_root):uInt<8>), .x1=((put_old):uInt<8>), .x8=41 })
+#define nfsservctl(cmd, arg, res) \
+            ((svc){ .x0=((cmd):uInt<8>), .x1=((arg):uInt<8>), .x2=((res):uInt<8>), .x8=42 })
+#define statfs(path, buf) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((buf):uInt<8>), .x8=43 })
+#define fstatfs(fd, buf) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((buf):uInt<8>), .x8=44 })
+#define truncate(path, length) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((length):uInt<8>), .x8=45 })
+#define ftruncate(fd, length) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((length):uInt<8>), .x8=46 })
+#define fallocate(fd, mode, offset, len) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((mode):uInt<8>), .x2=((offset):uInt<8>), .x3=((len):uInt<8>), .x8=47 })
+#define faccessat(dirfd, pathname, mode, flags) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((mode):uInt<8>), .x3=((flags):uInt<8>), .x8=48 })
+#define chdir(path) \
+            ((svc){ .x0=((path):uInt<8>), .x8=49 })
+#define fchdir(fd) \
+            ((svc){ .x0=((fd):uInt<8>), .x8=50 })
+#define chroot(path) \
+            ((svc){ .x0=((path):uInt<8>), .x8=51 })
+#define fchmod(fd, mode) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((mode):uInt<8>), .x8=52 })
+#define fchmodat(dirfd, pathname, mode, flags) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((mode):uInt<8>), .x3=((flags):uInt<8>), .x8=53 })
+#define fchownat(dirfd, pathname, owner, group, flags) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((owner):uInt<8>), .x3=((group):uInt<8>), .x4=((flags):uInt<8>), .x8=54 })
+#define fchown(fd, owner, group) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((owner):uInt<8>), .x2=((group):uInt<8>), .x8=55 })
+#define openat(dirfd, pathname, flags, mode) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((flags):uInt<8>), .x3=((mode):uInt<8>), .x8=56 })
+#define close(fd) \
+            ((svc){ .x0=((fd):uInt<8>), .x8=57 })
+#define pipe2(fildes, flags) \
+            ((svc){ .x0=((fildes):uInt<8>), .x1=((flags):uInt<8>), .x8=59 })
+#define quotactl(cmd, special, id, addr) \
+            ((svc){ .x0=((cmd):uInt<8>), .x1=((special):uInt<8>), .x2=((id):uInt<8>), .x3=((addr):uInt<8>), .x8=60 })
+#define getdents64(fd, dirp, count) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((dirp):uInt<8>), .x2=((count):uInt<8>), .x8=61 })
+#define lseek(fd, offset, whence) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((offset):uInt<8>), .x2=((whence):uInt<8>), .x8=62 })
+#define read(fd, buf, count) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((buf):uInt<8>), .x2=((count):uInt<8>), .x8=63 })
+#define write(fd, buf, count) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((buf):uInt<8>), .x2=((count):uInt<8>), .x8=64 })
+#define readv(fd, iov, iovcnt) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((iov):uInt<8>), .x2=((iovcnt):uInt<8>), .x8=65 })
+#define writev(fd, iov, iovcnt) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((iov):uInt<8>), .x2=((iovcnt):uInt<8>), .x8=66 })
+#define pread64(fd, buf, count, offset) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((buf):uInt<8>), .x2=((count):uInt<8>), .x3=((offset):uInt<8>), .x8=67 })
+#define pwrite64(fd, buf, count, offset) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((buf):uInt<8>), .x2=((count):uInt<8>), .x3=((offset):uInt<8>), .x8=68 })
+#define preadv(fd, iov, iovcnt, offset) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((iov):uInt<8>), .x2=((iovcnt):uInt<8>), .x3=((offset):uInt<8>), .x8=69 })
+#define pwritev(fd, iov, iovcnt, offset) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((iov):uInt<8>), .x2=((iovcnt):uInt<8>), .x3=((offset):uInt<8>), .x8=70 })
+#define sendfile(out_fd, in_fd, offset, count) \
+            ((svc){ .x0=((out_fd):uInt<8>), .x1=((in_fd):uInt<8>), .x2=((offset):uInt<8>), .x3=((count):uInt<8>), .x8=71 })
+#define pselect6(nfds, readfds, writefds, exceptfds, timeout, sigset) \
+            ((svc){ .x0=((nfds):uInt<8>), .x1=((readfds):uInt<8>), .x2=((writefds):uInt<8>), .x3=((exceptfds):uInt<8>), .x4=((timeout):uInt<8>), .x5=((sigset):uInt<8>), .x8=72 })
+#define ppoll(fds, nfds, timeout, sigmask, sigsetsize) \
+            ((svc){ .x0=((fds):uInt<8>), .x1=((nfds):uInt<8>), .x2=((timeout):uInt<8>), .x3=((sigmask):uInt<8>), .x4=((sigsetsize):uInt<8>), .x8=73 })
+#define signalfd4(fd, mask, sizemask, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((mask):uInt<8>), .x2=((sizemask):uInt<8>), .x3=((flags):uInt<8>), .x8=74 })
+#define vmsplice(fd, iov, nr_segs, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((iov):uInt<8>), .x2=((nr_segs):uInt<8>), .x3=((flags):uInt<8>), .x8=75 })
+#define splice(fd_in, off_in, fd_out, off_out, len, flags) \
+            ((svc){ .x0=((fd_in):uInt<8>), .x1=((off_in):uInt<8>), .x2=((fd_out):uInt<8>), .x3=((off_out):uInt<8>), .x4=((len):uInt<8>), .x5=((flags):uInt<8>), .x8=76 })
+#define tee(fdin, fdout, len, flags) \
+            ((svc){ .x0=((fdin):uInt<8>), .x1=((fdout):uInt<8>), .x2=((len):uInt<8>), .x3=((flags):uInt<8>), .x8=77 })
+#define readlinkat(dirfd, pathname, buf, bufsiz) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((buf):uInt<8>), .x3=((bufsiz):uInt<8>), .x8=78 })
+#define fstatat(dirfd, pathname, statbuf, flags) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((statbuf):uInt<8>), .x3=((flags):uInt<8>), .x8=79 })
+#define fstat(fd, statbuf) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((statbuf):uInt<8>), .x8=80 })
+#define fsync(fd) \
+            ((svc){ .x0=((fd):uInt<8>), .x8=82 })
+#define fdatasync(fd) \
+            ((svc){ .x0=((fd):uInt<8>), .x8=83 })
+#define sync_file_range2(fd, flags, offset, nbytes) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((flags):uInt<8>), .x2=((offset):uInt<8>), .x3=((nbytes):uInt<8>), .x8=84 })
+#define timerfd_create(clockid, flags) \
+            ((svc){ .x0=((clockid):uInt<8>), .x1=((flags):uInt<8>), .x8=85 })
+#define timerfd_settime(fd, flags, new_value, old_value) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((flags):uInt<8>), .x2=((new_value):uInt<8>), .x3=((old_value):uInt<8>), .x8=86 })
+#define timerfd_gettime(fd, curr_value) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((curr_value):uInt<8>), .x8=87 })
+#define utimensat(dirfd, pathname, times, flags) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((times):uInt<8>), .x3=((flags):uInt<8>), .x8=88 })
+#define acct(filename) \
+            ((svc){ .x0=((filename):uInt<8>), .x8=89 })
+#define capget(header, dataptr) \
+            ((svc){ .x0=((header):uInt<8>), .x1=((dataptr):uInt<8>), .x8=90 })
+#define capset(header, data) \
+            ((svc){ .x0=((header):uInt<8>), .x1=((data):uInt<8>), .x8=91 })
+#define personality(persona) \
+            ((svc){ .x0=((persona):uInt<8>), .x8=92 })
+#define exit(status) \
+            ((svc){ .x0=((status):uInt<8>), .x8=93 })
+#define exit_group(status) \
+            ((svc){ .x0=((status):uInt<8>), .x8=94 })
+#define waitid(idtype, id, infop, options, rusage) \
+            ((svc){ .x0=((idtype):uInt<8>), .x1=((id):uInt<8>), .x2=((infop):uInt<8>), .x3=((options):uInt<8>), .x4=((rusage):uInt<8>), .x8=95 })
+#define set_tid_address(tidptr) \
+            ((svc){ .x0=((tidptr):uInt<8>), .x8=96 })
+#define unshare(flags) \
+            ((svc){ .x0=((flags):uInt<8>), .x8=97 })
+#define futex(uaddr, op, val, timeout, uaddr2, val3) \
+            ((svc){ .x0=((uaddr):uInt<8>), .x1=((op):uInt<8>), .x2=((val):uInt<8>), .x3=((timeout):uInt<8>), .x4=((uaddr2):uInt<8>), .x5=((val3):uInt<8>), .x8=98 })
+#define set_robust_list(head, len) \
+            ((svc){ .x0=((head):uInt<8>), .x1=((len):uInt<8>), .x8=99 })
+#define get_robust_list(pid, head_ptr, len_ptr) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((head_ptr):uInt<8>), .x2=((len_ptr):uInt<8>), .x8=100 })
+#define nanosleep(rqtp, rmtp) \
+            ((svc){ .x0=((rqtp):uInt<8>), .x1=((rmtp):uInt<8>), .x8=101 })
+#define getitimer(which, value) \
+            ((svc){ .x0=((which):uInt<8>), .x1=((value):uInt<8>), .x8=102 })
+#define setitimer(which, new, old) \
+            ((svc){ .x0=((which):uInt<8>), .x1=((new):uInt<8>), .x2=((old):uInt<8>), .x8=103 })
+#define kexec_load(entry, nr_segments, segments, flags) \
+            ((svc){ .x0=((entry):uInt<8>), .x1=((nr_segments):uInt<8>), .x2=((segments):uInt<8>), .x3=((flags):uInt<8>), .x8=104 })
+#define init_module(module_image, len, param_values) \
+            ((svc){ .x0=((module_image):uInt<8>), .x1=((len):uInt<8>), .x2=((param_values):uInt<8>), .x8=105 })
+#define delete_module(name, flags) \
+            ((svc){ .x0=((name):uInt<8>), .x1=((flags):uInt<8>), .x8=106 })
+#define timer_create(clockid, sevp, timerid) \
+            ((svc){ .x0=((clockid):uInt<8>), .x1=((sevp):uInt<8>), .x2=((timerid):uInt<8>), .x8=107 })
+#define timer_gettime(timerid, value) \
+            ((svc){ .x0=((timerid):uInt<8>), .x1=((value):uInt<8>), .x8=108 })
+#define timer_getoverrun(timerid) \
+            ((svc){ .x0=((timerid):uInt<8>), .x8=109 })
+#define timer_settime(timerid, flags, value, ovalue) \
+            ((svc){ .x0=((timerid):uInt<8>), .x1=((flags):uInt<8>), .x2=((value):uInt<8>), .x3=((ovalue):uInt<8>), .x8=110 })
+#define timer_delete(timerid) \
+            ((svc){ .x0=((timerid):uInt<8>), .x8=111 })
+#define clock_settime(clockid, tp) \
+            ((svc){ .x0=((clockid):uInt<8>), .x1=((tp):uInt<8>), .x8=112 })
+#define clock_gettime(clockid, tp) \
+            ((svc){ .x0=((clockid):uInt<8>), .x1=((tp):uInt<8>), .x8=113 })
+#define clock_getres(clockid, res) \
+            ((svc){ .x0=((clockid):uInt<8>), .x1=((res):uInt<8>), .x8=114 })
+#define clock_nanosleep(clockid, flags, request, remain) \
+            ((svc){ .x0=((clockid):uInt<8>), .x1=((flags):uInt<8>), .x2=((request):uInt<8>), .x3=((remain):uInt<8>), .x8=115 })
+#define syslog(type, buf, len) \
+            ((svc){ .x0=((type):uInt<8>), .x1=((buf):uInt<8>), .x2=((len):uInt<8>), .x8=116 })
+#define ptrace(request, pid, addr, data) \
+            ((svc){ .x0=((request):uInt<8>), .x1=((pid):uInt<8>), .x2=((addr):uInt<8>), .x3=((data):uInt<8>), .x8=117 })
+#define sched_setparam(pid, param) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((param):uInt<8>), .x8=118 })
+#define sched_setscheduler(pid, policy, param) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((policy):uInt<8>), .x2=((param):uInt<8>), .x8=119 })
+#define sched_getscheduler(pid) \
+            ((svc){ .x0=((pid):uInt<8>), .x8=120 })
+#define sched_getparam(pid, param) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((param):uInt<8>), .x8=121 })
+#define sched_setaffinity(pid, cpusetsize, mask) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((cpusetsize):uInt<8>), .x2=((mask):uInt<8>), .x8=122 })
+#define sched_getaffinity(pid, cpusetsize, mask) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((cpusetsize):uInt<8>), .x2=((mask):uInt<8>), .x8=123 })
+#define sched_get_priority_max(policy) \
+            ((svc){ .x0=((policy):uInt<8>), .x8=125 })
+#define sched_get_priority_min(policy) \
+            ((svc){ .x0=((policy):uInt<8>), .x8=126 })
+#define sched_rr_get_interval(pid, tp) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((tp):uInt<8>), .x8=127 })
+#define kill(pid, sig) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((sig):uInt<8>), .x8=129 })
+#define tkill(tid, sig) \
+            ((svc){ .x0=((tid):uInt<8>), .x1=((sig):uInt<8>), .x8=130 })
+#define tgkill(tgid, tid, sig) \
+            ((svc){ .x0=((tgid):uInt<8>), .x1=((tid):uInt<8>), .x2=((sig):uInt<8>), .x8=131 })
+#define sigaltstack(ss, oss) \
+            ((svc){ .x0=((ss):uInt<8>), .x1=((oss):uInt<8>), .x8=132 })
+#define rt_sigsuspend(unewset, sigsetsize) \
+            ((svc){ .x0=((unewset):uInt<8>), .x1=((sigsetsize):uInt<8>), .x8=133 })
+#define rt_sigaction(sig, act, oact, sigsetsize) \
+            ((svc){ .x0=((sig):uInt<8>), .x1=((act):uInt<8>), .x2=((oact):uInt<8>), .x3=((sigsetsize):uInt<8>), .x8=134 })
+#define rt_sigprocmask(how, set, oset, sigsetsize) \
+            ((svc){ .x0=((how):uInt<8>), .x1=((set):uInt<8>), .x2=((oset):uInt<8>), .x3=((sigsetsize):uInt<8>), .x8=135 })
+#define rt_sigpending(set, sigsetsize) \
+            ((svc){ .x0=((set):uInt<8>), .x1=((sigsetsize):uInt<8>), .x8=136 })
+#define rt_sigtimedwait(set, info, timeout, sigsetsize) \
+            ((svc){ .x0=((set):uInt<8>), .x1=((info):uInt<8>), .x2=((timeout):uInt<8>), .x3=((sigsetsize):uInt<8>), .x8=137 })
+#define rt_sigqueueinfo(pid, sig, info) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((sig):uInt<8>), .x2=((info):uInt<8>), .x8=138 })
+#define setpriority(which, who, niceval) \
+            ((svc){ .x0=((which):uInt<8>), .x1=((who):uInt<8>), .x2=((niceval):uInt<8>), .x8=140 })
+#define getpriority(which, who) \
+            ((svc){ .x0=((which):uInt<8>), .x1=((who):uInt<8>), .x8=141 })
+#define reboot(magic1, magic2, cmd, arg) \
+            ((svc){ .x0=((magic1):uInt<8>), .x1=((magic2):uInt<8>), .x2=((cmd):uInt<8>), .x3=((arg):uInt<8>), .x8=142 })
+#define setregid(rgid, egid) \
+            ((svc){ .x0=((rgid):uInt<8>), .x1=((egid):uInt<8>), .x8=143 })
+#define setgid(gid) \
+            ((svc){ .x0=((gid):uInt<8>), .x8=144 })
+#define setreuid(ruid, euid) \
+            ((svc){ .x0=((ruid):uInt<8>), .x1=((euid):uInt<8>), .x8=145 })
+#define setuid(uid) \
+            ((svc){ .x0=((uid):uInt<8>), .x8=146 })
+#define setresuid(ruid, euid, suid) \
+            ((svc){ .x0=((ruid):uInt<8>), .x1=((euid):uInt<8>), .x2=((suid):uInt<8>), .x8=147 })
+#define getresuid(ruid, euid, suid) \
+            ((svc){ .x0=((ruid):uInt<8>), .x1=((euid):uInt<8>), .x2=((suid):uInt<8>), .x8=148 })
+#define setresgid(rgid, egid, sgid) \
+            ((svc){ .x0=((rgid):uInt<8>), .x1=((egid):uInt<8>), .x2=((sgid):uInt<8>), .x8=149 })
+#define getresgid(rgid, egid, sgid) \
+            ((svc){ .x0=((rgid):uInt<8>), .x1=((egid):uInt<8>), .x2=((sgid):uInt<8>), .x8=150 })
+#define setfsuid(uid) \
+            ((svc){ .x0=((uid):uInt<8>), .x8=151 })
+#define setfsgid(gid) \
+            ((svc){ .x0=((gid):uInt<8>), .x8=152 })
+#define times(tbuf) \
+            ((svc){ .x0=((tbuf):uInt<8>), .x8=153 })
+#define setpgid(pid, pgid) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((pgid):uInt<8>), .x8=154 })
+#define getpgid(pid) \
+            ((svc){ .x0=((pid):uInt<8>), .x8=155 })
+#define getsid(pid) \
+            ((svc){ .x0=((pid):uInt<8>), .x8=156 })
+#define getgroups(gidsetsize, grouplist) \
+            ((svc){ .x0=((gidsetsize):uInt<8>), .x1=((grouplist):uInt<8>), .x8=158 })
+#define setgroups(gidsetsize, grouplist) \
+            ((svc){ .x0=((gidsetsize):uInt<8>), .x1=((grouplist):uInt<8>), .x8=159 })
+#define uname(buf) \
+            ((svc){ .x0=((buf):uInt<8>), .x8=160 })
+#define sethostname(name, len) \
+            ((svc){ .x0=((name):uInt<8>), .x1=((len):uInt<8>), .x8=161 })
+#define setdomainname(name, len) \
+            ((svc){ .x0=((name):uInt<8>), .x1=((len):uInt<8>), .x8=162 })
+#define getrlimit(resource, rlim) \
+            ((svc){ .x0=((resource):uInt<8>), .x1=((rlim):uInt<8>), .x8=163 })
+#define setrlimit(resource, rlim) \
+            ((svc){ .x0=((resource):uInt<8>), .x1=((rlim):uInt<8>), .x8=164 })
+#define getrusage(who, usage) \
+            ((svc){ .x0=((who):uInt<8>), .x1=((usage):uInt<8>), .x8=165 })
+#define umask(mask) \
+            ((svc){ .x0=((mask):uInt<8>), .x8=166 })
+#define prctl(option, arg2, arg3, arg4, arg5) \
+            ((svc){ .x0=((option):uInt<8>), .x1=((arg2):uInt<8>), .x2=((arg3):uInt<8>), .x3=((arg4):uInt<8>), .x4=((arg5):uInt<8>), .x8=167 })
+#define getcpu(cpu, node, tcache) \
+            ((svc){ .x0=((cpu):uInt<8>), .x1=((node):uInt<8>), .x2=((tcache):uInt<8>), .x8=168 })
+#define gettimeofday(tv, tz) \
+            ((svc){ .x0=((tv):uInt<8>), .x1=((tz):uInt<8>), .x8=169 })
+#define settimeofday(tv, tz) \
+            ((svc){ .x0=((tv):uInt<8>), .x1=((tz):uInt<8>), .x8=170 })
+#define adjtimex(buf) \
+            ((svc){ .x0=((buf):uInt<8>), .x8=171 })
+#define sysinfo(info) \
+            ((svc){ .x0=((info):uInt<8>), .x8=179 })
+#define mq_open(name, oflag, mode, attr) \
+            ((svc){ .x0=((name):uInt<8>), .x1=((oflag):uInt<8>), .x2=((mode):uInt<8>), .x3=((attr):uInt<8>), .x8=180 })
+#define mq_unlink(name) \
+            ((svc){ .x0=((name):uInt<8>), .x8=181 })
+#define mq_timedsend(mqdes, msg_ptr, msg_len, msg_prio, abs_timeout) \
+            ((svc){ .x0=((mqdes):uInt<8>), .x1=((msg_ptr):uInt<8>), .x2=((msg_len):uInt<8>), .x3=((msg_prio):uInt<8>), .x4=((abs_timeout):uInt<8>), .x8=182 })
+#define mq_timedreceive(mqdes, msg_ptr, msg_len, msg_prio, abs_timeout) \
+            ((svc){ .x0=((mqdes):uInt<8>), .x1=((msg_ptr):uInt<8>), .x2=((msg_len):uInt<8>), .x3=((msg_prio):uInt<8>), .x4=((abs_timeout):uInt<8>), .x8=183 })
+#define mq_notify(mqdes, notification) \
+            ((svc){ .x0=((mqdes):uInt<8>), .x1=((notification):uInt<8>), .x8=184 })
+#define mq_getsetattr(mqdes, newattr, oldattr) \
+            ((svc){ .x0=((mqdes):uInt<8>), .x1=((newattr):uInt<8>), .x2=((oldattr):uInt<8>), .x8=185 })
+#define msgget(key, msgflg) \
+            ((svc){ .x0=((key):uInt<8>), .x1=((msgflg):uInt<8>), .x8=186 })
+#define msgctl(msqid, cmd, buf) \
+            ((svc){ .x0=((msqid):uInt<8>), .x1=((cmd):uInt<8>), .x2=((buf):uInt<8>), .x8=187 })
+#define msgrcv(msqid, msgp, msgsz, msgtyp, msgflg) \
+            ((svc){ .x0=((msqid):uInt<8>), .x1=((msgp):uInt<8>), .x2=((msgsz):uInt<8>), .x3=((msgtyp):uInt<8>), .x4=((msgflg):uInt<8>), .x8=188 })
+#define msgsnd(msqid, msgp, msgsz, msgflg) \
+            ((svc){ .x0=((msqid):uInt<8>), .x1=((msgp):uInt<8>), .x2=((msgsz):uInt<8>), .x3=((msgflg):uInt<8>), .x8=189 })
+#define semget(key, nsems, semflg) \
+            ((svc){ .x0=((key):uInt<8>), .x1=((nsems):uInt<8>), .x2=((semflg):uInt<8>), .x8=190 })
+#define semctl(semid, semnum, cmd, arg) \
+            ((svc){ .x0=((semid):uInt<8>), .x1=((semnum):uInt<8>), .x2=((cmd):uInt<8>), .x3=((arg):uInt<8>), .x8=191 })
+#define semtimedop(semid, tsops, nsops, timeout) \
+            ((svc){ .x0=((semid):uInt<8>), .x1=((tsops):uInt<8>), .x2=((nsops):uInt<8>), .x3=((timeout):uInt<8>), .x8=192 })
+#define semop(semid, sops, nsops) \
+            ((svc){ .x0=((semid):uInt<8>), .x1=((sops):uInt<8>), .x2=((nsops):uInt<8>), .x8=193 })
+#define shmget(key, size, shmflg) \
+            ((svc){ .x0=((key):uInt<8>), .x1=((size):uInt<8>), .x2=((shmflg):uInt<8>), .x8=194 })
+#define shmctl(shmid, cmd, buf) \
+            ((svc){ .x0=((shmid):uInt<8>), .x1=((cmd):uInt<8>), .x2=((buf):uInt<8>), .x8=195 })
+#define shmat(shmid, shmaddr, shmflg) \
+            ((svc){ .x0=((shmid):uInt<8>), .x1=((shmaddr):uInt<8>), .x2=((shmflg):uInt<8>), .x8=196 })
+#define shmdt(shmaddr) \
+            ((svc){ .x0=((shmaddr):uInt<8>), .x8=197 })
+#define socket(family, type, protocol) \
+            ((svc){ .x0=((family):uInt<8>), .x1=((type):uInt<8>), .x2=((protocol):uInt<8>), .x8=198 })
+#define socketpair(family, type, protocol, usockvec) \
+            ((svc){ .x0=((family):uInt<8>), .x1=((type):uInt<8>), .x2=((protocol):uInt<8>), .x3=((usockvec):uInt<8>), .x8=199 })
+#define bind(fd, umyaddr, addrlen) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((umyaddr):uInt<8>), .x2=((addrlen):uInt<8>), .x8=200 })
+#define listen(fd, backlog) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((backlog):uInt<8>), .x8=201 })
+#define accept(fd, addr, addrlen) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((addr):uInt<8>), .x2=((addrlen):uInt<8>), .x8=202 })
+#define connect(fd, uservaddr, addrlen) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((uservaddr):uInt<8>), .x2=((addrlen):uInt<8>), .x8=203 })
+#define getsockname(fd, usockaddr, usockaddr_len) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((usockaddr):uInt<8>), .x2=((usockaddr_len):uInt<8>), .x8=204 })
+#define getpeername(fd, usockaddr, usockaddr_len) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((usockaddr):uInt<8>), .x2=((usockaddr_len):uInt<8>), .x8=205 })
+#define sendto(fd, buff, len, flags, addr, addr_len) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((buff):uInt<8>), .x2=((len):uInt<8>), .x3=((flags):uInt<8>), .x4=((addr):uInt<8>), .x5=((addr_len):uInt<8>), .x8=206 })
+#define recvfrom(fd, ubuf, size, flags, addr, addr_len) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((ubuf):uInt<8>), .x2=((size):uInt<8>), .x3=((flags):uInt<8>), .x4=((addr):uInt<8>), .x5=((addr_len):uInt<8>), .x8=207 })
+#define setsockopt(fd, level, optname, optval, optlen) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((level):uInt<8>), .x2=((optname):uInt<8>), .x3=((optval):uInt<8>), .x4=((optlen):uInt<8>), .x8=208 })
+#define getsockopt(fd, level, optname, optval, optlen) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((level):uInt<8>), .x2=((optname):uInt<8>), .x3=((optval):uInt<8>), .x4=((optlen):uInt<8>), .x8=209 })
+#define shutdown(fd, how) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((how):uInt<8>), .x8=210 })
+#define sendmsg(fd, msg, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((msg):uInt<8>), .x2=((flags):uInt<8>), .x8=211 })
+#define recvmsg(fd, msg, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((msg):uInt<8>), .x2=((flags):uInt<8>), .x8=212 })
+#define readahead(fd, offset, count) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((offset):uInt<8>), .x2=((count):uInt<8>), .x8=213 })
+#define brk(brk) \
+            ((svc){ .x0=((brk):uInt<8>), .x8=214 })
+#define munmap(addr, length) \
+            ((svc){ .x0=((addr):uInt<8>), .x1=((length):uInt<8>), .x8=215 })
+#define mremap(old_address, old_size, new_size, flags, new_address) \
+            ((svc){ .x0=((old_address):uInt<8>), .x1=((old_size):uInt<8>), .x2=((new_size):uInt<8>), .x3=((flags):uInt<8>), .x4=((new_address):uInt<8>), .x8=216 })
+#define add_key(type, description, payload, plen, ringid) \
+            ((svc){ .x0=((type):uInt<8>), .x1=((description):uInt<8>), .x2=((payload):uInt<8>), .x3=((plen):uInt<8>), .x4=((ringid):uInt<8>), .x8=217 })
+#define request_key(type, description, callout_info, dest_ringid) \
+            ((svc){ .x0=((type):uInt<8>), .x1=((description):uInt<8>), .x2=((callout_info):uInt<8>), .x3=((dest_ringid):uInt<8>), .x8=218 })
+#define keyctl(operation, arg2, arg3, arg4, arg5) \
+            ((svc){ .x0=((operation):uInt<8>), .x1=((arg2):uInt<8>), .x2=((arg3):uInt<8>), .x3=((arg4):uInt<8>), .x4=((arg5):uInt<8>), .x8=219 })
+#define clone(flags, stack, parent_tid, child_tid, tls) \
+            ((svc){ .x0=((flags):uInt<8>), .x1=((stack):uInt<8>), .x2=((parent_tid):uInt<8>), .x3=((child_tid):uInt<8>), .x4=((tls):uInt<8>), .x8=220 })
+#define execve(filename, argv, envp) \
+            ((svc){ .x0=((filename):uInt<8>), .x1=((argv):uInt<8>), .x2=((envp):uInt<8>), .x8=221 })
+#define mmap(addr, length, prot, flags, fd, offset) \
+            ((svc){ .x0=((addr):uInt<8>), .x1=((length):uInt<8>), .x2=((prot):uInt<8>), .x3=((flags):uInt<8>), .x4=((fd):uInt<8>), .x5=((offset):uInt<8>), .x8=222 })
+#define fadvise64_64(fd, offset, len, advice) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((offset):uInt<8>), .x2=((len):uInt<8>), .x3=((advice):uInt<8>), .x8=223 })
+#define swapon(path, swapflags) \
+            ((svc){ .x0=((path):uInt<8>), .x1=((swapflags):uInt<8>), .x8=224 })
+#define swapoff(path) \
+            ((svc){ .x0=((path):uInt<8>), .x8=225 })
+#define mprotect(start, len, prot) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((len):uInt<8>), .x2=((prot):uInt<8>), .x8=226 })
+#define msync(start, len, flags) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((len):uInt<8>), .x2=((flags):uInt<8>), .x8=227 })
+#define mlock(start, len) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((len):uInt<8>), .x8=228 })
+#define munlock(start, len) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((len):uInt<8>), .x8=229 })
+#define mlockall(flags) \
+            ((svc){ .x0=((flags):uInt<8>), .x8=230 })
+#define mincore(start, len, vec) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((len):uInt<8>), .x2=((vec):uInt<8>), .x8=232 })
+#define madvise(start, len, behavior) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((len):uInt<8>), .x2=((behavior):uInt<8>), .x8=233 })
+#define remap_file_pages(start, size, prot, pgoff, flags) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((size):uInt<8>), .x2=((prot):uInt<8>), .x3=((pgoff):uInt<8>), .x4=((flags):uInt<8>), .x8=234 })
+#define mbind(start, len, mode, nodemask, maxnode, flags) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((len):uInt<8>), .x2=((mode):uInt<8>), .x3=((nodemask):uInt<8>), .x4=((maxnode):uInt<8>), .x5=((flags):uInt<8>), .x8=235 })
+#define get_mempolicy(policy, nodemask, maxnode, addr, flags) \
+            ((svc){ .x0=((policy):uInt<8>), .x1=((nodemask):uInt<8>), .x2=((maxnode):uInt<8>), .x3=((addr):uInt<8>), .x4=((flags):uInt<8>), .x8=236 })
+#define set_mempolicy(mode, nodemask, maxnode) \
+            ((svc){ .x0=((mode):uInt<8>), .x1=((nodemask):uInt<8>), .x2=((maxnode):uInt<8>), .x8=237 })
+#define migrate_pages(pid, maxnode, old_nodes, new_nodes) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((maxnode):uInt<8>), .x2=((old_nodes):uInt<8>), .x3=((new_nodes):uInt<8>), .x8=238 })
+#define move_pages(pid, nr_pages, pages, nodes, status, flags) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((nr_pages):uInt<8>), .x2=((pages):uInt<8>), .x3=((nodes):uInt<8>), .x4=((status):uInt<8>), .x5=((flags):uInt<8>), .x8=239 })
+#define rt_tgsigqueueinfo(tgid, tid, sig, info) \
+            ((svc){ .x0=((tgid):uInt<8>), .x1=((tid):uInt<8>), .x2=((sig):uInt<8>), .x3=((info):uInt<8>), .x8=240 })
+#define perf_event_open(attr, pid, cpu, group_fd, flags) \
+            ((svc){ .x0=((attr):uInt<8>), .x1=((pid):uInt<8>), .x2=((cpu):uInt<8>), .x3=((group_fd):uInt<8>), .x4=((flags):uInt<8>), .x8=241 })
+#define accept4(fd, addr, addrlen, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((addr):uInt<8>), .x2=((addrlen):uInt<8>), .x3=((flags):uInt<8>), .x8=242 })
+#define recvmmsg(fd, msg, vlen, flags, timeout) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((msg):uInt<8>), .x2=((vlen):uInt<8>), .x3=((flags):uInt<8>), .x4=((timeout):uInt<8>), .x8=243 })
+
+/* numbers 244–259 are unused on AArch64 – omitted */
+
+#define wait4(pid, stat_addr, options, rusage) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((stat_addr):uInt<8>), .x2=((options):uInt<8>), .x3=((rusage):uInt<8>), .x8=260 })
+#define prlimit64(pid, resource, new_limit, old_limit) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((resource):uInt<8>), .x2=((new_limit):uInt<8>), .x3=((old_limit):uInt<8>), .x8=261 })
+#define fanotify_init(flags, event_f_flags) \
+            ((svc){ .x0=((flags):uInt<8>), .x1=((event_f_flags):uInt<8>), .x8=262 })
+#define fanotify_mark(fanotify_fd, flags, mask, dirfd, pathname) \
+            ((svc){ .x0=((fanotify_fd):uInt<8>), .x1=((flags):uInt<8>), .x2=((mask):uInt<8>), .x3=((dirfd):uInt<8>), .x4=((pathname):uInt<8>), .x8=263 })
+#define name_to_handle_at(dirfd, pathname, handle, mount_id, flags) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((handle):uInt<8>), .x3=((mount_id):uInt<8>), .x4=((flags):uInt<8>), .x8=264 })
+#define open_by_handle_at(mount_fd, handle, flags) \
+            ((svc){ .x0=((mount_fd):uInt<8>), .x1=((handle):uInt<8>), .x2=((flags):uInt<8>), .x8=265 })
+#define clock_adjtime(clockid, buf) \
+            ((svc){ .x0=((clockid):uInt<8>), .x1=((buf):uInt<8>), .x8=266 })
+#define syncfs(fd) \
+            ((svc){ .x0=((fd):uInt<8>), .x8=267 })
+#define setns(fd, nstype) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((nstype):uInt<8>), .x8=268 })
+#define sendmmsg(fd, mmsg, vlen, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((mmsg):uInt<8>), .x2=((vlen):uInt<8>), .x3=((flags):uInt<8>), .x8=269 })
+#define process_vm_readv(pid, lvec, liovcnt, rvec, riovcnt, flags) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((lvec):uInt<8>), .x2=((liovcnt):uInt<8>), .x3=((rvec):uInt<8>), .x4=((riovcnt):uInt<8>), .x5=((flags):uInt<8>), .x8=270 })
+#define process_vm_writev(pid, lvec, liovcnt, rvec, riovcnt, flags) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((lvec):uInt<8>), .x2=((liovcnt):uInt<8>), .x3=((rvec):uInt<8>), .x4=((riovcnt):uInt<8>), .x5=((flags):uInt<8>), .x8=271 })
+#define kcmp(pid1, pid2, type, idx1, idx2) \
+            ((svc){ .x0=((pid1):uInt<8>), .x1=((pid2):uInt<8>), .x2=((type):uInt<8>), .x3=((idx1):uInt<8>), .x4=((idx2):uInt<8>), .x8=272 })
+#define finit_module(fd, param_values, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((param_values):uInt<8>), .x2=((flags):uInt<8>), .x8=273 })
+#define sched_setattr(pid, attr, flags) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((attr):uInt<8>), .x2=((flags):uInt<8>), .x8=274 })
+#define sched_getattr(pid, attr, size, flags) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((attr):uInt<8>), .x2=((size):uInt<8>), .x3=((flags):uInt<8>), .x8=275 })
+#define renameat2(olddirfd, oldpath, newdirfd, newpath, flags) \
+            ((svc){ .x0=((olddirfd):uInt<8>), .x1=((oldpath):uInt<8>), .x2=((newdirfd):uInt<8>), .x3=((newpath):uInt<8>), .x4=((flags):uInt<8>), .x8=276 })
+#define seccomp(operation, flags, args) \
+            ((svc){ .x0=((operation):uInt<8>), .x1=((flags):uInt<8>), .x2=((args):uInt<8>), .x8=277 })
+#define getrandom(buf, count, flags) \
+            ((svc){ .x0=((buf):uInt<8>), .x1=((count):uInt<8>), .x2=((flags):uInt<8>), .x8=278 })
+#define memfd_create(name, flags) \
+            ((svc){ .x0=((name):uInt<8>), .x1=((flags):uInt<8>), .x8=279 })
+#define bpf(cmd, attr, size) \
+            ((svc){ .x0=((cmd):uInt<8>), .x1=((attr):uInt<8>), .x2=((size):uInt<8>), .x8=280 })
+#define execveat(dirfd, pathname, argv, envp, flags) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((argv):uInt<8>), .x3=((envp):uInt<8>), .x4=((flags):uInt<8>), .x8=281 })
+#define userfaultfd(flags) \
+            ((svc){ .x0=((flags):uInt<8>), .x8=282 })
+#define membarrier(cmd, flags) \
+            ((svc){ .x0=((cmd):uInt<8>), .x1=((flags):uInt<8>), .x8=283 })
+#define mlock2(start, len, flags) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((len):uInt<8>), .x2=((flags):uInt<8>), .x8=284 })
+#define copy_file_range(fd_in, off_in, fd_out, off_out, len, flags) \
+            ((svc){ .x0=((fd_in):uInt<8>), .x1=((off_in):uInt<8>), .x2=((fd_out):uInt<8>), .x3=((off_out):uInt<8>), .x4=((len):uInt<8>), .x5=((flags):uInt<8>), .x8=285 })
+#define preadv2(fd, iov, iovcnt, offset, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((iov):uInt<8>), .x2=((iovcnt):uInt<8>), .x3=((offset):uInt<8>), .x4=((flags):uInt<8>), .x8=286 })
+#define pwritev2(fd, iov, iovcnt, offset, flags) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((iov):uInt<8>), .x2=((iovcnt):uInt<8>), .x3=((offset):uInt<8>), .x4=((flags):uInt<8>), .x8=287 })
+#define pkey_mprotect(start, len, prot, pkey) \
+            ((svc){ .x0=((start):uInt<8>), .x1=((len):uInt<8>), .x2=((prot):uInt<8>), .x3=((pkey):uInt<8>), .x8=288 })
+#define pkey_alloc(flags, access_rights) \
+            ((svc){ .x0=((flags):uInt<8>), .x1=((access_rights):uInt<8>), .x8=289 })
+#define pkey_free(pkey) \
+            ((svc){ .x0=((pkey):uInt<8>), .x8=290 })
+#define statx(dirfd, pathname, flags, mask, buf) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((flags):uInt<8>), .x3=((mask):uInt<8>), .x4=((buf):uInt<8>), .x8=291 })
+#define io_pgetevents(ctx_id, min_nr, nr, events, timeout, usig) \
+            ((svc){ .x0=((ctx_id):uInt<8>), .x1=((min_nr):uInt<8>), .x2=((nr):uInt<8>), .x3=((events):uInt<8>), .x4=((timeout):uInt<8>), .x5=((usig):uInt<8>), .x8=292 })
+#define rseq(rseq, rseq_len, flags, sig) \
+            ((svc){ .x0=((rseq):uInt<8>), .x1=((rseq_len):uInt<8>), .x2=((flags):uInt<8>), .x3=((sig):uInt<8>), .x8=293 })
+#define kexec_file_load(kernel_fd, initrd_fd, cmdline_len, cmdline, flags) \
+            ((svc){ .x0=((kernel_fd):uInt<8>), .x1=((initrd_fd):uInt<8>), .x2=((cmdline_len):uInt<8>), .x3=((cmdline):uInt<8>), .x4=((flags):uInt<8>), .x8=294 })
+#define pidfd_send_signal(pidfd, sig, info, flags) \
+            ((svc){ .x0=((pidfd):uInt<8>), .x1=((sig):uInt<8>), .x2=((info):uInt<8>), .x3=((flags):uInt<8>), .x8=295 })
+#define io_uring_setup(entries, params) \
+            ((svc){ .x0=((entries):uInt<8>), .x1=((params):uInt<8>), .x8=296 })
+#define io_uring_enter(fd, to_submit, min_complete, flags, sig, sigsz) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((to_submit):uInt<8>), .x2=((min_complete):uInt<8>), .x3=((flags):uInt<8>), .x4=((sig):uInt<8>), .x5=((sigsz):uInt<8>), .x8=297 })
+#define io_uring_register(fd, opcode, arg, nr_args) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((opcode):uInt<8>), .x2=((arg):uInt<8>), .x3=((nr_args):uInt<8>), .x8=298 })
+#define open_tree(dfd, path, flags) \
+            ((svc){ .x0=((dfd):uInt<8>), .x1=((path):uInt<8>), .x2=((flags):uInt<8>), .x8=299 })
+#define move_mount(from_dfd, from_path, to_dfd, to_path, flags) \
+            ((svc){ .x0=((from_dfd):uInt<8>), .x1=((from_path):uInt<8>), .x2=((to_dfd):uInt<8>), .x3=((to_path):uInt<8>), .x4=((flags):uInt<8>), .x8=300 })
+#define fsopen(fsname, flags) \
+            ((svc){ .x0=((fsname):uInt<8>), .x1=((flags):uInt<8>), .x8=301 })
+#define fsconfig(fs_fd, cmd, key, value, aux) \
+            ((svc){ .x0=((fs_fd):uInt<8>), .x1=((cmd):uInt<8>), .x2=((key):uInt<8>), .x3=((value):uInt<8>), .x4=((aux):uInt<8>), .x8=302 })
+#define fsmount(fs_fd, flags, ms_flags) \
+            ((svc){ .x0=((fs_fd):uInt<8>), .x1=((flags):uInt<8>), .x2=((ms_flags):uInt<8>), .x8=303 })
+#define fspick(dfd, path, flags) \
+            ((svc){ .x0=((dfd):uInt<8>), .x1=((path):uInt<8>), .x2=((flags):uInt<8>), .x8=304 })
+#define pidfd_open(pid, flags) \
+            ((svc){ .x0=((pid):uInt<8>), .x1=((flags):uInt<8>), .x8=305 })
+#define clone3(cl_args, size) \
+            ((svc){ .x0=((cl_args):uInt<8>), .x1=((size):uInt<8>), .x8=306 })
+#define close_range(first, last, flags) \
+            ((svc){ .x0=((first):uInt<8>), .x1=((last):uInt<8>), .x2=((flags):uInt<8>), .x8=307 })
+#define openat2(dirfd, pathname, how, size) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((how):uInt<8>), .x3=((size):uInt<8>), .x8=308 })
+#define pidfd_getfd(pidfd, targetfd, flags) \
+            ((svc){ .x0=((pidfd):uInt<8>), .x1=((targetfd):uInt<8>), .x2=((flags):uInt<8>), .x8=309 })
+#define faccessat2(dirfd, pathname, mode, flags) \
+            ((svc){ .x0=((dirfd):uInt<8>), .x1=((pathname):uInt<8>), .x2=((mode):uInt<8>), .x3=((flags):uInt<8>), .x8=310 })
+#define process_madvise(pidfd, iovec, vlen, advice, flags) \
+            ((svc){ .x0=((pidfd):uInt<8>), .x1=((iovec):uInt<8>), .x2=((vlen):uInt<8>), .x3=((advice):uInt<8>), .x4=((flags):uInt<8>), .x8=311 })
+#define epoll_pwait2(epfd, events, maxevents, timeout, sigmask, sigsetsize) \
+            ((svc){ .x0=((epfd):uInt<8>), .x1=((events):uInt<8>), .x2=((maxevents):uInt<8>), .x3=((timeout):uInt<8>), .x4=((sigmask):uInt<8>), .x5=((sigsetsize):uInt<8>), .x8=312 })
+#define mount_setattr(dfd, path, flags, attr, size) \
+            ((svc){ .x0=((dfd):uInt<8>), .x1=((path):uInt<8>), .x2=((flags):uInt<8>), .x3=((attr):uInt<8>), .x4=((size):uInt<8>), .x8=313 })
+#define quotactl_fd(fd, cmd, id, addr) \
+            ((svc){ .x0=((fd):uInt<8>), .x1=((cmd):uInt<8>), .x2=((id):uInt<8>), .x3=((addr):uInt<8>), .x8=314 })
+#define landlock_create_ruleset(attr, size, flags) \
+            ((svc){ .x0=((attr):uInt<8>), .x1=((size):uInt<8>), .x2=((flags):uInt<8>), .x8=315 })
+#define landlock_add_rule(ruleset_fd, rule_type, rule_attr, flags) \
+            ((svc){ .x0=((ruleset_fd):uInt<8>), .x1=((rule_type):uInt<8>), .x2=((rule_attr):uInt<8>), .x3=((flags):uInt<8>), .x8=316 })
+#define landlock_restrict_self(ruleset_fd, flags) \
+            ((svc){ .x0=((ruleset_fd):uInt<8>), .x1=((flags):uInt<8>), .x8=317 })
+#define memfd_secret(flags) \
+            ((svc){ .x0=((flags):uInt<8>), .x8=318 })
+#define process_mrelease(pidfd, flags) \
+            ((svc){ .x0=((pidfd):uInt<8>), .x1=((flags):uInt<8>), .x8=319 })
+#define futex_waitv(waiters, nr_waiters, flags, timeout, clockid) \
+            ((svc){ .x0=((waiters):uInt<8>), .x1=((nr_waiters):uInt<8>), .x2=((flags):uInt<8>), .x3=((timeout):uInt<8>), .x4=((clockid):uInt<8>), .x8=320 })
+#define set_mempolicy_home_node(mode, nodemask, maxnode, home_node) \
+            ((svc){ .x0=((mode):uInt<8>), .x1=((nodemask):uInt<8>), .x2=((maxnode):uInt<8>), .x3=((home_node):uInt<8>), .x8=321 })
+
+#elif defined(__x86_64__) or defined(__x86__) or defined(__8086__)
+
+def extern svc: {
+    def raw[56]: uChar=none;
+    def u64[7]: uInt<8>=none;
+    def: Struct {
+        def rdi: Int<8>=0;
+        def rsi: Int<8>=0;
+        def rdx: Int<8>=0;
+        def r10: Int<8>=0;
+        def r8: Int<8>=0;
+        def r9: Int<8>=0;
+        def rax: Int<8>=0;
+    };
+}: Union;
+
+#define svc__vhangup        153
+#define svc__sync           162
+#define svc__sched_yield    24
+#define svc__restart        219
+#define svc__rt_sigreturn   15
+#define svc__setsid         112
+#define svc__getpid         39
+#define svc__getppid        110
+#define svc__getuid         102
+#define svc__geteuid        107
+#define svc__getgid         104
+#define svc__getegid        108
+#define svc__gettid         186
+#define svc__munlockall     152
+
+#define io_setup(nr_events, ctx) \
+            ((svc){ .rdi=((nr_events):Int<8>), .rsi=((ctx):Int<8>), .rax=206 })
+#define io_destroy(ctx) \
+            ((svc){ .rdi=((ctx):Int<8>), .rax=207 })
+#define io_submit(ctx_id, nr, iocbpp) \
+            ((svc){ .rdi=((ctx_id):Int<8>), .rsi=((nr):Int<8>), .rdx=((iocbpp):Int<8>), .rax=209 })
+#define io_cancel(ctx_id, iocb, result) \
+            ((svc){ .rdi=((ctx_id):Int<8>), .rsi=((iocb):Int<8>), .rdx=((result):Int<8>), .rax=210 })
+#define io_getevents(ctx_id, min_nr, nr, events, timeout) \
+            ((svc){ .rdi=((ctx_id):Int<8>), .rsi=((min_nr):Int<8>), .rdx=((nr):Int<8>), .r10=((events):Int<8>), .r8=((timeout):Int<8>), .rax=208 })
+#define setxattr(path, name, value, size, flags) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((name):Int<8>), .rdx=((value):Int<8>), .r10=((size):Int<8>), .r8=((flags):Int<8>), .rax=188 })
+#define lsetxattr(path, name, value, size, flags) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((name):Int<8>), .rdx=((value):Int<8>), .r10=((size):Int<8>), .r8=((flags):Int<8>), .rax=189 })
+#define fsetxattr(fd, name, value, size, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((name):Int<8>), .rdx=((value):Int<8>), .r10=((size):Int<8>), .r8=((flags):Int<8>), .rax=190 })
+#define getxattr(path, name, value, size) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((name):Int<8>), .rdx=((value):Int<8>), .r10=((size):Int<8>), .rax=191 })
+#define lgetxattr(path, name, value, size) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((name):Int<8>), .rdx=((value):Int<8>), .r10=((size):Int<8>), .rax=192 })
+#define fgetxattr(fd, name, value, size) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((name):Int<8>), .rdx=((value):Int<8>), .r10=((size):Int<8>), .rax=193 })
+#define listxattr(path, list, size) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((list):Int<8>), .rdx=((size):Int<8>), .rax=194 })
+#define llistxattr(path, list, size) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((list):Int<8>), .rdx=((size):Int<8>), .rax=195 })
+#define flistxattr(fd, list, size) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((list):Int<8>), .rdx=((size):Int<8>), .rax=196 })
+#define removexattr(path, name) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((name):Int<8>), .rax=197 })
+#define lremovexattr(path, name) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((name):Int<8>), .rax=198 })
+#define fremovexattr(fd, name) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((name):Int<8>), .rax=199 })
+#define getcwd(buf, size) \
+            ((svc){ .rdi=((buf):Int<8>), .rsi=((size):Int<8>), .rax=79 })
+#define lookup_dcookie(cookie, buf, len) \
+            ((svc){ .rdi=((cookie):Int<8>), .rsi=((buf):Int<8>), .rdx=((len):Int<8>), .rax=212 })
+#define eventfd2(count, flags) \
+            ((svc){ .rdi=((count):Int<8>), .rsi=((flags):Int<8>), .rax=290 })
+#define epoll_create1(flags) \
+            ((svc){ .rdi=((flags):Int<8>), .rax=291 })
+#define epoll_ctl(epfd, op, fd, event) \
+            ((svc){ .rdi=((epfd):Int<8>), .rsi=((op):Int<8>), .rdx=((fd):Int<8>), .r10=((event):Int<8>), .rax=233 })
+#define epoll_pwait(epfd, events, maxevents, timeout, sigmask, sigsetsize) \
+            ((svc){ .rdi=((epfd):Int<8>), .rsi=((events):Int<8>), .rdx=((maxevents):Int<8>), .r10=((timeout):Int<8>), .r8=((sigmask):Int<8>), .r9=((sigsetsize):Int<8>), .rax=280 })
+#define dup(oldfd) \
+            ((svc){ .rdi=((oldfd):Int<8>), .rax=32 })
+#define dup3(oldfd, newfd, flags) \
+            ((svc){ .rdi=((oldfd):Int<8>), .rsi=((newfd):Int<8>), .rdx=((flags):Int<8>), .rax=292 })
+#define fcntl(fd, cmd, arg) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((cmd):Int<8>), .rdx=((arg):Int<8>), .rax=72 })
+#define inotify_init1(flags) \
+            ((svc){ .rdi=((flags):Int<8>), .rax=294 })
+#define inotify_add_watch(fd, pathname, mask) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((mask):Int<8>), .rax=254 })
+#define inotify_rm_watch(fd, wd) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((wd):Int<8>), .rax=255 })
+#define ioctl(fd, request, arg) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((request):Int<8>), .rdx=((arg):Int<8>), .rax=16 })
+#define ioprio_set(which, who, ioprio) \
+            ((svc){ .rdi=((which):Int<8>), .rsi=((who):Int<8>), .rdx=((ioprio):Int<8>), .rax=251 })
+#define ioprio_get(which, who) \
+            ((svc){ .rdi=((which):Int<8>), .rsi=((who):Int<8>), .rax=252 })
+#define flock(fd, operation) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((operation):Int<8>), .rax=73 })
+#define mknodat(dirfd, pathname, mode, dev) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((mode):Int<8>), .r10=((dev):Int<8>), .rax=259 })
+#define mkdirat(dirfd, pathname, mode) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((mode):Int<8>), .rax=258 })
+#define unlinkat(dirfd, pathname, flags) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((flags):Int<8>), .rax=263 })
+#define symlinkat(target, newdirfd, linkpath) \
+            ((svc){ .rdi=((target):Int<8>), .rsi=((newdirfd):Int<8>), .rdx=((linkpath):Int<8>), .rax=266 })
+#define linkat(olddirfd, oldpath, newdirfd, newpath, flags) \
+            ((svc){ .rdi=((olddirfd):Int<8>), .rsi=((oldpath):Int<8>), .rdx=((newdirfd):Int<8>), .r10=((newpath):Int<8>), .r8=((flags):Int<8>), .rax=265 })
+#define renameat(olddirfd, oldpath, newdirfd, newpath) \
+            ((svc){ .rdi=((olddirfd):Int<8>), .rsi=((oldpath):Int<8>), .rdx=((newdirfd):Int<8>), .r10=((newpath):Int<8>), .rax=264 })
+#define umount2(target, flags) \
+            ((svc){ .rdi=((target):Int<8>), .rsi=((flags):Int<8>), .rax=166 })
+#define mount(source, target, filesystemtype, mountflags, data) \
+            ((svc){ .rdi=((source):Int<8>), .rsi=((target):Int<8>), .rdx=((filesystemtype):Int<8>), .r10=((mountflags):Int<8>), .r8=((data):Int<8>), .rax=165 })
+#define pivot_root(new_root, put_old) \
+            ((svc){ .rdi=((new_root):Int<8>), .rsi=((put_old):Int<8>), .rax=155 })
+#define nfsservctl(cmd, arg, res) \
+            ((svc){ .rdi=((cmd):Int<8>), .rsi=((arg):Int<8>), .rdx=((res):Int<8>), .rax=180 })
+#define statfs(path, buf) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((buf):Int<8>), .rax=137 })
+#define fstatfs(fd, buf) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((buf):Int<8>), .rax=138 })
+#define truncate(path, length) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((length):Int<8>), .rax=76 })
+#define ftruncate(fd, length) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((length):Int<8>), .rax=77 })
+#define fallocate(fd, mode, offset, len) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((mode):Int<8>), .rdx=((offset):Int<8>), .r10=((len):Int<8>), .rax=285 })
+#define faccessat(dirfd, pathname, mode, flags) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((mode):Int<8>), .r10=((flags):Int<8>), .rax=269 })
+#define chdir(path) \
+            ((svc){ .rdi=((path):Int<8>), .rax=80 })
+#define fchdir(fd) \
+            ((svc){ .rdi=((fd):Int<8>), .rax=81 })
+#define chroot(path) \
+            ((svc){ .rdi=((path):Int<8>), .rax=161 })
+#define fchmod(fd, mode) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((mode):Int<8>), .rax=91 })
+#define fchmodat(dirfd, pathname, mode, flags) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((mode):Int<8>), .r10=((flags):Int<8>), .rax=268 })
+#define fchownat(dirfd, pathname, owner, group, flags) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((owner):Int<8>), .r10=((group):Int<8>), .r8=((flags):Int<8>), .rax=260 })
+#define fchown(fd, owner, group) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((owner):Int<8>), .rdx=((group):Int<8>), .rax=93 })
+#define openat(dirfd, pathname, flags, mode) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((flags):Int<8>), .r10=((mode):Int<8>), .rax=257 })
+#define close(fd) \
+            ((svc){ .rdi=((fd):Int<8>), .rax=3 })
+#define pipe2(fildes, flags) \
+            ((svc){ .rdi=((fildes):Int<8>), .rsi=((flags):Int<8>), .rax=293 })
+#define quotactl(cmd, special, id, addr) \
+            ((svc){ .rdi=((cmd):Int<8>), .rsi=((special):Int<8>), .rdx=((id):Int<8>), .r10=((addr):Int<8>), .rax=179 })
+#define getdents64(fd, dirp, count) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((dirp):Int<8>), .rdx=((count):Int<8>), .rax=217 })
+#define lseek(fd, offset, whence) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((offset):Int<8>), .rdx=((whence):Int<8>), .rax=8 })
+#define read(fd, buf, count) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((buf):Int<8>), .rdx=((count):Int<8>), .rax=0 })
+#define write(fd, buf, count) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((buf):Int<8>), .rdx=((count):Int<8>), .rax=1 })
+#define readv(fd, iov, iovcnt) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((iov):Int<8>), .rdx=((iovcnt):Int<8>), .rax=19 })
+#define writev(fd, iov, iovcnt) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((iov):Int<8>), .rdx=((iovcnt):Int<8>), .rax=20 })
+#define pread64(fd, buf, count, offset) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((buf):Int<8>), .rdx=((count):Int<8>), .r10=((offset):Int<8>), .rax=17 })
+#define pwrite64(fd, buf, count, offset) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((buf):Int<8>), .rdx=((count):Int<8>), .r10=((offset):Int<8>), .rax=18 })
+#define preadv(fd, iov, iovcnt, offset) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((iov):Int<8>), .rdx=((iovcnt):Int<8>), .r10=((offset):Int<8>), .rax=295 })
+#define pwritev(fd, iov, iovcnt, offset) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((iov):Int<8>), .rdx=((iovcnt):Int<8>), .r10=((offset):Int<8>), .rax=296 })
+#define sendfile(out_fd, in_fd, offset, count) \
+            ((svc){ .rdi=((out_fd):Int<8>), .rsi=((in_fd):Int<8>), .rdx=((offset):Int<8>), .r10=((count):Int<8>), .rax=40 })
+#define pselect6(nfds, readfds, writefds, exceptfds, timeout, sigset) \
+            ((svc){ .rdi=((nfds):Int<8>), .rsi=((readfds):Int<8>), .rdx=((writefds):Int<8>), .r10=((exceptfds):Int<8>), .r8=((timeout):Int<8>), .r9=((sigset):Int<8>), .rax=270 })
+#define ppoll(fds, nfds, timeout, sigmask, sigsetsize) \
+            ((svc){ .rdi=((fds):Int<8>), .rsi=((nfds):Int<8>), .rdx=((timeout):Int<8>), .r10=((sigmask):Int<8>), .r8=((sigsetsize):Int<8>), .rax=271 })
+#define signalfd4(fd, mask, sizemask, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((mask):Int<8>), .rdx=((sizemask):Int<8>), .r10=((flags):Int<8>), .rax=289 })
+#define vmsplice(fd, iov, nr_segs, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((iov):Int<8>), .rdx=((nr_segs):Int<8>), .r10=((flags):Int<8>), .rax=277 })
+#define splice(fd_in, off_in, fd_out, off_out, len, flags) \
+            ((svc){ .rdi=((fd_in):Int<8>), .rsi=((off_in):Int<8>), .rdx=((fd_out):Int<8>), .r10=((off_out):Int<8>), .r8=((len):Int<8>), .r9=((flags):Int<8>), .rax=275 })
+#define tee(fdin, fdout, len, flags) \
+            ((svc){ .rdi=((fdin):Int<8>), .rsi=((fdout):Int<8>), .rdx=((len):Int<8>), .r10=((flags):Int<8>), .rax=276 })
+#define readlinkat(dirfd, pathname, buf, bufsiz) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((buf):Int<8>), .r10=((bufsiz):Int<8>), .rax=267 })
+#define fstatat(dirfd, pathname, statbuf, flags) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((statbuf):Int<8>), .r10=((flags):Int<8>), .rax=262 })
+#define fstat(fd, statbuf) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((statbuf):Int<8>), .rax=5 })
+#define fsync(fd) \
+            ((svc){ .rdi=((fd):Int<8>), .rax=74 })
+#define fdatasync(fd) \
+            ((svc){ .rdi=((fd):Int<8>), .rax=75 })
+#define sync_file_range2(fd, flags, offset, nbytes) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((flags):Int<8>), .rdx=((offset):Int<8>), .r10=((nbytes):Int<8>), .rax=306 })
+#define timerfd_create(clockid, flags) \
+            ((svc){ .rdi=((clockid):Int<8>), .rsi=((flags):Int<8>), .rax=283 })
+#define timerfd_settime(fd, flags, new_value, old_value) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((flags):Int<8>), .rdx=((new_value):Int<8>), .r10=((old_value):Int<8>), .rax=286 })
+#define timerfd_gettime(fd, curr_value) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((curr_value):Int<8>), .rax=287 })
+#define utimensat(dirfd, pathname, times, flags) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((times):Int<8>), .r10=((flags):Int<8>), .rax=281 })
+#define acct(filename) \
+            ((svc){ .rdi=((filename):Int<8>), .rax=163 })
+#define capget(header, dataptr) \
+            ((svc){ .rdi=((header):Int<8>), .rsi=((dataptr):Int<8>), .rax=125 })
+#define capset(header, data) \
+            ((svc){ .rdi=((header):Int<8>), .rsi=((data):Int<8>), .rax=126 })
+#define personality(persona) \
+            ((svc){ .rdi=((persona):Int<8>), .rax=135 })
+#define exit(status) \
+            ((svc){ .rdi=((status):Int<8>), .rax=60 })
+#define exit_group(status) \
+            ((svc){ .rdi=((status):Int<8>), .rax=231 })
+#define waitid(idtype, id, infop, options, rusage) \
+            ((svc){ .rdi=((idtype):Int<8>), .rsi=((id):Int<8>), .rdx=((infop):Int<8>), .r10=((options):Int<8>), .r8=((rusage):Int<8>), .rax=247 })
+#define set_tid_address(tidptr) \
+            ((svc){ .rdi=((tidptr):Int<8>), .rax=218 })
+#define unshare(flags) \
+            ((svc){ .rdi=((flags):Int<8>), .rax=272 })
+#define futex(uaddr, op, val, timeout, uaddr2, val3) \
+            ((svc){ .rdi=((uaddr):Int<8>), .rsi=((op):Int<8>), .rdx=((val):Int<8>), .r10=((timeout):Int<8>), .r8=((uaddr2):Int<8>), .r9=((val3):Int<8>), .rax=202 })
+#define set_robust_list(head, len) \
+            ((svc){ .rdi=((head):Int<8>), .rsi=((len):Int<8>), .rax=273 })
+#define get_robust_list(pid, head_ptr, len_ptr) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((head_ptr):Int<8>), .rdx=((len_ptr):Int<8>), .rax=274 })
+#define nanosleep(rqtp, rmtp) \
+            ((svc){ .rdi=((rqtp):Int<8>), .rsi=((rmtp):Int<8>), .rax=35 })
+#define getitimer(which, value) \
+            ((svc){ .rdi=((which):Int<8>), .rsi=((value):Int<8>), .rax=36 })
+#define setitimer(which, new, old) \
+            ((svc){ .rdi=((which):Int<8>), .rsi=((new):Int<8>), .rdx=((old):Int<8>), .rax=38 })
+#define kexec_load(entry, nr_segments, segments, flags) \
+            ((svc){ .rdi=((entry):Int<8>), .rsi=((nr_segments):Int<8>), .rdx=((segments):Int<8>), .r10=((flags):Int<8>), .rax=246 })
+#define init_module(module_image, len, param_values) \
+            ((svc){ .rdi=((module_image):Int<8>), .rsi=((len):Int<8>), .rdx=((param_values):Int<8>), .rax=175 })
+#define delete_module(name, flags) \
+            ((svc){ .rdi=((name):Int<8>), .rsi=((flags):Int<8>), .rax=176 })
+#define timer_create(clockid, sevp, timerid) \
+            ((svc){ .rdi=((clockid):Int<8>), .rsi=((sevp):Int<8>), .rdx=((timerid):Int<8>), .rax=222 })
+#define timer_gettime(timerid, value) \
+            ((svc){ .rdi=((timerid):Int<8>), .rsi=((value):Int<8>), .rax=224 })
+#define timer_getoverrun(timerid) \
+            ((svc){ .rdi=((timerid):Int<8>), .rax=225 })
+#define timer_settime(timerid, flags, value, ovalue) \
+            ((svc){ .rdi=((timerid):Int<8>), .rsi=((flags):Int<8>), .rdx=((value):Int<8>), .r10=((ovalue):Int<8>), .rax=223 })
+#define timer_delete(timerid) \
+            ((svc){ .rdi=((timerid):Int<8>), .rax=226 })
+#define clock_settime(clockid, tp) \
+            ((svc){ .rdi=((clockid):Int<8>), .rsi=((tp):Int<8>), .rax=227 })
+#define clock_gettime(clockid, tp) \
+            ((svc){ .rdi=((clockid):Int<8>), .rsi=((tp):Int<8>), .rax=228 })
+#define clock_getres(clockid, res) \
+            ((svc){ .rdi=((clockid):Int<8>), .rsi=((res):Int<8>), .rax=229 })
+#define clock_nanosleep(clockid, flags, request, remain) \
+            ((svc){ .rdi=((clockid):Int<8>), .rsi=((flags):Int<8>), .rdx=((request):Int<8>), .r10=((remain):Int<8>), .rax=230 })
+#define syslog(type, buf, len) \
+            ((svc){ .rdi=((type):Int<8>), .rsi=((buf):Int<8>), .rdx=((len):Int<8>), .rax=103 })
+#define ptrace(request, pid, addr, data) \
+            ((svc){ .rdi=((request):Int<8>), .rsi=((pid):Int<8>), .rdx=((addr):Int<8>), .r10=((data):Int<8>), .rax=101 })
+#define sched_setparam(pid, param) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((param):Int<8>), .rax=142 })
+#define sched_setscheduler(pid, policy, param) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((policy):Int<8>), .rdx=((param):Int<8>), .rax=144 })
+#define sched_getscheduler(pid) \
+            ((svc){ .rdi=((pid):Int<8>), .rax=145 })
+#define sched_getparam(pid, param) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((param):Int<8>), .rax=143 })
+#define sched_setaffinity(pid, cpusetsize, mask) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((cpusetsize):Int<8>), .rdx=((mask):Int<8>), .rax=203 })
+#define sched_getaffinity(pid, cpusetsize, mask) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((cpusetsize):Int<8>), .rdx=((mask):Int<8>), .rax=204 })
+#define sched_get_priority_max(policy) \
+            ((svc){ .rdi=((policy):Int<8>), .rax=146 })
+#define sched_get_priority_min(policy) \
+            ((svc){ .rdi=((policy):Int<8>), .rax=147 })
+#define sched_rr_get_interval(pid, tp) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((tp):Int<8>), .rax=148 })
+#define kill(pid, sig) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((sig):Int<8>), .rax=62 })
+#define tkill(tid, sig) \
+            ((svc){ .rdi=((tid):Int<8>), .rsi=((sig):Int<8>), .rax=200 })
+#define tgkill(tgid, tid, sig) \
+            ((svc){ .rdi=((tgid):Int<8>), .rsi=((tid):Int<8>), .rdx=((sig):Int<8>), .rax=234 })
+#define sigaltstack(ss, oss) \
+            ((svc){ .rdi=((ss):Int<8>), .rsi=((oss):Int<8>), .rax=131 })
+#define rt_sigsuspend(unewset, sigsetsize) \
+            ((svc){ .rdi=((unewset):Int<8>), .rsi=((sigsetsize):Int<8>), .rax=130 })
+#define rt_sigaction(sig, act, oact, sigsetsize) \
+            ((svc){ .rdi=((sig):Int<8>), .rsi=((act):Int<8>), .rdx=((oact):Int<8>), .r10=((sigsetsize):Int<8>), .rax=13 })
+#define rt_sigprocmask(how, set, oset, sigsetsize) \
+            ((svc){ .rdi=((how):Int<8>), .rsi=((set):Int<8>), .rdx=((oset):Int<8>), .r10=((sigsetsize):Int<8>), .rax=14 })
+#define rt_sigpending(set, sigsetsize) \
+            ((svc){ .rdi=((set):Int<8>), .rsi=((sigsetsize):Int<8>), .rax=127 })
+#define rt_sigtimedwait(set, info, timeout, sigsetsize) \
+            ((svc){ .rdi=((set):Int<8>), .rsi=((info):Int<8>), .rdx=((timeout):Int<8>), .r10=((sigsetsize):Int<8>), .rax=128 })
+#define rt_sigqueueinfo(pid, sig, info) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((sig):Int<8>), .rdx=((info):Int<8>), .rax=129 })
+#define setpriority(which, who, niceval) \
+            ((svc){ .rdi=((which):Int<8>), .rsi=((who):Int<8>), .rdx=((niceval):Int<8>), .rax=141 })
+#define getpriority(which, who) \
+            ((svc){ .rdi=((which):Int<8>), .rsi=((who):Int<8>), .rax=140 })
+#define reboot(magic1, magic2, cmd, arg) \
+            ((svc){ .rdi=((magic1):Int<8>), .rsi=((magic2):Int<8>), .rdx=((cmd):Int<8>), .r10=((arg):Int<8>), .rax=169 })
+#define setregid(rgid, egid) \
+            ((svc){ .rdi=((rgid):Int<8>), .rsi=((egid):Int<8>), .rax=114 })
+#define setgid(gid) \
+            ((svc){ .rdi=((gid):Int<8>), .rax=106 })
+#define setreuid(ruid, euid) \
+            ((svc){ .rdi=((ruid):Int<8>), .rsi=((euid):Int<8>), .rax=113 })
+#define setuid(uid) \
+            ((svc){ .rdi=((uid):Int<8>), .rax=105 })
+#define setresuid(ruid, euid, suid) \
+            ((svc){ .rdi=((ruid):Int<8>), .rsi=((euid):Int<8>), .rdx=((suid):Int<8>), .rax=117 })
+#define getresuid(ruid, euid, suid) \
+            ((svc){ .rdi=((ruid):Int<8>), .rsi=((euid):Int<8>), .rdx=((suid):Int<8>), .rax=118 })
+#define setresgid(rgid, egid, sgid) \
+            ((svc){ .rdi=((rgid):Int<8>), .rsi=((egid):Int<8>), .rdx=((sgid):Int<8>), .rax=119 })
+#define getresgid(rgid, egid, sgid) \
+            ((svc){ .rdi=((rgid):Int<8>), .rsi=((egid):Int<8>), .rdx=((sgid):Int<8>), .rax=120 })
+#define setfsuid(uid) \
+            ((svc){ .rdi=((uid):Int<8>), .rax=122 })
+#define setfsgid(gid) \
+            ((svc){ .rdi=((gid):Int<8>), .rax=123 })
+#define times(tbuf) \
+            ((svc){ .rdi=((tbuf):Int<8>), .rax=100 })
+#define setpgid(pid, pgid) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((pgid):Int<8>), .rax=109 })
+#define getpgid(pid) \
+            ((svc){ .rdi=((pid):Int<8>), .rax=121 })
+#define getsid(pid) \
+            ((svc){ .rdi=((pid):Int<8>), .rax=124 })
+#define getgroups(gidsetsize, grouplist) \
+            ((svc){ .rdi=((gidsetsize):Int<8>), .rsi=((grouplist):Int<8>), .rax=115 })
+#define setgroups(gidsetsize, grouplist) \
+            ((svc){ .rdi=((gidsetsize):Int<8>), .rsi=((grouplist):Int<8>), .rax=116 })
+#define uname(buf) \
+            ((svc){ .rdi=((buf):Int<8>), .rax=63 })
+#define sethostname(name, len) \
+            ((svc){ .rdi=((name):Int<8>), .rsi=((len):Int<8>), .rax=170 })
+#define setdomainname(name, len) \
+            ((svc){ .rdi=((name):Int<8>), .rsi=((len):Int<8>), .rax=171 })
+#define getrlimit(resource, rlim) \
+            ((svc){ .rdi=((resource):Int<8>), .rsi=((rlim):Int<8>), .rax=97 })
+#define setrlimit(resource, rlim) \
+            ((svc){ .rdi=((resource):Int<8>), .rsi=((rlim):Int<8>), .rax=160 })
+#define getrusage(who, usage) \
+            ((svc){ .rdi=((who):Int<8>), .rsi=((usage):Int<8>), .rax=98 })
+#define umask(mask) \
+            ((svc){ .rdi=((mask):Int<8>), .rax=95 })
+#define prctl(option, arg2, arg3, arg4, arg5) \
+            ((svc){ .rdi=((option):Int<8>), .rsi=((arg2):Int<8>), .rdx=((arg3):Int<8>), .r10=((arg4):Int<8>), .r8=((arg5):Int<8>), .rax=157 })
+#define getcpu(cpu, node, tcache) \
+            ((svc){ .rdi=((cpu):Int<8>), .rsi=((node):Int<8>), .rdx=((tcache):Int<8>), .rax=279 })
+#define gettimeofday(tv, tz) \
+            ((svc){ .rdi=((tv):Int<8>), .rsi=((tz):Int<8>), .rax=96 })
+#define settimeofday(tv, tz) \
+            ((svc){ .rdi=((tv):Int<8>), .rsi=((tz):Int<8>), .rax=164 })
+#define adjtimex(buf) \
+            ((svc){ .rdi=((buf):Int<8>), .rax=159 })
+#define sysinfo(info) \
+            ((svc){ .rdi=((info):Int<8>), .rax=99 })
+#define mq_open(name, oflag, mode, attr) \
+            ((svc){ .rdi=((name):Int<8>), .rsi=((oflag):Int<8>), .rdx=((mode):Int<8>), .r10=((attr):Int<8>), .rax=240 })
+#define mq_unlink(name) \
+            ((svc){ .rdi=((name):Int<8>), .rax=241 })
+#define mq_timedsend(mqdes, msg_ptr, msg_len, msg_prio, abs_timeout) \
+            ((svc){ .rdi=((mqdes):Int<8>), .rsi=((msg_ptr):Int<8>), .rdx=((msg_len):Int<8>), .r10=((msg_prio):Int<8>), .r8=((abs_timeout):Int<8>), .rax=242 })
+#define mq_timedreceive(mqdes, msg_ptr, msg_len, msg_prio, abs_timeout) \
+            ((svc){ .rdi=((mqdes):Int<8>), .rsi=((msg_ptr):Int<8>), .rdx=((msg_len):Int<8>), .r10=((msg_prio):Int<8>), .r8=((abs_timeout):Int<8>), .rax=243 })
+#define mq_notify(mqdes, notification) \
+            ((svc){ .rdi=((mqdes):Int<8>), .rsi=((notification):Int<8>), .rax=244 })
+#define mq_getsetattr(mqdes, newattr, oldattr) \
+            ((svc){ .rdi=((mqdes):Int<8>), .rsi=((newattr):Int<8>), .rdx=((oldattr):Int<8>), .rax=245 })
+#define msgget(key, msgflg) \
+            ((svc){ .rdi=((key):Int<8>), .rsi=((msgflg):Int<8>), .rax=68 })
+#define msgctl(msqid, cmd, buf) \
+            ((svc){ .rdi=((msqid):Int<8>), .rsi=((cmd):Int<8>), .rdx=((buf):Int<8>), .rax=71 })
+#define msgrcv(msqid, msgp, msgsz, msgtyp, msgflg) \
+            ((svc){ .rdi=((msqid):Int<8>), .rsi=((msgp):Int<8>), .rdx=((msgsz):Int<8>), .r10=((msgtyp):Int<8>), .r8=((msgflg):Int<8>), .rax=70 })
+#define msgsnd(msqid, msgp, msgsz, msgflg) \
+            ((svc){ .rdi=((msqid):Int<8>), .rsi=((msgp):Int<8>), .rdx=((msgsz):Int<8>), .r10=((msgflg):Int<8>), .rax=69 })
+#define semget(key, nsems, semflg) \
+            ((svc){ .rdi=((key):Int<8>), .rsi=((nsems):Int<8>), .rdx=((semflg):Int<8>), .rax=64 })
+#define semctl(semid, semnum, cmd, arg) \
+            ((svc){ .rdi=((semid):Int<8>), .rsi=((semnum):Int<8>), .rdx=((cmd):Int<8>), .r10=((arg):Int<8>), .rax=66 })
+#define semtimedop(semid, tsops, nsops, timeout) \
+            ((svc){ .rdi=((semid):Int<8>), .rsi=((tsops):Int<8>), .rdx=((nsops):Int<8>), .r10=((timeout):Int<8>), .rax=220 })
+#define semop(semid, sops, nsops) \
+            ((svc){ .rdi=((semid):Int<8>), .rsi=((sops):Int<8>), .rdx=((nsops):Int<8>), .rax=65 })
+#define shmget(key, size, shmflg) \
+            ((svc){ .rdi=((key):Int<8>), .rsi=((size):Int<8>), .rdx=((shmflg):Int<8>), .rax=29 })
+#define shmctl(shmid, cmd, buf) \
+            ((svc){ .rdi=((shmid):Int<8>), .rsi=((cmd):Int<8>), .rdx=((buf):Int<8>), .rax=31 })
+#define shmat(shmid, shmaddr, shmflg) \
+            ((svc){ .rdi=((shmid):Int<8>), .rsi=((shmaddr):Int<8>), .rdx=((shmflg):Int<8>), .rax=30 })
+#define shmdt(shmaddr) \
+            ((svc){ .rdi=((shmaddr):Int<8>), .rax=67 })
+#define socket(family, type, protocol) \
+            ((svc){ .rdi=((family):Int<8>), .rsi=((type):Int<8>), .rdx=((protocol):Int<8>), .rax=41 })
+#define socketpair(family, type, protocol, usockvec) \
+            ((svc){ .rdi=((family):Int<8>), .rsi=((type):Int<8>), .rdx=((protocol):Int<8>), .r10=((usockvec):Int<8>), .rax=53 })
+#define bind(fd, umyaddr, addrlen) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((umyaddr):Int<8>), .rdx=((addrlen):Int<8>), .rax=49 })
+#define listen(fd, backlog) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((backlog):Int<8>), .rax=50 })
+#define accept(fd, addr, addrlen) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((addr):Int<8>), .rdx=((addrlen):Int<8>), .rax=43 })
+#define connect(fd, uservaddr, addrlen) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((uservaddr):Int<8>), .rdx=((addrlen):Int<8>), .rax=42 })
+#define getsockname(fd, usockaddr, usockaddr_len) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((usockaddr):Int<8>), .rdx=((usockaddr_len):Int<8>), .rax=51 })
+#define getpeername(fd, usockaddr, usockaddr_len) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((usockaddr):Int<8>), .rdx=((usockaddr_len):Int<8>), .rax=52 })
+#define sendto(fd, buff, len, flags, addr, addr_len) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((buff):Int<8>), .rdx=((len):Int<8>), .r10=((flags):Int<8>), .r8=((addr):Int<8>), .r9=((addr_len):Int<8>), .rax=44 })
+#define recvfrom(fd, ubuf, size, flags, addr, addr_len) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((ubuf):Int<8>), .rdx=((size):Int<8>), .r10=((flags):Int<8>), .r8=((addr):Int<8>), .r9=((addr_len):Int<8>), .rax=45 })
+#define setsockopt(fd, level, optname, optval, optlen) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((level):Int<8>), .rdx=((optname):Int<8>), .r10=((optval):Int<8>), .r8=((optlen):Int<8>), .rax=54 })
+#define getsockopt(fd, level, optname, optval, optlen) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((level):Int<8>), .rdx=((optname):Int<8>), .r10=((optval):Int<8>), .r8=((optlen):Int<8>), .rax=55 })
+#define shutdown(fd, how) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((how):Int<8>), .rax=48 })
+#define sendmsg(fd, msg, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((msg):Int<8>), .rdx=((flags):Int<8>), .rax=46 })
+#define recvmsg(fd, msg, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((msg):Int<8>), .rdx=((flags):Int<8>), .rax=47 })
+#define readahead(fd, offset, count) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((offset):Int<8>), .rdx=((count):Int<8>), .rax=187 })
+#define brk(brk) \
+            ((svc){ .rdi=((brk):Int<8>), .rax=12 })
+#define munmap(addr, length) \
+            ((svc){ .rdi=((addr):Int<8>), .rsi=((length):Int<8>), .rax=11 })
+#define mremap(old_address, old_size, new_size, flags, new_address) \
+            ((svc){ .rdi=((old_address):Int<8>), .rsi=((old_size):Int<8>), .rdx=((new_size):Int<8>), .r10=((flags):Int<8>), .r8=((new_address):Int<8>), .rax=25 })
+#define add_key(type, description, payload, plen, ringid) \
+            ((svc){ .rdi=((type):Int<8>), .rsi=((description):Int<8>), .rdx=((payload):Int<8>), .r10=((plen):Int<8>), .r8=((ringid):Int<8>), .rax=248 })
+#define request_key(type, description, callout_info, dest_ringid) \
+            ((svc){ .rdi=((type):Int<8>), .rsi=((description):Int<8>), .rdx=((callout_info):Int<8>), .r10=((dest_ringid):Int<8>), .rax=249 })
+#define keyctl(operation, arg2, arg3, arg4, arg5) \
+            ((svc){ .rdi=((operation):Int<8>), .rsi=((arg2):Int<8>), .rdx=((arg3):Int<8>), .r10=((arg4):Int<8>), .r8=((arg5):Int<8>), .rax=250 })
+#define clone(flags, stack, parent_tid, child_tid, tls) \
+            ((svc){ .rdi=((flags):Int<8>), .rsi=((stack):Int<8>), .rdx=((parent_tid):Int<8>), .r10=((child_tid):Int<8>), .r8=((tls):Int<8>), .rax=56 })
+#define execve(filename, argv, envp) \
+            ((svc){ .rdi=((filename):Int<8>), .rsi=((argv):Int<8>), .rdx=((envp):Int<8>), .rax=59 })
+#define mmap(addr, length, prot, flags, fd, offset) \
+            ((svc){ .rdi=((addr):Int<8>), .rsi=((length):Int<8>), .rdx=((prot):Int<8>), .r10=((flags):Int<8>), .r8=((fd):Int<8>), .r9=((offset):Int<8>), .rax=9 })
+#define fadvise64_64(fd, offset, len, advice) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((offset):Int<8>), .rdx=((len):Int<8>), .r10=((advice):Int<8>), .rax=221 })
+#define swapon(path, swapflags) \
+            ((svc){ .rdi=((path):Int<8>), .rsi=((swapflags):Int<8>), .rax=167 })
+#define swapoff(path) \
+            ((svc){ .rdi=((path):Int<8>), .rax=168 })
+#define mprotect(start, len, prot) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((len):Int<8>), .rdx=((prot):Int<8>), .rax=10 })
+#define msync(start, len, flags) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((len):Int<8>), .rdx=((flags):Int<8>), .rax=26 })
+#define mlock(start, len) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((len):Int<8>), .rax=149 })
+#define munlock(start, len) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((len):Int<8>), .rax=150 })
+#define mlockall(flags) \
+            ((svc){ .rdi=((flags):Int<8>), .rax=151 })
+#define mincore(start, len, vec) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((len):Int<8>), .rdx=((vec):Int<8>), .rax=27 })
+#define madvise(start, len, behavior) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((len):Int<8>), .rdx=((behavior):Int<8>), .rax=28 })
+#define remap_file_pages(start, size, prot, pgoff, flags) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((size):Int<8>), .rdx=((prot):Int<8>), .r10=((pgoff):Int<8>), .r8=((flags):Int<8>), .rax=216 })
+#define mbind(start, len, mode, nodemask, maxnode, flags) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((len):Int<8>), .rdx=((mode):Int<8>), .r10=((nodemask):Int<8>), .r8=((maxnode):Int<8>), .r9=((flags):Int<8>), .rax=237 })
+#define get_mempolicy(policy, nodemask, maxnode, addr, flags) \
+            ((svc){ .rdi=((policy):Int<8>), .rsi=((nodemask):Int<8>), .rdx=((maxnode):Int<8>), .r10=((addr):Int<8>), .r8=((flags):Int<8>), .rax=239 })
+#define set_mempolicy(mode, nodemask, maxnode) \
+            ((svc){ .rdi=((mode):Int<8>), .rsi=((nodemask):Int<8>), .rdx=((maxnode):Int<8>), .rax=238 })
+#define migrate_pages(pid, maxnode, old_nodes, new_nodes) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((maxnode):Int<8>), .rdx=((old_nodes):Int<8>), .r10=((new_nodes):Int<8>), .rax=256 })
+#define move_pages(pid, nr_pages, pages, nodes, status, flags) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((nr_pages):Int<8>), .rdx=((pages):Int<8>), .r10=((nodes):Int<8>), .r8=((status):Int<8>), .r9=((flags):Int<8>), .rax=278 })
+#define rt_tgsigqueueinfo(tgid, tid, sig, info) \
+            ((svc){ .rdi=((tgid):Int<8>), .rsi=((tid):Int<8>), .rdx=((sig):Int<8>), .r10=((info):Int<8>), .rax=297 })
+#define perf_event_open(attr, pid, cpu, group_fd, flags) \
+            ((svc){ .rdi=((attr):Int<8>), .rsi=((pid):Int<8>), .rdx=((cpu):Int<8>), .r10=((group_fd):Int<8>), .r8=((flags):Int<8>), .rax=298 })
+#define accept4(fd, addr, addrlen, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((addr):Int<8>), .rdx=((addrlen):Int<8>), .r10=((flags):Int<8>), .rax=288 })
+#define recvmmsg(fd, msg, vlen, flags, timeout) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((msg):Int<8>), .rdx=((vlen):Int<8>), .r10=((flags):Int<8>), .r8=((timeout):Int<8>), .rax=299 })
+#define wait4(pid, stat_addr, options, rusage) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((stat_addr):Int<8>), .rdx=((options):Int<8>), .r10=((rusage):Int<8>), .rax=61 })
+#define prlimit64(pid, resource, new_limit, old_limit) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((resource):Int<8>), .rdx=((new_limit):Int<8>), .r10=((old_limit):Int<8>), .rax=302 })
+#define fanotify_init(flags, event_f_flags) \
+            ((svc){ .rdi=((flags):Int<8>), .rsi=((event_f_flags):Int<8>), .rax=300 })
+#define fanotify_mark(fanotify_fd, flags, mask, dirfd, pathname) \
+            ((svc){ .rdi=((fanotify_fd):Int<8>), .rsi=((flags):Int<8>), .rdx=((mask):Int<8>), .r10=((dirfd):Int<8>), .r8=((pathname):Int<8>), .rax=301 })
+#define name_to_handle_at(dirfd, pathname, handle, mount_id, flags) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((handle):Int<8>), .r10=((mount_id):Int<8>), .r8=((flags):Int<8>), .rax=303 })
+#define open_by_handle_at(mount_fd, handle, flags) \
+            ((svc){ .rdi=((mount_fd):Int<8>), .rsi=((handle):Int<8>), .rdx=((flags):Int<8>), .rax=304 })
+#define clock_adjtime(clockid, buf) \
+            ((svc){ .rdi=((clockid):Int<8>), .rsi=((buf):Int<8>), .rax=305 })
+#define syncfs(fd) \
+            ((svc){ .rdi=((fd):Int<8>), .rax=306 })
+#define setns(fd, nstype) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((nstype):Int<8>), .rax=308 })
+#define sendmmsg(fd, mmsg, vlen, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((mmsg):Int<8>), .rdx=((vlen):Int<8>), .r10=((flags):Int<8>), .rax=307 })
+#define process_vm_readv(pid, lvec, liovcnt, rvec, riovcnt, flags) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((lvec):Int<8>), .rdx=((liovcnt):Int<8>), .r10=((rvec):Int<8>), .r8=((riovcnt):Int<8>), .r9=((flags):Int<8>), .rax=312 })
+#define process_vm_writev(pid, lvec, liovcnt, rvec, riovcnt, flags) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((lvec):Int<8>), .rdx=((liovcnt):Int<8>), .r10=((rvec):Int<8>), .r8=((riovcnt):Int<8>), .r9=((flags):Int<8>), .rax=313 })
+#define kcmp(pid1, pid2, type, idx1, idx2) \
+            ((svc){ .rdi=((pid1):Int<8>), .rsi=((pid2):Int<8>), .rdx=((type):Int<8>), .r10=((idx1):Int<8>), .r8=((idx2):Int<8>), .rax=314 })
+#define finit_module(fd, param_values, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((param_values):Int<8>), .rdx=((flags):Int<8>), .rax=315 })
+#define sched_setattr(pid, attr, flags) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((attr):Int<8>), .rdx=((flags):Int<8>), .rax=316 })
+#define sched_getattr(pid, attr, size, flags) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((attr):Int<8>), .rdx=((size):Int<8>), .r10=((flags):Int<8>), .rax=317 })
+#define renameat2(olddirfd, oldpath, newdirfd, newpath, flags) \
+            ((svc){ .rdi=((olddirfd):Int<8>), .rsi=((oldpath):Int<8>), .rdx=((newdirfd):Int<8>), .r10=((newpath):Int<8>), .r8=((flags):Int<8>), .rax=318 })
+#define seccomp(operation, flags, args) \
+            ((svc){ .rdi=((operation):Int<8>), .rsi=((flags):Int<8>), .rdx=((args):Int<8>), .rax=319 })
+#define getrandom(buf, count, flags) \
+            ((svc){ .rdi=((buf):Int<8>), .rsi=((count):Int<8>), .rdx=((flags):Int<8>), .rax=320 })
+#define memfd_create(name, flags) \
+            ((svc){ .rdi=((name):Int<8>), .rsi=((flags):Int<8>), .rax=321 })
+#define bpf(cmd, attr, size) \
+            ((svc){ .rdi=((cmd):Int<8>), .rsi=((attr):Int<8>), .rdx=((size):Int<8>), .rax=322 })
+#define execveat(dirfd, pathname, argv, envp, flags) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((argv):Int<8>), .r10=((envp):Int<8>), .r8=((flags):Int<8>), .rax=323 })
+#define userfaultfd(flags) \
+            ((svc){ .rdi=((flags):Int<8>), .rax=324 })
+#define membarrier(cmd, flags) \
+            ((svc){ .rdi=((cmd):Int<8>), .rsi=((flags):Int<8>), .rax=325 })
+#define mlock2(start, len, flags) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((len):Int<8>), .rdx=((flags):Int<8>), .rax=326 })
+#define copy_file_range(fd_in, off_in, fd_out, off_out, len, flags) \
+            ((svc){ .rdi=((fd_in):Int<8>), .rsi=((off_in):Int<8>), .rdx=((fd_out):Int<8>), .r10=((off_out):Int<8>), .r8=((len):Int<8>), .r9=((flags):Int<8>), .rax=327 })
+#define preadv2(fd, iov, iovcnt, offset, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((iov):Int<8>), .rdx=((iovcnt):Int<8>), .r10=((offset):Int<8>), .r8=((flags):Int<8>), .rax=328 })
+#define pwritev2(fd, iov, iovcnt, offset, flags) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((iov):Int<8>), .rdx=((iovcnt):Int<8>), .r10=((offset):Int<8>), .r8=((flags):Int<8>), .rax=329 })
+#define pkey_mprotect(start, len, prot, pkey) \
+            ((svc){ .rdi=((start):Int<8>), .rsi=((len):Int<8>), .rdx=((prot):Int<8>), .r10=((pkey):Int<8>), .rax=330 })
+#define pkey_alloc(flags, access_rights) \
+            ((svc){ .rdi=((flags):Int<8>), .rsi=((access_rights):Int<8>), .rax=331 })
+#define pkey_free(pkey) \
+            ((svc){ .rdi=((pkey):Int<8>), .rax=332 })
+#define statx(dirfd, pathname, flags, mask, buf) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((flags):Int<8>), .r10=((mask):Int<8>), .r8=((buf):Int<8>), .rax=333 })
+#define io_pgetevents(ctx_id, min_nr, nr, events, timeout, usig) \
+            ((svc){ .rdi=((ctx_id):Int<8>), .rsi=((min_nr):Int<8>), .rdx=((nr):Int<8>), .r10=((events):Int<8>), .r8=((timeout):Int<8>), .r9=((usig):Int<8>), .rax=334 })
+#define rseq(rseq, rseq_len, flags, sig) \
+            ((svc){ .rdi=((rseq):Int<8>), .rsi=((rseq_len):Int<8>), .rdx=((flags):Int<8>), .r10=((sig):Int<8>), .rax=335 })
+#define pidfd_send_signal(pidfd, sig, info, flags) \
+            ((svc){ .rdi=((pidfd):Int<8>), .rsi=((sig):Int<8>), .rdx=((info):Int<8>), .r10=((flags):Int<8>), .rax=424 })
+#define io_uring_setup(entries, params) \
+            ((svc){ .rdi=((entries):Int<8>), .rsi=((params):Int<8>), .rax=425 })
+#define io_uring_enter(fd, to_submit, min_complete, flags, sig, sigsz) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((to_submit):Int<8>), .rdx=((min_complete):Int<8>), .r10=((flags):Int<8>), .r8=((sig):Int<8>), .r9=((sigsz):Int<8>), .rax=426 })
+#define io_uring_register(fd, opcode, arg, nr_args) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((opcode):Int<8>), .rdx=((arg):Int<8>), .r10=((nr_args):Int<8>), .rax=427 })
+#define open_tree(dfd, path, flags) \
+            ((svc){ .rdi=((dfd):Int<8>), .rsi=((path):Int<8>), .rdx=((flags):Int<8>), .rax=428 })
+#define move_mount(from_dfd, from_path, to_dfd, to_path, flags) \
+            ((svc){ .rdi=((from_dfd):Int<8>), .rsi=((from_path):Int<8>), .rdx=((to_dfd):Int<8>), .r10=((to_path):Int<8>), .r8=((flags):Int<8>), .rax=429 })
+#define fsopen(fsname, flags) \
+            ((svc){ .rdi=((fsname):Int<8>), .rsi=((flags):Int<8>), .rax=430 })
+#define fsconfig(fs_fd, cmd, key, value, aux) \
+            ((svc){ .rdi=((fs_fd):Int<8>), .rsi=((cmd):Int<8>), .rdx=((key):Int<8>), .r10=((value):Int<8>), .r8=((aux):Int<8>), .rax=431 })
+#define fsmount(fs_fd, flags, ms_flags) \
+            ((svc){ .rdi=((fs_fd):Int<8>), .rsi=((flags):Int<8>), .rdx=((ms_flags):Int<8>), .rax=432 })
+#define fspick(dfd, path, flags) \
+            ((svc){ .rdi=((dfd):Int<8>), .rsi=((path):Int<8>), .rdx=((flags):Int<8>), .rax=433 })
+#define pidfd_open(pid, flags) \
+            ((svc){ .rdi=((pid):Int<8>), .rsi=((flags):Int<8>), .rax=434 })
+#define clone3(cl_args, size) \
+            ((svc){ .rdi=((cl_args):Int<8>), .rsi=((size):Int<8>), .rax=435 })
+#define close_range(first, last, flags) \
+            ((svc){ .rdi=((first):Int<8>), .rsi=((last):Int<8>), .rdx=((flags):Int<8>), .rax=436 })
+#define openat2(dirfd, pathname, how, size) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((how):Int<8>), .r10=((size):Int<8>), .rax=437 })
+#define pidfd_getfd(pidfd, targetfd, flags) \
+            ((svc){ .rdi=((pidfd):Int<8>), .rsi=((targetfd):Int<8>), .rdx=((flags):Int<8>), .rax=438 })
+#define faccessat2(dirfd, pathname, mode, flags) \
+            ((svc){ .rdi=((dirfd):Int<8>), .rsi=((pathname):Int<8>), .rdx=((mode):Int<8>), .r10=((flags):Int<8>), .rax=439 })
+#define process_madvise(pidfd, iovec, vlen, advice, flags) \
+            ((svc){ .rdi=((pidfd):Int<8>), .rsi=((iovec):Int<8>), .rdx=((vlen):Int<8>), .r10=((advice):Int<8>), .r8=((flags):Int<8>), .rax=440 })
+#define epoll_pwait2(epfd, events, maxevents, timeout, sigmask, sigsetsize) \
+            ((svc){ .rdi=((epfd):Int<8>), .rsi=((events):Int<8>), .rdx=((maxevents):Int<8>), .r10=((timeout):Int<8>), .r8=((sigmask):Int<8>), .r9=((sigsetsize):Int<8>), .rax=441 })
+#define mount_setattr(dfd, path, flags, attr, size) \
+            ((svc){ .rdi=((dfd):Int<8>), .rsi=((path):Int<8>), .rdx=((flags):Int<8>), .r10=((attr):Int<8>), .r8=((size):Int<8>), .rax=442 })
+#define quotactl_fd(fd, cmd, id, addr) \
+            ((svc){ .rdi=((fd):Int<8>), .rsi=((cmd):Int<8>), .rdx=((id):Int<8>), .r10=((addr):Int<8>), .rax=443 })
+#define landlock_create_ruleset(attr, size, flags) \
+            ((svc){ .rdi=((attr):Int<8>), .rsi=((size):Int<8>), .rdx=((flags):Int<8>), .rax=444 })
+#define landlock_add_rule(ruleset_fd, rule_type, rule_attr, flags) \
+            ((svc){ .rdi=((ruleset_fd):Int<8>), .rsi=((rule_type):Int<8>), .rdx=((rule_attr):Int<8>), .r10=((flags):Int<8>), .rax=445 })
+#define landlock_restrict_self(ruleset_fd, flags) \
+            ((svc){ .rdi=((ruleset_fd):Int<8>), .rsi=((flags):Int<8>), .rax=446 })
+#define memfd_secret(flags) \
+            ((svc){ .rdi=((flags):Int<8>), .rax=447 })
+#define process_mrelease(pidfd, flags) \
+            ((svc){ .rdi=((pidfd):Int<8>), .rsi=((flags):Int<8>), .rax=448 })
+#define futex_waitv(waiters, nr_waiters, flags, timeout, clockid) \
+            ((svc){ .rdi=((waiters):Int<8>), .rsi=((nr_waiters):Int<8>), .rdx=((flags):Int<8>), .r10=((timeout):Int<8>), .r8=((clockid):Int<8>), .rax=449 })
+#define set_mempolicy_home_node(mode, nodemask, maxnode, home_node) \
+            ((svc){ .rdi=((mode):Int<8>), .rsi=((nodemask):Int<8>), .rdx=((maxnode):Int<8>), .r10=((home_node):Int<8>), .rax=450 })
+
+#endif
+
+#endif /* SVC__LIB */

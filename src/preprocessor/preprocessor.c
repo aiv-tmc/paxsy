@@ -544,8 +544,8 @@ static void process_directive(PreprocessorState* state) {
         DPPF__define(state, args);
     } else if (strcmp(command, "undef") == 0) {
         DPPF__undef(state, args);
-    } else if (strcmp(command, "import") == 0) {
-        DPPF__import(state, args);
+    } else if (strcmp(command, "include") == 0) {
+        DPPF__include(state, args);
     } else if (strcmp(command, "using") == 0) {
         DPPF__using(state, args);
     } else if (strcmp(command, "if") == 0) {
@@ -636,7 +636,7 @@ static int process_buffer(PreprocessorState* state, const char* input, const cha
 }
 
 /* Public function: preprocess a buffer of source code using an existing state.
-   Used by #import and #using for recursive preprocessing. */
+   Used by #include and #using for recursive preprocessing. */
 int preprocess_content(PreprocessorState* state, const char* input, const char* filename) {
     if (!state || !input || !filename) return 1;
     return process_buffer(state, input, filename);

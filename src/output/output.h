@@ -4,207 +4,65 @@
 #include "../lexer/lexer.h"
 #include "../parser/parser.h"
 #include "../semantic/semantic.h"
+#include "../ir/ir.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 
-/**
- * @brief Output verbosity and content selection modes.
- */
 typedef enum {
-    PRINT_TOKENS_ONLY,       /* Print only lexer tokens. */
-    PRINT_AST_ONLY,          /* Print only AST. */
-    PRINT_ALL,               /* Print tokens, AST, and semantic analysis. */
-    PRINT_VERBOSE,           /* Print detailed information for all phases. */
-    PRINT_PARSER_TRACE,      /* Print parser trace (requires parser state). */
-    PRINT_SEMANTIC_ONLY,     /* Print only semantic analysis results. */
-    PRINT_SEMANTIC_FULL,     /* Print full semantic details (symbols, types, summary). */
-    PRINT_COMPLETE_ANALYSIS, /* Print tokens, AST, semantic, and statistics. */
-    PRINT_SEMANTIC_LOG       /* Print semantic analysis log. */
+    PRINT_TOKENS_ONLY,
+    PRINT_AST_ONLY,
+    PRINT_ALL,
+    PRINT_VERBOSE,
+    PRINT_PARSER_TRACE,
+    PRINT_SEMANTIC_ONLY,
+    PRINT_SEMANTIC_FULL,
+    PRINT_COMPLETE_ANALYSIS,
+    PRINT_SEMANTIC_LOG,
+    PRINT_IR,
+    PRINT_IR_STATISTICS
 } PrintMode;
 
-/**
- * @brief Compilation statistics collected from lexer, parser, and semantic phases.
- */
 typedef struct {
-    uint32_t total_tokens;      /* Total number of tokens. */
-    uint32_t total_nodes;       /* Total number of AST nodes. */
-    uint32_t node_types[64];    /* Count per AST node type. */
-    uint32_t token_types[256];  /* Count per token type. */
-    uint32_t semantic_errors;   /* Number of semantic errors detected. */
-    uint32_t semantic_warnings; /* Number of semantic warnings issued. */
-    uint32_t symbols_count;     /* Number of symbols in the symbol table. */
+    uint32_t total_tokens;
+    uint32_t total_nodes;
+    uint32_t node_types[64];
+    uint32_t token_types[256];
+    uint32_t semantic_errors;
+    uint32_t semantic_warnings;
+    uint32_t symbols_count;
 } ParseStatistics;
 
-/* Extern arrays mapping token types and AST node types to human-readable strings. */
 extern const char* token_names[];
 extern const char* ast_node_names[];
 
-/* Total number of token types. */
 #define TOKEN_TYPE_COUNT (TOKEN_ERRORCODE + 1)
-
-/**
- * Number of AST node types, derived from the size of the name array.
- * This automatically adjusts when elements are added or removed.
- */
 #define AST_NODE_TYPE_COUNT (sizeof(ast_node_names) / sizeof(ast_node_names[0]))
-
-/* Helper macros for safe printing and type bounds checking. */
-#define IS_VALID_TOKEN_TYPE(t) (((t) & (TOKEN_TYPE_COUNT - 1)) == (t))
+#define IS_VALID_TOKEN_TYPE(t)    (((t) & (TOKEN_TYPE_COUNT - 1)) == (t))
 #define IS_VALID_AST_NODE_TYPE(t) ((unsigned int)(t) < AST_NODE_TYPE_COUNT)
 
-/**
- * @brief Print a formatted section header.
- * @param title Header title.
- * @param out   Output file stream.
- */
 void print_section_header(const char* title, FILE* out);
-
-/**
- * @brief Print all tokens with index, type, value, and location.
- * @param lexer Lexer containing the token list.
- * @param out   Output file stream.
- */
 void print_all_tokens(Lexer* lexer, FILE* out);
-
-/**
- * @brief Print tokens with line markers (for main.c compatibility).
- * @param lexer Lexer containing the token list.
- * @param out   Output file stream.
- */
 void print_tokens_in_lines(Lexer* lexer, FILE* out);
-
-/**
- * @brief Print token type statistics.
- * @param lexer Lexer containing the token list.
- * @param out   Output file stream.
- */
 void print_token_statistics(Lexer* lexer, FILE* out);
-
-/**
- * @brief Print current parser state information.
- * @param parser Parser state.
- * @param out    Output file stream.
- */
 void print_parser_trace(ParserState* parser, FILE* out);
-
-/**
- * @brief Print AST in a detailed tree format with indentation.
- * @param ast AST to print.
- * @param out Output file stream.
- */
 void print_ast_detailed(AST* ast, FILE* out);
-
-/**
- * @brief Print AST statistics (node counts per type, total nodes).
- * @param ast AST to analyze.
- * @param out Output file stream.
- */
 void print_ast_statistics(AST* ast, FILE* out);
-
-/**
- * @brief Print the symbol table from the semantic context.
- * @param context Semantic context.
- * @param out     Output file stream.
- */
 void print_semantic_symbol_table(SemanticContext* context, FILE* out);
-
-/**
- * @brief Print type distribution and initialization state from semantic analysis.
- * @param context Semantic context.
- * @param out     Output file stream.
- */
 void print_semantic_type_info(SemanticContext* context, FILE* out);
-
-/**
- * @brief Print a concise summary of the semantic analysis.
- * @param context Semantic context.
- * @param out     Output file stream.
- */
 void print_semantic_summary(SemanticContext* context, FILE* out);
-
-/**
- * @brief Print complete semantic analysis: summary, symbol table, type info.
- * @param context Semantic context.
- * @param out     Output file stream.
- */
 void print_semantic_analysis(SemanticContext* context, FILE* out);
-
-/**
- * @brief Print a detailed semantic log (summary, symbols, types, scope info).
- * @param context Semantic context.
- * @param out     Output file stream.
- */
 void print_semantic_log(SemanticContext* context, FILE* out);
-
-/**
- * @brief Convert an AST node type to its string representation.
- * @param type AST node type.
- * @return String describing the node type.
- */
 const char* get_ast_node_type_name(ASTNodeType type);
-
-/**
- * @brief Convert a token type to its string representation.
- * @param type Token type.
- * @return String describing the token type.
- */
 const char* get_token_type_name(TokenType type);
-
-/**
- * @brief Print type information in a human-readable format.
- * @param type Type structure.
- * @param out  Output file stream.
- */
 void print_type_info(Type* type, FILE* out);
-
-/**
- * @brief Print a complete analysis according to the selected mode.
- * @param lexer    Lexer data.
- * @param ast      AST data.
- * @param semantic Semantic context (may be NULL).
- * @param mode     Print mode selector.
- * @param out      Output file stream.
- */
-void print_complete_analysis(Lexer* lexer, AST* ast,
-                             SemanticContext* semantic, PrintMode mode, FILE* out);
-
-/**
- * @brief Collect compilation statistics from all phases.
- * @param lexer    Lexer data.
- * @param ast      AST data.
- * @param semantic Semantic context (may be NULL).
- * @return Pointer to a newly allocated ParseStatistics structure (caller must free).
- */
-ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast,
-                                          SemanticContext* semantic);
-
-/**
- * @brief Print a formatted statistics report.
- * @param stats Statistics to print.
- * @param out   Output file stream.
- */
+void print_complete_analysis(Lexer* lexer, AST* ast, SemanticContext* semantic, PrintMode mode, FILE* out);
+ParseStatistics* collect_parse_statistics(Lexer* lexer, AST* ast, SemanticContext* semantic);
 void print_statistics_report(ParseStatistics* stats, FILE* out);
-
-/**
- * @brief Enable or disable parser trace logging.
- * @param enabled true to enable, false to disable.
- */
 void enable_parser_trace(bool enabled);
-
-/**
- * @brief Log a parser step when trace is enabled.
- * @param parser Parser state.
- * @param action Description of the current action.
- * @param node   Current AST node being processed (may be NULL).
- */
 void log_parser_step(ParserState* parser, const char* action, ASTNode* node);
-
-/**
- * @brief Print the AST after optimization (for debug output).
- * @param ast Optimized AST to print.
- * @param out Output file stream.
- */
 void print_optimized_ast(AST* ast, FILE* out);
+void output__print_ir_module(IrModule* mod, FILE* out);
+void output__print_ir_statistics(IrModule* mod, FILE* out);
 
 #endif

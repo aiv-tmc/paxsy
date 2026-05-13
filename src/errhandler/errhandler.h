@@ -7,10 +7,11 @@
 #include <stdio.h>
 
 /*
- * Error severity levels.
- * WARNING : non‑critical issue, compilation may continue.
- * ERROR   : critical issue, compilation cannot succeed but may continue to find more errors.
- * FATAL   : severe error, immediate termination required.
+ * Severity levels.
+ *   ERROR_LEVEL_WARNING – non‑critical, compilation may continue.
+ *   ERROR_LEVEL_ERROR   – critical, compilation should not succeed but more errors
+ *                         may be collected.
+ *   ERROR_LEVEL_FATAL   – immediate termination is required.
  */
 typedef enum {
     ERROR_LEVEL_WARNING,
@@ -19,15 +20,16 @@ typedef enum {
 } ErrorLevel;
 
 /*
- * Primary diagnostic entry point (variadic).
- * level       - severity level
- * error_code  - 16‑bit hex error code
- * line        - 1‑based line number
- * column      - 1‑based column (byte offset)
- * length      - length of the erroneous token in bytes
- * context     - subsystem identifier (e.g., "syntax", "semantic")
- * format      - printf‑style format string
- * ...         - format arguments
+ * Report a diagnostic with full detail (variadic).
+ *
+ * level      : one of the ErrorLevel values.
+ * error_code : 16‑bit hex code (see predefined codes below).
+ * line       : 1‑based line number.
+ * column     : 1‑based column (byte offset).
+ * length     : length of the erroneous token in bytes.
+ * context    : short subsystem tag (e.g. "syntax", "semantic").
+ * format     : printf‑style message format.
+ * ...        : format arguments.
  */
 void errhandler__report_error_ex
     ( ErrorLevel level
@@ -41,9 +43,9 @@ void errhandler__report_error_ex
     );
 
 /*
- * Same as errhandler__report_error_ex, but accepts a va_list instead of variadic
- * arguments. This is the actual worker function; both the variadic version and
- * the simplified wrappers call this one.
+ * Same as errhandler__report_error_ex but takes a va_list.
+ * This is the real worker; the variadic version simply unpacks the va_list
+ * and calls this one.
  */
 void errhandler__report_error_ex_va
     ( ErrorLevel level
@@ -57,80 +59,86 @@ void errhandler__report_error_ex_va
     );
 
 /*
- * Set the current source filename (copied internally).
- * Pass NULL to clear.
+ * Store the current source filename.
+ * The filename is copied internally, so the caller may free its own copy.
+ * Pass NULL to clear the stored name.
  */
 void errhandler__set_current_filename(const char* filename);
 
 /*
- * Provide source lines for contextual display.
- * The manager does not take ownership unless copy_source_lines is enabled.
+ * Provide the text of the source file as an array of null‑terminated lines.
+ * The manager does NOT take ownership; if the caller later frees the lines
+ * diagnostics that were already emitted still hold their own copies of the
+ * relevant source line.
+ *
+ * line_count must equal the number of elements in source_lines.
  */
 void errhandler__set_source_code(const char** source_lines, uint16_t line_count);
 
 /*
- * Clear any stored source lines.
+ * Discard the externally provided source lines.
+ * If the manager itself owns the lines (from errhandler__load_source_file),
+ * those are freed; otherwise only the pointer is forgotten.
  */
 void errhandler__clear_source_code(void);
 
 /*
- * Control whether source lines are copied or merely referenced.
- * enable = true  -> copy lines (default, safe)
- * enable = false -> store pointer only (caller must keep lines alive)
- */
-void errhandler__set_copy_source(bool enable);
-
-/*
- * Load a source file from disk, store lines as copies.
- * Returns 0 on success, -1 on failure.
+ * Load a whole source file into memory, storing each line as an owned copy.
+ * Returns 0 on success, -1 on failure (file not found, allocation failure, ...).
  */
 int errhandler__load_source_file(const char* filename);
 
 /*
- * Print all ERROR and FATAL entries to stdout.
- * WARNING entries are printed with error formatting if warnings_as_errors is set.
+ * Print every ERROR and FATAL diagnostic to stdout.
+ * If warnings_as_errors is enabled, WARNING entries are also printed here
+ * (but without the usual warning colour).
  */
 void errhandler__print_errors(void);
 
 /*
- * Print all WARNING entries to stdout, unless suppressed or treated as errors.
+ * Print every WARNING diagnostic to stdout, unless they are suppressed or
+ * are already shown as errors.
  */
 void errhandler__print_warnings(void);
 
 /*
- * True if any ERROR or FATAL entry exists (or WARNING when warnings_as_errors is on).
+ * Return true if at least one ERROR or FATAL entry exists.
+ * When warnings_as_errors is on, the presence of any WARNING also makes this
+ * function return true.
  */
 bool errhandler__has_errors(void);
 
 /*
- * True if any WARNING entry exists.
+ * Return true if any WARNING entry exists.
  */
 bool errhandler__has_warnings(void);
 
 /*
- * Free all memory and reset state.
+ * Release all memory owned by the manager (entries, copies, source lines)
+ * and reset every piece of internal state to the initial defaults.
  */
 void errhandler__free_error_manager(void);
 
 /*
- * Return number of error entries (ERROR + FATAL), capped to UINT16_MAX.
- * Warnings are included if warnings_as_errors is enabled.
+ * Get the current number of error‑level entries (ERROR + FATAL).
+ * If warnings_as_errors is active, warnings are also counted.
+ * The value is capped to UINT16_MAX.
  */
 uint16_t errhandler__get_error_count(void);
 
 /*
- * Return number of warning entries, capped to UINT16_MAX.
+ * Get the current number of warning‑level entries, capped to UINT16_MAX.
  */
 uint16_t errhandler__get_warning_count(void);
 
 /*
- * Convert an ErrorLevel to a human‑readable string.
+ * Map an ErrorLevel value to a readable string: "WARNING", "ERROR", "FATAL".
  */
 const char* errhandler__get_error_level_string(ErrorLevel level);
 
 /*
- * Decompose a 4‑hex‑digit error code string (TTGGNN).
- * Returns true on success, false if input is not exactly 4 hex digits.
+ * Decompose a 4‑hex‑digit error code string (form TTGGNN) into its three
+ * components.  Returns true if the string consists of exactly four hex digits.
  */
 bool errhandler__parse_error_code
     ( const char* error_code_str
@@ -140,16 +148,17 @@ bool errhandler__parse_error_code
     );
 
 /*
- * Treat warnings as errors for counting and printing.
+ * When enabled, WARNING entries are counted as errors and printed together
+ * with them, suppressing the separate warning output.
  */
 void errhandler__set_warnings_as_errors(bool enable);
 
 /*
- * Suppress all warning output.
+ * When enabled, no warning output is produced at all; the entries still
+ * exist and are counted, but errhandler__print_warnings prints nothing.
  */
 void errhandler__set_suppress_warnings(bool suppress);
 
-/* Predefined error codes. */
 #define ERROR_CODE_SYNTAX_GENERIC               0x7A00
 #define ERROR_CODE_SYNTAX_UNEXPECTED_TOKEN      0x7A01
 #define ERROR_CODE_SYNTAX_UNEXPECTED_EOF        0x7A02
@@ -158,6 +167,7 @@ void errhandler__set_suppress_warnings(bool suppress);
 #define ERROR_CODE_SYNTAX_INVALID_STATEMENT     0x7A05
 #define ERROR_CODE_SYNTAX_UNCLOSED_QUOTE        0x7A06
 #define ERROR_CODE_SYNTAX_MISMATCHED_PAREN      0x7A07
+#define ERROR_CODE_SYNTAX_EMPTY_PARENS          0x7A08
 
 #define ERROR_CODE_LEXER_INVALID_NUMBER         0xE000
 #define ERROR_CODE_LEXER_INVALID_ESCAPE         0xE001
@@ -189,8 +199,6 @@ void errhandler__set_suppress_warnings(bool suppress);
 #define ERROR_CODE_SEM_RETURN_TYPE_MISMATCH     0xA416
 #define ERROR_CODE_SEM_FUNC_DUPLICATE_BODY      0xA417
 #define ERROR_CODE_SEM_FUNC_DIFFERENT_KIND      0xA418
-#define ERROR_CODE_SEM_RETURN_VOID_VALUE        0xA419
-#define ERROR_CODE_SEM_CAST_CONST               0xA41A
 
 #define ERROR_CODE_PP_UNKNOW_DIR                0x4C00
 #define ERROR_CODE_PP_DIR_TOO_LONG              0x4C01
@@ -201,11 +209,23 @@ void errhandler__set_suppress_warnings(bool suppress);
 #define ERROR_CODE_PP_DUPLICATE_DIR             0x4C06
 #define ERROR_CODE_PP_ERROR_DIR                 0x4C07
 
+#define ERROR_CODE_IR_TYPE_MISMATCH             0xB100 
+#define ERROR_CODE_IR_UNDEFINED_VAR             0xB101 
+#define ERROR_CODE_IR_INVALID_INSTR             0xB102 
+#define ERROR_CODE_IR_BUFFER_OVERFLOW           0xB103 
+#define ERROR_CODE_IR_UNSUPPORTED_NODE          0xB104
+#define ERROR_CODE_IR_MEMORY_ALLOCATION         0xB105
+#define ERROR_CODE_IR_INVALID_ARGUMENT          0xB106
+
 #define ERROR_CODE_COM_FAILCREATE               0xFF00
 
 #define ERROR_CODE_MEMORY_ALLOCATION            0x6B00
 #define ERROR_CODE_MEMORY_OVERFLOW              0x6B01
 #define ERROR_CODE_MEMORY_INVALID_FREE          0x6B02
+
+#define ERROR_CODE_OPTIM_MEMORY_ALLOCATION      0xD001
+#define ERROR_CODE_OPTIM_INTERNAL_ERROR         0xD002
+#define ERROR_CODE_OPTIM_INLINE_WRITE           0xD003 // new
 
 #define ERROR_CODE_RUNTIME_DIV_BY_ZERO          0x2300
 #define ERROR_CODE_RUNTIME_OUT_OF_BOUNDS        0x2301
@@ -222,7 +242,7 @@ void errhandler__set_suppress_warnings(bool suppress);
 #define ERROR_CODE_INPUT_NO_SOURCE              0x8902
 
 /*
- * Simplified error reporter (level = ERROR, length = 1).
+ * Convenience wrapper: report an error of level ERROR with length = 1.
  * Delegates to errhandler__report_error_ex_va.
  */
 static inline void errhandler__report_error
@@ -241,8 +261,8 @@ static inline void errhandler__report_error
 }
 
 /*
- * Simplified warning reporter (level = WARNING, code = SYNTAX_GENERIC, length = 1).
- * Delegates to errhandler__report_error_ex_va.
+ * Convenience wrapper: report a warning with level WARNING, default
+ * SYNTAX_GENERIC error code, and length = 1.
  */
 static inline void errhandler__report_warning
     ( uint16_t line
@@ -259,7 +279,7 @@ static inline void errhandler__report_warning
 
 /*
  * Perform a graceful shutdown after a fatal error.
- * Prints all accumulated diagnostics to stderr, then frees the error manager.
+ * Prints all accumulated diagnostics to stderr, then releases the manager.
  */
 static inline void errhandler__shutdown_on_fatal(void) {
     fprintf(stderr, "\033[31mFATAL ERROR\033[0m – compilation aborted.\n");

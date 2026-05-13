@@ -4,75 +4,73 @@
 #include <string.h>
 #include <ctype.h>
 
-/*
- * Internal constants.
- */
 #define ERROR_MESSAGE_BUFFER_SIZE       1024    /* max length of a formatted message */
-#define CONTEXT_BUFFER_SIZE             8       /* max length of a context identifier */
-#define INITIAL_CAPACITY                8       /* initial slots per array */
+#define CONTEXT_BUFFER_SIZE             8       /* max length of a context tag */
+#define INITIAL_CAPACITY                8       /* starting number of slots per array */
 #define MAX_EXPONENTIAL_CAPACITY        1024    /* threshold for switching to linear growth */
-#define LINEAR_INCREMENT                256     /* slots added after exponential phase */
+#define LINEAR_INCREMENT                256     /* slots added each time after exponential phase */
 #define TAB_SIZE                        8       /* spaces per tab stop */
 #define EXPAND_TABS_BUFFER_SIZE         2048    /* local buffer for tab expansion */
 
+/* ANSI terminal escape codes for colouring output */
+#define ANSI_RED    "\033[31m"
+#define ANSI_YELLOW "\033[33m"
+#define ANSI_RESET  "\033[0m"
+
 /*
- * Structure representing a single diagnostic entry.
+ * A single diagnostic entry.
  */
 typedef struct {
-    char* message;               /* formatted error message */
-    char* filename;              /* source file name (owned copy) */
-    uint16_t line;               /* 1‑based line number */
-    uint8_t column;              /* 1‑based column (byte offset) */
-    uint8_t length;              /* length in bytes of the highlighted token */
-    ErrorLevel level;            /* severity level */
-    char context[CONTEXT_BUFFER_SIZE]; /* subsystem identifier */
-    uint16_t error_code;         /* 16‑bit hexadecimal error code */
-    char* source_line_copy;      /* owned copy of the source line */
-    const char* source_line_ref; /* reference to user‑provided line (if not copied) */
+    char*   message;          /* owned formatted human‑readable text */
+    char*   filename;         /* owned copy of the source filename */
+    uint16_t line;            /* 1‑based line number */
+    uint8_t  column;          /* 1‑based column (byte offset) */
+    uint8_t  length;          /* length of the underlined token in bytes */
+    ErrorLevel level;         /* severity */
+    char     context[CONTEXT_BUFFER_SIZE]; /* short subsystem tag */
+    uint16_t error_code;      /* 4‑hex‑digit error code */
+    char*   source_line_copy; /* owned copy of the whole source line for
+                                 caret display */
 } ErrorEntry;
 
 /*
- * Global state of the error manager.
+ * Global state – there is exactly one instance, accessed only through the
+ * functions in this file.
  */
 typedef struct {
-    ErrorEntry* error_entries;
-    ErrorEntry* warning_entries;
-    uint32_t error_count;
-    uint32_t warning_count;
-    uint32_t error_capacity;
-    uint32_t warning_capacity;
-    const char** source_lines;
-    uint32_t source_line_count;
-    bool copy_source_lines;      /* if true, copy source lines; else reference */
-    bool warnings_as_errors;
-    bool suppress_warnings;
+    ErrorEntry* error_entries;       /* dynamic array of ERROR/FATAL */
+    ErrorEntry* warning_entries;     /* dynamic array of WARNING */
+    uint32_t    error_count;         /* number of used error entries */
+    uint32_t    warning_count;
+    uint32_t    error_capacity;      /* allocated size of error_entries */
+    uint32_t    warning_capacity;
+    const char** source_lines;       /* pointer to source lines array */
+    uint32_t    source_line_count;
+    bool        owns_source_lines;   /* if true, source_lines was allocated
+                                        by us and must be freed */
+    bool        warnings_as_errors;
+    bool        suppress_warnings;
 } ErrorManager;
 
-/*
- * Singleton instance – all functions operate on this global structure.
- */
 static ErrorManager em = {
-    .error_entries = NULL,
-    .warning_entries = NULL,
-    .error_count = 0,
-    .warning_count = 0,
-    .error_capacity = 0,
+    .error_entries    = NULL,
+    .warning_entries  = NULL,
+    .error_count      = 0,
+    .warning_count    = 0,
+    .error_capacity   = 0,
     .warning_capacity = 0,
-    .source_lines = NULL,
+    .source_lines     = NULL,
     .source_line_count = 0,
-    .copy_source_lines = true,
+    .owns_source_lines = false,
     .warnings_as_errors = false,
-    .suppress_warnings = false
+    .suppress_warnings  = false
 };
 
-/*
- * Current source filename, set by errhandler__set_current_filename().
- * Copied so that it remains valid even if the original pointer is freed.
- */
+/* Current source filename, copied when set. */
 static char* current_filename = NULL;
 
-/* Forward declarations of internal helpers. */
-static bool ensure_capacity(ErrorEntry** array, uint32_t* capacity, uint32_t count);
+static bool ensure_capacity(ErrorEntry** array, uint32_t* capacity,
+                            uint32_t count);
 static void add_error_entry(ErrorLevel level, uint16_t error_code,
                             uint16_t line, uint8_t column, uint8_t length,
                             const char* context, const char* message);
@@ -87,7 +85,8 @@ static void print_error_entry(const ErrorEntry* entry, bool is_warning);
 static bool validate_error_code(uint16_t error_code);
 
 /*
- * Duplicate a null‑terminated string. Returns NULL on failure or NULL input.
+ * Duplicate a null‑terminated string.  Returns NULL if str is NULL or if
+ * allocation fails.
  */
 static char* duplicate_string(const char* str) {
     if (!str) return NULL;
@@ -101,7 +100,7 @@ static char* duplicate_string(const char* str) {
 }
 
 /*
- * Return the number of decimal digits needed to represent a uint16_t.
+ * Return the number of decimal digits required to represent a uint16_t.
  */
 static uint16_t count_digits(uint16_t number) {
     if (number == 0) return 1;
@@ -114,19 +113,25 @@ static uint16_t count_digits(uint16_t number) {
 }
 
 /*
- * Verify that an error code is not zero (the reserved invalid code).
- * If zero, it is replaced by a generic syntax error.
+ * Reject the invalid zero error code (reserved).
  */
 static bool validate_error_code(uint16_t error_code) {
     return error_code != 0;
 }
 
 /*
- * Ensure a dynamic array of error entries has room for one more element.
- * Growth strategy: exponential up to MAX_EXPONENTIAL_CAPACITY, then linear.
- * Returns true on success, false on allocation failure.
+ * Ensures that *array has room for at least (count+1) elements.
+ *
+ * Growth policy:
+ *   - when capacity == 0                  -> INITIAL_CAPACITY
+ *   - when capacity < MAX_EXPONENTIAL_CAPACITY  -> double capacity
+ *   - otherwise                           -> add LINEAR_INCREMENT
+ *
+ * Returns true on success, false on memory allocation failure.
+ * On failure *array and *capacity are left untouched.
  */
-static bool ensure_capacity(ErrorEntry** array, uint32_t* capacity, uint32_t count) {
+static bool ensure_capacity(ErrorEntry** array, uint32_t* capacity,
+                            uint32_t count) {
     if (count < *capacity) return true;
 
     uint32_t new_cap;
@@ -139,13 +144,16 @@ static bool ensure_capacity(ErrorEntry** array, uint32_t* capacity, uint32_t cou
     }
 
     if (new_cap <= *capacity) {
-        fprintf(stderr, "\033[31mERROR\033[0m: Error entries capacity overflow\n");
+        /* overflow guard */
+        fprintf(stderr, ANSI_RED "ERROR" ANSI_RESET
+                ": error entries capacity overflow\n");
         return false;
     }
 
     ErrorEntry* new_array = (ErrorEntry*)realloc(*array, new_cap * sizeof(ErrorEntry));
     if (!new_array) {
-        fprintf(stderr, "\033[31mERROR\033[0m: Failed to allocate error entries\n");
+        fprintf(stderr, ANSI_RED "ERROR" ANSI_RESET
+                ": failed to allocate memory for error entries\n");
         return false;
     }
 
@@ -155,29 +163,36 @@ static bool ensure_capacity(ErrorEntry** array, uint32_t* capacity, uint32_t cou
 }
 
 /*
- * Internal function that creates a diagnostic entry and stores it in the
- * appropriate array (errors or warnings).
+ * Append a diagnostic entry to the appropriate array.
+ *
+ * The message and current filename are always duplicated if provided.
+ * If source lines are available, the offending line is also duplicated
+ * and stored inside the entry, guaranteeing that the entry can be printed
+ * at any later time regardless of what happens to the external source array.
  */
 static void add_error_entry(ErrorLevel level, uint16_t error_code,
                             uint16_t line, uint8_t column, uint8_t length,
                             const char* context, const char* message) {
     if (!validate_error_code(error_code)) {
-        fprintf(stderr, "\033[33mWARNING\033[0m: Invalid error code: 0x%04X, using default\n", error_code);
+        fprintf(stderr, ANSI_YELLOW "WARNING" ANSI_RESET
+                ": invalid error code 0x%04X, replaced by generic syntax code\n",
+                error_code);
         error_code = ERROR_CODE_SYNTAX_GENERIC;
     }
 
     bool is_warning = (level == ERROR_LEVEL_WARNING);
     ErrorEntry** array = is_warning ? &em.warning_entries : &em.error_entries;
-    uint32_t* count   = is_warning ? &em.warning_count   : &em.error_count;
-    uint32_t* cap     = is_warning ? &em.warning_capacity : &em.error_capacity;
+    uint32_t* count    = is_warning ? &em.warning_count    : &em.error_count;
+    uint32_t* cap      = is_warning ? &em.warning_capacity : &em.error_capacity;
 
     if (!ensure_capacity(array, cap, *count)) {
-        return;
+        return; /* allocation failure – entry is lost, but we survive */
     }
 
     ErrorEntry* entry = &(*array)[*count];
     memset(entry, 0, sizeof(ErrorEntry));
 
+    /* copy message and filename */
     if (message) {
         entry->message = duplicate_string(message);
     }
@@ -196,15 +211,11 @@ static void add_error_entry(ErrorLevel level, uint16_t error_code,
         entry->context[CONTEXT_BUFFER_SIZE - 1] = '\0';
     }
 
-    /* Store the source line if available. */
+    /* always store a copy of the affected source line if available */
     if (line > 0 && em.source_lines != NULL && line <= em.source_line_count) {
         const char* src_line = em.source_lines[line - 1]; /* 0‑based */
         if (src_line) {
-            if (em.copy_source_lines) {
-                entry->source_line_copy = duplicate_string(src_line);
-            } else {
-                entry->source_line_ref = src_line;
-            }
+            entry->source_line_copy = duplicate_string(src_line);
         }
     }
 
@@ -212,26 +223,28 @@ static void add_error_entry(ErrorLevel level, uint16_t error_code,
 }
 
 /*
- * Format the message using a va_list and pass it to add_error_entry.
- * This function is the core worker behind all public reporting functions.
+ * Format the user message using a va_list and delegate to add_error_entry.
  */
 static void report_error_va(ErrorLevel level, uint16_t error_code,
                             uint16_t line, uint8_t column, uint8_t length,
-                            const char* context, const char* format, va_list args) {
+                            const char* context, const char* format,
+                            va_list args) {
     char buffer[ERROR_MESSAGE_BUFFER_SIZE];
     int written = vsnprintf(buffer, sizeof(buffer), format, args);
 
     if (written < 0) {
         snprintf(buffer, sizeof(buffer), "Error message formatting failed");
     } else if ((size_t)written >= sizeof(buffer)) {
-        buffer[sizeof(buffer) - 1] = '\0'; /* ensure null termination */
+        buffer[sizeof(buffer) - 1] = '\0'; /* ensure proper termination */
     }
 
     add_error_entry(level, error_code, line, column, length, context, buffer);
 }
 
 /*
- * Expand tab characters to spaces assuming a fixed tab width.
+ * Expand tab characters in src to spaces (assuming a fixed tab width)
+ * and write the result into dst, which has dst_size bytes.
+ * Stops when dst is full or src is exhausted.
  */
 static void expand_tabs(const char* src, char* dst, size_t dst_size) {
     if (!src || !dst || dst_size == 0) return;
@@ -255,8 +268,8 @@ static void expand_tabs(const char* src, char* dst, size_t dst_size) {
 }
 
 /*
- * Compute the visual column (in monospaced display) corresponding to a
- * byte offset in a line that may contain tabs.
+ * Compute the visual column (monospaced, after expanding tabs) that
+ * corresponds to a 0‑based byte offset 'byte_col' in string 'line'.
  */
 static uint16_t visual_column(const char* line, uint16_t byte_col) {
     if (!line) return 0;
@@ -271,8 +284,9 @@ static uint16_t visual_column(const char* line, uint16_t byte_col) {
 }
 
 /*
- * Calculate the visual length of a token that starts at a given visual column,
- * accounting for tabs inside the token.
+ * Return the visual length (after expanding tabs) of the token that starts
+ * at byte offset segment and spans byte_len bytes.  start_visual_col must be
+ * the visual column of the beginning of the token.
  */
 static uint16_t visual_token_length(const char* segment, uint8_t byte_len,
                                     uint16_t start_visual_col) {
@@ -294,32 +308,33 @@ static uint16_t visual_token_length(const char* segment, uint8_t byte_len,
 }
 
 /*
- * Print the problematic source line with a caret marker highlighting the
- * exact location and length of the token.
+ * Print the source line referenced by entry with a caret (^^^^) under
+ * the offending token.  The line is printed as‑is (tabs are NOT expanded),
+ * but the caret column and width are computed considering tab expansion
+ * so that the caret aligns with the visual position.
  */
 static void print_error_source_line(const ErrorEntry* entry, bool is_warning) {
     if (!entry) return;
 
-    const char* raw_line = entry->source_line_copy ?
-                           entry->source_line_copy : entry->source_line_ref;
-    if (!raw_line) return;
-
-    char expanded[EXPAND_TABS_BUFFER_SIZE];
-    expand_tabs(raw_line, expanded, sizeof(expanded));
-    if (expanded[0] == '\0') return;
+    const char* raw_line = entry->source_line_copy;
+    if (!raw_line || raw_line[0] == '\0') return;
 
     uint16_t line_num = entry->line;
-    uint8_t col_byte = entry->column;
-    uint8_t token_len = entry->length;
+    uint8_t  col_byte = entry->column;  /* 1‑based */
+    uint8_t  token_len = entry->length;
+
+    /* total visual width of the raw line */
+    uint16_t total_visual_len = visual_column(raw_line,
+                                              (uint16_t)strlen(raw_line));
 
     uint16_t visual_col = 0;
     uint16_t visual_len = 1;
-    size_t expanded_len = strlen(expanded);
 
     if (col_byte > 0) {
         visual_col = visual_column(raw_line, col_byte - 1);
 
         size_t raw_len = strlen(raw_line);
+        /* clamp token length to what remains */
         if (col_byte - 1 + token_len > raw_len)
             token_len = (uint8_t)(raw_len - (col_byte - 1));
 
@@ -328,45 +343,50 @@ static void print_error_source_line(const ErrorEntry* entry, bool is_warning) {
                                              token_len, visual_col);
         }
 
-        if (visual_col + visual_len > expanded_len)
-            visual_len = (uint16_t)(expanded_len - visual_col);
+        /* safety clamping */
+        if (visual_col >= total_visual_len) visual_col = total_visual_len;
+        if (visual_col + visual_len > total_visual_len)
+            visual_len = (uint16_t)(total_visual_len - visual_col);
         if (visual_len == 0) visual_len = 1;
     } else {
         visual_col = 0;
         visual_len = 1;
     }
 
-    printf("  %*u | %s\n", count_digits(line_num), line_num, expanded);
-    printf("  %*s | ", count_digits(line_num), "");
+    /* print line number gutter */
+    int gutter_width = count_digits(line_num);
+    printf("  %*u | %s\n", gutter_width, line_num, raw_line);
+    printf("  %*s | ", gutter_width, "");
 
+    /* colour */
     if (is_warning)
-        printf("\033[33m");
+        printf(ANSI_YELLOW);
     else
-        printf("\033[31m");
+        printf(ANSI_RED);
 
-    for (uint16_t i = 0; i < visual_col && i < expanded_len; i++)
+    /* print spaces then carets */
+    for (uint16_t i = 0; i < visual_col && i < total_visual_len; i++)
         putchar(' ');
-
-    for (uint16_t i = 0; i < visual_len && (visual_col + i) < expanded_len; i++)
+    for (uint16_t i = 0; i < visual_len && (visual_col + i) < total_visual_len; i++)
         putchar('^');
 
-    printf("\033[0m\n");
+    printf(ANSI_RESET "\n");
 }
 
 /*
- * Print a complete diagnostic entry (filename, severity, error code, message,
- * and optionally the source line with a caret).
+ * Print a complete error entry: filename, severity tag, error code, context,
+ * message, and (if applicable) the source line with caret.
  */
 static void print_error_entry(const ErrorEntry* entry, bool is_warning) {
-    printf("%s: ", entry->filename);
+    printf("%s: ", entry->filename ? entry->filename : "(unknown)");
 
     if (is_warning) {
-        printf("\033[33mWARNING\033[0m");
+        printf(ANSI_YELLOW "WARNING" ANSI_RESET);
     } else {
         if (entry->level == ERROR_LEVEL_FATAL)
-            printf("\033[31mFATAL\033[0m");
+            printf(ANSI_RED "FATAL" ANSI_RESET);
         else
-            printf("\033[31mERROR\033[0m");
+            printf(ANSI_RED "ERROR" ANSI_RESET);
     }
 
     printf("[%04X]", entry->error_code);
@@ -379,16 +399,13 @@ static void print_error_entry(const ErrorEntry* entry, bool is_warning) {
     }
 }
 
-/*
- * Variadic wrappers for the public functions.
- * They simply extract the va_list and delegate to the va_list‑based worker.
- */
 void errhandler__report_error_ex(ErrorLevel level, uint16_t error_code,
                                  uint16_t line, uint8_t column, uint8_t length,
                                  const char* context, const char* format, ...) {
     va_list args;
     va_start(args, format);
-    report_error_va(level, error_code, line, column, length, context, format, args);
+    report_error_va(level, error_code, line, column, length, context,
+                    format, args);
     va_end(args);
 }
 
@@ -396,7 +413,8 @@ void errhandler__report_error_ex_va(ErrorLevel level, uint16_t error_code,
                                     uint16_t line, uint8_t column, uint8_t length,
                                     const char* context, const char* format,
                                     va_list args) {
-    report_error_va(level, error_code, line, column, length, context, format, args);
+    report_error_va(level, error_code, line, column, length, context,
+                    format, args);
 }
 
 void errhandler__set_current_filename(const char* filename) {
@@ -409,48 +427,64 @@ void errhandler__set_current_filename(const char* filename) {
     }
 }
 
-void errhandler__set_source_code(const char** source_lines, uint16_t line_count) {
+void errhandler__set_source_code(const char** source_lines,
+                                 uint16_t line_count) {
+    /*
+     * We do NOT take ownership; the caller retains responsibility for
+     * the memory.  Individual error entries already copy the lines they
+     * need, so this pointer is only used at the moment of reporting.
+     */
     em.source_lines = source_lines;
     em.source_line_count = line_count;
+    em.owns_source_lines = false;
 }
 
 void errhandler__clear_source_code(void) {
+    if (em.owns_source_lines && em.source_lines) {
+        for (uint32_t i = 0; i < em.source_line_count; i++) {
+            free((void*)em.source_lines[i]);
+        }
+        free((void*)em.source_lines);
+    }
     em.source_lines = NULL;
     em.source_line_count = 0;
-}
-
-void errhandler__set_copy_source(bool enable) {
-    em.copy_source_lines = enable;
+    em.owns_source_lines = false;
 }
 
 int errhandler__load_source_file(const char* filename) {
     if (!filename) return -1;
+
     FILE* f = fopen(filename, "r");
     if (!f) return -1;
 
-    /* Free any previously stored source lines if they were copied. */
-    if (em.source_lines && em.copy_source_lines) {
+    /* free any previously owned source lines */
+    if (em.owns_source_lines && em.source_lines) {
         for (uint32_t i = 0; i < em.source_line_count; i++) {
             free((void*)em.source_lines[i]);
         }
+        free((void*)em.source_lines);
+        em.source_lines = NULL;
+        em.source_line_count = 0;
+        em.owns_source_lines = false;
     }
-    free((void*)em.source_lines);
-    em.source_lines = NULL;
-    em.source_line_count = 0;
 
     char** lines = NULL;
     uint16_t line_count = 0;
-    char buffer[4096];
-    while (fgets(buffer, sizeof(buffer), f)) {
-        size_t len = strlen(buffer);
-        if (len > 0 && buffer[len-1] == '\n') buffer[len-1] = '\0';
-        char* line = duplicate_string(buffer);
+    char buf[4096];
+
+    while (fgets(buf, sizeof(buf), f)) {
+        size_t len = strlen(buf);
+        if (len > 0 && buf[len-1] == '\n') buf[len-1] = '\0';
+
+        char* line = duplicate_string(buf);
         if (!line) {
+            /* cleanup */
             for (uint16_t i = 0; i < line_count; i++) free(lines[i]);
             free(lines);
             fclose(f);
             return -1;
         }
+
         char** new_lines = realloc(lines, (line_count + 1) * sizeof(char*));
         if (!new_lines) {
             free(line);
@@ -466,7 +500,7 @@ int errhandler__load_source_file(const char* filename) {
 
     em.source_lines = (const char**)lines;
     em.source_line_count = line_count;
-    em.copy_source_lines = true;   /* we own these copies */
+    em.owns_source_lines = true;   /* we own every line and the array */
     return 0;
 }
 
@@ -483,7 +517,7 @@ void errhandler__print_errors(void) {
 
 void errhandler__print_warnings(void) {
     if (em.suppress_warnings) return;
-    if (em.warnings_as_errors) return;   /* already printed as errors */
+    if (em.warnings_as_errors) return;   /* already shown as errors */
     for (uint32_t i = 0; i < em.warning_count; i++) {
         print_error_entry(&em.warning_entries[i], true);
     }
@@ -500,6 +534,7 @@ bool errhandler__has_warnings(void) {
 }
 
 void errhandler__free_error_manager(void) {
+    /* free each error entry's owned strings */
     for (uint32_t i = 0; i < em.error_count; i++) {
         free(em.error_entries[i].message);
         free(em.error_entries[i].filename);
@@ -510,6 +545,7 @@ void errhandler__free_error_manager(void) {
     em.error_count = 0;
     em.error_capacity = 0;
 
+    /* free each warning entry's owned strings */
     for (uint32_t i = 0; i < em.warning_count; i++) {
         free(em.warning_entries[i].message);
         free(em.warning_entries[i].filename);
@@ -520,20 +556,19 @@ void errhandler__free_error_manager(void) {
     em.warning_count = 0;
     em.warning_capacity = 0;
 
-    if (em.source_lines && em.copy_source_lines) {
+    /* free the global source lines if we own them */
+    if (em.owns_source_lines && em.source_lines) {
         for (uint32_t i = 0; i < em.source_line_count; i++) {
             free((void*)em.source_lines[i]);
         }
+        free((void*)em.source_lines);
     }
-    free((void*)em.source_lines);
     em.source_lines = NULL;
     em.source_line_count = 0;
-    em.copy_source_lines = true;
+    em.owns_source_lines = false;
 
-    if (current_filename) {
-        free(current_filename);
-        current_filename = NULL;
-    }
+    free(current_filename);
+    current_filename = NULL;
 }
 
 uint16_t errhandler__get_error_count(void) {
@@ -543,7 +578,8 @@ uint16_t errhandler__get_error_count(void) {
 }
 
 uint16_t errhandler__get_warning_count(void) {
-    return (em.warning_count > UINT16_MAX) ? UINT16_MAX : (uint16_t)em.warning_count;
+    return (em.warning_count > UINT16_MAX) ? UINT16_MAX
+                                            : (uint16_t)em.warning_count;
 }
 
 const char* errhandler__get_error_level_string(ErrorLevel level) {

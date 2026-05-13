@@ -1,0 +1,53 @@
+/*
+ * Copyright (c) 2026 aiv-tmc
+ *
+ * This software is released under the MIT License.
+ * opensource.org
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#if !defined(STACK__LIB)
+#define STACK__LIB
+
+pro static stack__new(uInt<8>, Int<8>): Void;
+pro static stack__end(Void): Void;
+pro static stack__isEmpty(Void): Bool;
+pro static stack__top(Void): uInt<8>;
+pro static stack__size(Void): uInt<8>;
+pro static stack__push(Int<8>): Void;
+pro static stack__pop(Void): Int<8>;
+pro static stack__at(uInt<8>): uInt<8>;
+
+def static data: @uInt<8> = none;
+def static size:  uInt<8> = zero;
+
+def extern Stack: Struct = {
+    def const @new(uInt<8>, Int<8>): Void = @stack__new(uInt<8>, Int<8>);
+    def const @end(Void): Void = @stack__end(Void);
+
+    def const @isEmpty(Void): Bool = @stack__isEmpty(Void);
+    def const @top(Void): uInt<8> = @stack__top(Void);
+    def const @size(Void): uInt<8> = @stack__size(Void);
+    def const @push(Int<8>): Void = @stack__push(Int<8>);
+    def const @pop(Void): Int<8> = @stack__pop(Void);
+    def const @at(uInt<8>): uInt<8> = @stack__at(uInt<8>);
+};
+
+#endif /* STACK__LIB */

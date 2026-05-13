@@ -1,0 +1,593 @@
+/*
+ * Copyright (c) 2026 aiv-tmc
+ *
+ * This software is released under the MIT License.
+ * opensource.org
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#if !defined(VECTOR__LIB)
+#define VECTOR__LIB
+
+/**
+ * 2D vector aliases (default to 32‑bit)
+ */
+#define IVector2 IVector2_b32    // Signed 2D integer vector (32‑bit components)
+#define uIVector2 uIVector2_b32  // Unsigned 2D integer vector (32‑bit components)
+#define Vector2 Vector2_b32      // Signed 2D real vector (32‑bit components)
+#define uVector2 uVector2_b32    // Unsigned 2D real vector (32‑bit components)
+
+/**
+ * Signed 2D integer vectors (various bit widths)
+ */
+def IVector2_b8: Struct {
+    def x: Int<1>=zero;
+    def y: Int<1>=zero;
+};
+
+def IVector2_b16: Struct {
+    def x: Int<2>=zero;
+    def y: Int<2>=zero;
+};
+
+def IVector2_b32: Struct {
+    def x: Int<4>=zero;
+    def y: Int<4>=zero;
+};
+
+def IVector2_b64: Struct {
+    def x: Int<8>=zero;
+    def y: Int<8>=zero;
+};
+
+/**
+ * Unsigned 2D integer vectors
+ */
+def uIVector2_b8: Struct: Type {
+    def x: unsigned Int<1>=zero;
+    def y: unsigned Int<1>=zero;
+};
+
+def uIVector2_b16: Struct : Type {
+    def x: unsigned Int<2>=zero;
+    def y: unsigned Int<2>=zero;
+};
+
+def uIVector2_b32: Struct {
+    def x: unsigned Int<4>=zero;
+    def y: unsigned Int<4>=zero;
+};
+
+def uIVector2_b64: Struct {
+    def x: unsigned Int<8>=zero;
+    def y: unsigned Int<8>=zero;
+};
+
+/**
+ * Signed 2D real vectors
+ */
+def Vector2_b8: Struct {
+    def x: Real<1>=zero;
+    def y: Real<1>=zero;
+};
+
+def Vector2_b16: Struct {
+    def x: Real<2>=zero;
+    def y: Real<2>=zero;
+};
+
+def Vector2_b32: Struct {
+    def x: Real<4>=zero;
+    def y: Real<4>=zero;
+};
+
+def Vector2_b64: Struct {
+    def x: Real<8>=zero;
+    def y: Real<8>=zero;
+};
+
+/**
+ * Unsigned 2D real vectors
+ */
+def uVector2_b8: Struct {
+    def x: unsigned Real<1>=zero;
+    def y: unsigned Real<1>=zero;
+};
+
+def uVector2_b16: Struct {
+    def x: unsigned Real<2>=zero;
+    def y: unsigned Real<2>=zero;
+};
+
+def uVector2_b32: Struct {
+    def x: unsigned Real<4>=zero;
+    def y: unsigned Real<4>=zero;
+};
+
+def uVector2_b64: Struct {
+    def x: unsigned Real<8>=zero;
+    def y: unsigned Real<8>=zero;
+};
+
+/**
+ * 3D vector aliases (default to 32‑bit)
+ */
+#define IVector3 IVector3_b32    // Signed 3D integer vector
+#define uIVector3 uIVector3_b32  // Unsigned 3D integer vector
+#define Vector3 Vector3          // Signed 3D real vector
+#define uVector3 uVector3        // Unsigned 3D real vector
+
+/**
+ * Signed 3D integer vectors
+ */
+def IVector3_b8: Struct {
+    def x: Int<1>=zero;
+    def y: Int<1>=zero;
+    def z: Int<1>=zero;
+};
+
+def IVector3_b16: Struct {
+    def x: Int<2>=zero;
+    def y: Int<2>=zero;
+    def z: Int<2>=zero;
+};
+
+def IVector3_b32: Struct {
+    def x: Int<4>=zero;
+    def y: Int<4>=zero;
+    def z: Int<4>=zero;
+};
+
+def IVector3_b64: Struct {
+    def x: Int<8>=zero;
+    def y: Int<8>=zero;
+    def z: Int<8>=zero;
+};
+
+/**
+ * Unsigned 3D integer vectors
+ */
+def uIVector3_b8: Struct {
+    def x: unsigned Int<1>=zero;
+    def y: unsigned Int<1>=zero;
+    def z: unsigned Int<1>=zero;
+};
+
+def uIVector3_b16: Struct {
+    def x: unsigned Int<2>=zero;
+    def y: unsigned Int<2>=zero;
+    def z: unsigned Int<2>=zero;
+};
+
+def uIVector3_b32: Struct {
+    def x: unsigned Int<4>=zero;
+    def y: unsigned Int<4>=zero;
+    def z: unsigned Int<4>=zero;
+};
+
+def uIVector3_b64: Struct {
+    def x: unsigned Int<8>=zero;
+    def y: unsigned Int<8>=zero;
+    def z: unsigned Int<8>=zero;
+};
+
+/**
+ * Signed 3D real vectors
+ */
+def Vector3_b8: Struct {
+    def x: Real<1>=zero;
+    def y: Real<1>=zero;
+    def z: Real<1>=zero;
+};
+
+def Vector3_b16: Struct {
+    def x: Real<2>=zero;
+    def y: Real<2>=zero;
+    def z: Real<2>=zero;
+};
+
+def Vector3_b32: Struct {
+    def x: Real<4>=zero;
+    def y: Real<4>=zero;
+    def z: Real<4>=zero;
+};
+
+def Vector3_b64: Struct {
+    def x: Real<8>=zero;
+    def y: Real<8>=zero;
+    def z: Real<8>=zero;
+};
+
+/**
+ * Unsigned 3D real vectors
+ */
+def uVector3_b8: Struct {
+    def x: unsigned Real<1>=zero;
+    def y: unsigned Real<1>=zero;
+    def z: unsigned Real<1>=zero;
+};
+
+def uVector3_b16: Struct {
+    def x: unsigned Real<2>=zero;
+    def y: unsigned Real<2>=zero;
+    def z: unsigned Real<2>=zero;
+};
+
+def uVector3_b32: Struct {
+    def x: unsigned Real<4>=zero;
+    def y: unsigned Real<4>=zero;
+    def z: unsigned Real<4>=zero;
+};
+
+def uVector3_b64: Struct {
+    def x: unsigned Real<8>=zero;
+    def y: unsigned Real<8>=zero;
+    def z: unsigned Real<8>=zero;
+};
+
+/**
+ * Rectangle side sets (four sides) aliases (default 32‑bit)
+ */
+#define Side4 Side4_b32: Struct          // Signed real sides
+#define uSide4 uSide4_b32: Struct        // Unsigned real sides
+#define ISide4 ISide4_b32: Struct        // Signed integer sides
+#define uISide4 uISide4_b32: Struct      // Unsigned integer sides
+
+/**
+ * Signed real sides (4 components)
+ */
+def Side4_b8: Struct {
+    def right: Real<1>=zero;
+    def left: Real<1>=zero;
+    def top: Real<1>=zero;
+    def bottom: Real<1>=zero;
+};
+
+def Side4_b16: Struct {
+    def right: Real<2>=zero;
+    def left: Real<2>=zero;
+    def top: Real<2>=zero;
+    def bottom: Real<2>=zero;
+};
+
+def Side4_b32: Struct {
+    def right: Real<4>=zero;
+    def left: Real<4>=zero;
+    def top: Real<4>=zero;
+    def bottom: Real<4>=zero;
+};
+
+def Side4_b64: Struct {
+    def right: Real<8>=zero;
+    def left: Real<8>=zero;
+    def top: Real<8>=zero;
+    def bottom: Real<8>=zero;
+};
+
+/**
+ * Unsigned real sides (4 components)
+ */
+def uSide4_b8: Struct {
+    def right: unsigned Real<1>=zero;
+    def left: unsigned Real<1>=zero;
+    def top: unsigned Real<1>=zero;
+    def bottom: unsigned Real<1>=zero;
+};
+
+def uSide4_b16: Struct {
+    def right: unsigned Real<2>=zero;
+    def left: unsigned Real<2>=zero;
+    def top: unsigned Real<2>=zero;
+    def bottom: unsigned Real<2>=zero;
+};
+
+def uSide4_b32: Struct {
+    def right: unsigned Real<4>=zero;
+    def left: unsigned Real<4>=zero;
+    def top: unsigned Real<4>=zero;
+    def bottom: unsigned Real<4>=zero;
+};
+
+def uSide4_b64: Struct {
+    def right: unsigned Real<8>=zero;
+    def left: unsigned Real<8>=zero;
+    def top: unsigned Real<8>=zero;
+    def bottom: unsigned Real<8>=zero;
+};
+
+/**
+ * Signed integer sides (4 components)
+ */
+def ISide4_b8: Struct {
+    def right: Int<1>=zero;
+    def left: Int<1>=zero;
+    def top: Int<1>=zero;
+    def bottom: Int<1>=zero;
+};
+
+def ISide4_b16: Struct {
+    def right: Int<2>=zero;
+    def left: Int<2>=zero;
+    def top: Int<2>=zero;
+    def bottom: Int<2>=zero;
+};
+
+def ISide4_b32: Struct {
+    def right: Int<4>=zero;
+    def left: Int<4>=zero;
+    def top: Int<4>=zero;
+    def bottom: Int<4>=zero;
+};
+
+def ISide4_b64: Struct {
+    def right: Int<8>=zero;
+    def left: Int<8>=zero;
+    def top: Int<8>=zero;
+    def bottom: Int<8>=zero;
+};
+
+/**
+ * Unsigned integer sides (4 components)
+ */
+def uISide4_b8: Struct {
+    def right: unsigned Int<1>=zero;
+    def left: unsigned Int<1>=zero;
+    def top: unsigned Int<1>=zero;
+    def bottom: unsigned Int<1>=zero;
+};
+
+def uISide4_b16: Struct {
+    def right: unsigned Int<2>=zero;
+    def left: unsigned Int<2>=zero;
+    def top: unsigned Int<2>=zero;
+    def bottom: unsigned Int<2>=zero;
+};
+
+def uISide4_b32: Struct {
+    def right: unsigned Int<4>=zero;
+    def left: unsigned Int<4>=zero;
+    def top: unsigned Int<4>=zero;
+    def bottom: unsigned Int<4>=zero;
+};
+
+def uISide4_b64: Struct {
+    def right: unsigned Int<8>=zero;
+    var lift    : unsigned Int<8>=zero;
+    def top: unsigned Int<8>=zero;
+    def bottom: unsigned Int<8>=zero;
+};
+
+/**
+ * Top‑bottom side pairs (default 32‑bit)
+ */
+#define SideTB SideTB_b32: Struct          // Signed real top/bottom
+#define uSideTB uSideTB_b32: Struct        // Unsigned real top/bottom
+#define ISideTB ISideTB_b32: Struct        // Signed integer top/bottom
+#define uISideTB uISideTB_b32: Struct      // Unsigned integer top/bottom
+
+/**
+ * Signed real top‑bottom
+ */
+def SideTB_b8: Struct {
+    def top: Real<1>=zero;
+    def bottom: Real<1>=zero;
+};
+
+def SideTB_b16: Struct {
+    def top: Real<2>=zero;
+    def bottom: Real<2>=zero;
+};
+
+def SideTB_b32: Struct {
+    def top: Real<4>=zero;
+    def bottom: Real<4>=zero;
+};
+
+def SideTB_b64: Struct {
+    def top: Real<8>=zero;
+    def bottom: Real<8>=zero;
+};
+
+/**
+ * Unsigned real top‑bottom
+ */
+def uSideTB_b8: Struct {
+    def top: unsigned Real<1>=zero;
+    def bottom: unsigned Real<1>=zero;
+};
+
+def uSideTB_b16: Struct {
+    def top: unsigned Real<2>=zero;
+    def bottom: unsigned Real<2>=zero;
+};
+
+def uSideTB_b32: Struct {
+    def top: unsigned Real<4>=zero;
+    def bottom: unsigned Real<4>=zero;
+};
+
+def uSideTB_b64: Struct {
+    def top: unsigned Real<8>=zero;
+    def bottom: unsigned Real<8>=zero;
+};
+
+/**
+ * Signed integer top‑bottom
+ */
+def ISideTB_b8: Struct {
+    def top: Int<1>=zero;
+    def bottom: Int<1>=zero;
+};
+
+def ISideTB_b16: Struct {
+    def top: Int<2>=zero;
+    def bottom: Int<2>=zero;
+};
+
+def ISideTB_b32: Struct {
+    def top: Int<4>=zero;
+    def bottom: Int<4>=zero;
+};
+
+def ISideTB_b64: Struct {
+    def top: Int<8>=zero;
+    def bottom: Int<8>=zero;
+};
+
+/**
+ * unsigned integer top‑bottom
+ */
+def uISideTB_b8: Struct {
+    def top: unsigned Int<1>=zero;
+    def bottom: unsigned Int<1>=zero;
+};
+
+def uISideTB_b16: Struct {
+    def top: unsigned Int<2>=zero;
+    def bottom: unsigned Int<2>=zero;
+};
+
+def uISideTB_b32: Struct {
+    def top: unsigned Int<4>=zero;
+    def bottom: unsigned Int<4>=zero;
+};
+
+def uISideTB_b64: Struct {
+    def top: unsigned Int<8>=zero;
+    def bottom: unsigned Int<8>=zero;
+};
+
+/**
+ * Right‑left side pairs (default 32‑bit)
+ */
+#define SideRL SideRL_b32          // Signed real right/left
+#define uSideRL uSideRL_b32        // Unsigned real right/left
+#define ISideRL ISideRL_b32        // Signed integer right/left
+#define uISideRL uISideRL_b32      // Unsigned integer right/left
+
+/**
+ * Signed real right‑left
+ */
+def SideRL_b8: Struct {
+    def right: Real<1>=zero;
+    def left: Real<1>=zero;
+};
+
+def SideRL_b16: Struct {
+    def right: Real<2>=zero;
+    def left: Real<2>=zero;
+};
+
+def SideRL_b32: Struct {
+    def right: Real<4>=zero;
+    def left: Real<4>=zero;
+};
+
+def SideRL_b64: Struct {
+    def right: Real<8>=zero;
+    def left: Real<8>=zero;
+};
+
+/**
+ * unsigned real right‑left
+ */
+def uSideRL_b8: Struct {
+    def right: unsigned Real<1>=zero;
+    def left: unsigned Real<1>=zero;
+};
+
+def uSideRL_b16: Struct {
+    def right: unsigned Real<2>=zero;
+    def left: unsigned Real<2>=zero;
+};
+
+def uSideRL_b32: Struct {
+    def right: unsigned Real<4>=zero;
+    def left: unsigned Real<4>=zero;
+};
+
+def uSideRL_b64: Struct {
+    def right: unsigned Real<8>=zero;
+    def left: unsigned Real<8>=zero;
+};
+
+/**
+ * Signed integer right‑left
+ */
+def ISideRL_b8: Struct {
+    def right: Int<1>=zero
+    def left: Int<1>=zero;
+};
+
+def ISideRL_b16: Struct {
+    def right: Int<2>=zero
+    def left: Int<2>=zero;
+};
+
+def ISideRL_b32: Struct {
+    def right: Int<4>=zero
+    def left: Int<4>=zero;
+};
+
+def ISideRL_b64: Struct {
+    def right: Int<8>=zero
+    def left: Int<8>=zero;
+};
+
+/**
+ * unsigned integer right‑left
+ */
+de uISideRL_b8: Struct {
+    def right: unsigned Int<1>=zero;
+    def left: unsigned Int<1>=zero;
+};
+
+def uISideRL_b16: Struct {
+    def right: unsigned Int<2>=zero;
+    def left: unsigned Int<2>=zero;
+};
+
+def uISideRL_b32: Struct {
+    def right: unsigned Int<4>=zero;
+    def left: unsigned Int<4>=zero;
+};
+
+def uISideRL_b64: Struct {
+    def right: unsigned Int<8>=zero;
+    def left: unsigned Int<8>=zero;
+};
+
+/**
+ * color (8 bits per component)
+ */
+def RGB: Struct {
+    def r: uInt<1>=zero;
+    def g: uInt<1>=zero;
+    def b: uInt<1>=zero;
+};
+
+def RGBA: Struct {
+    def r: uInt<1>=zero;
+    def g: uInt<1>=zero;
+    def b: uInt<1>=zero;
+    def a: uInt<1>=zero;
+};
+
+#endif /* VECTOR__LIB */
