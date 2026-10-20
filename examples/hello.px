@@ -1,9 +1,0 @@
-/*
- * Simplest program: prints "Hello, World!" using the standard library.
- */
-
-use std::inout;
-
-func main(): Void {
-    std::inout::println("Hello, World!");
-}
