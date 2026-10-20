@@ -1,202 +1,135 @@
 # Paxsy
 
-**Paxsy** is a statically‑typed, compiled systems programming language with manual memory management, lightweight processes, and a modern toolchain.
+**Paxsy** is a statically-typed, compiled systems programming language designed for software that must be fast, predictable, and safe — without relying on a garbage collector. It targets native machine code and gives the programmer direct control over memory layout, allocation, and CPU behaviour, while providing modern facilities for error handling, compile-time evaluation, and concurrency.
 
-Paxsy is designed for systems programming, embedded development, high‑performance computing, and cross‑platform application development. It compiles to native code for ARM AArch64 and x86‑64, with support for Android APK packages. The language combines the familiarity of C‑like syntax with modern features such as pattern matching, deferred execution (`defer`), built‑in error handling (`try`/`catch`), compile‑time evaluation (`comptime`), and safe concurrency through message‑passing processes (`proc`).
+Paxsy is built for operating system kernels, device drivers, embedded firmware, real-time controllers, game engines, network servers, and any domain where the cost of every allocation and every branch must be understood.
 
-Paxsy gives you low‑level control without sacrificing developer productivity. Its syntax is familiar to C programmers, but it adds modern abstractions that make writing safe, concurrent, and high‑performance code more enjoyable. The toolchain is designed for simplicity and reproducibility – one TOML file configures everything from compiler flags to dependencies. Whether you are writing a kernel driver, a game engine, or a cloud service, Paxsy provides the performance and flexibility you need, backed by comprehensive documentation and an open community.
+## Features
 
----
+- **Native performance** — compiles to machine code with no hidden runtime, no tracing collector, and no interpreter.
+- **Determinism** — the same source, compiled with the same options, produces the same machine code and the same memory layout on every machine.
+- **Memory safety without GC** — explicit ownership conventions, zero-pointer checks, and a type system that distinguishes values from errors prevent use-after-free, double-free, and zero-pointer dereference.
+- **Errors as values** — no exceptions, no `panic`. Every failure is a typed `T!` value, propagated with `try` or handled with `catch`.
+- **Two concurrency models** — lightweight cooperative `routine`s and parallel native `async` threads, both communicating through typed `chan`nels. No shared mutable state, no data races by construction.
+- **First-class compile-time evaluation** — constants, types, functions, and blocks evaluated by the compiler, so array sizes, lookup tables, and configuration values are computed once at build time.
+- **Compact static typing** — type families (`Int`, `UInt`, `Real`, `Char`) and `Auto` let the compiler pick the smallest suitable representation, fixed permanently at first assignment.
 
-## Requirements
+## Quick Start
 
-To build or install Paxsy from source, you need:
+Build the toolchain from source and install it:
 
-- **Git** – for cloning the repository (>= 2.0)
-- **GCC** – a C compiler supporting C11 (>= 4.8)
-- **Make** – to run the build system (>= 3.81)
-- **Binutils** – `as`, `ar`, and `ld` for assembling and linking (>= 2.20)
-
-On most Linux distributions these can be installed via the system package manager (e.g., `build-essential` on Debian/Ubuntu, `base-devel` on Arch Linux).
-
----
-
-## Installation
-
-There are two recommended ways to install Paxsy: a one‑line script, or manual build from source.
-
-### Quick install (using curl)
-
-Run the following command in your terminal:
-
-```bash
-curl -sSf https://paxsy.org/install.sh | sh
+```
+$ make
+$ ./install.sh
 ```
 
-This script will:
+Create a new project, build it, and run it:
 
-- Detect your operating system and package manager (apt, dnf, pacman, apk) and attempt to install any missing build dependencies.
-- Clone the Paxsy source code from GitHub (default branch: `main`).
-- Build the compiler using `make`.
-- Install the `paxsy` binary to `/usr/local/bin` (or the directory specified by `INSTALL_PATH`).
-
-You can customise the installation by setting environment variables before running the script:
-
-| Variable              | Purpose                                           | Default              |
-|-----------------------|---------------------------------------------------|----------------------|
-| `INSTALL_PATH`        | Destination for the `paxsy` binary                | `/usr/local/bin`     |
-| `PAXSY_LIBRARY_DIR`   | Where to install libraries (if any)               | `/usr/local/lib/paxsy` |
-| `PAXSY_SRC_DIR`       | Temporary directory for cloning and building      | `/tmp/paxsy-build`   |
-| `BRANCH`              | Git branch to build                               | `main`               |
-| `PAXSY_VERSION`       | Git tag or commit hash (overrides `BRANCH`)       | (unset)              |
-
-For example, to install a specific version tag:
-
-```bash
-curl -sSf https://paxsy.org/install.sh | PAXSY_VERSION=v0.1.0 sh
+```
+$ paxsy init myapp
+Created project 'myapp' with src/, lib/, include/, myapp.toml, and a Git repository.
+$ cd myapp
+$ paxsy build
+$ paxsy run
 ```
 
-You may also pass `--branch` or `--version` directly to the script:
+The compiler is `paxsy`; the package manager is `paxsy-lib`. Every project is configured by a single file, `<project>.toml`, which is the single source of truth for the build.
 
-```bash
-curl -sSf https://paxsy.org/install.sh | sh -s -- --version v0.1.0
+## A Taste of Paxsy
+
+Resource safety is enforced by convention and visible in the types — every acquisition is paired with a `defer` that releases it:
+
+```
+func copy_data(src_path: Char[], dst_path: Char[]): Void! {
+    let src = try std::file::open(src_path);
+    defer std::file::close(src);
+
+    let dst = try std::file::create(dst_path);
+    defer std::file::close(dst);
+
+    let buf: &Int8 = alloc Int8[1024];
+    if buf == 0 {
+        return error 1;
+    }
+    defer free buf;
+
+    // ...
+}
 ```
 
-> **Note:** If you install to a system directory like `/usr/local/bin`, you may need `sudo` (the script will prompt if required). If you do not have write permissions, the script automatically falls back to `~/.local/bin` – make sure that directory is in your `PATH`.
+Concurrency is message-passing, not shared memory:
 
-### Manual build from source
-
-If you prefer to build manually, follow these steps:
-
-1. Clone the repository (or download a release archive):
-
-   ```bash
-   git clone https://github.com/aiv-tmc/paxsy.git
-   cd paxsy
-   ```
-
-2. (Optional) Check out a specific branch or tag:
-
-   ```bash
-   git checkout <branch-or-tag>
-   ```
-
-3. Build the compiler:
-
-   ```bash
-   make
-   ```
-
-   This produces the `paxsy` executable in the project root.
-
-4. (Optional) Install it to a directory of your choice:
-
-   ```bash
-   sudo install -D -m 755 paxsy /usr/local/bin/paxsy
-   ```
-
-   or copy it manually:
-
-   ```bash
-   cp paxsy ~/.local/bin/
-   ```
-
----
-
-## Usage
-
-After installation, you can invoke the compiler with:
-
-```bash
-paxsy [options]
 ```
+let jobs: chan Job = chan 16;
 
-For a full list of options, run:
-
-```bash
-paxsy --help
+routine {
+    for 1..100 |i| {
+        jobs <- Job {.id = i, .payload = i};
+    }
+    close jobs;
+};
 ```
-
----
 
 ## Documentation
 
-Comprehensive documentation, including the language reference, standard library guide, and tutorials, is available at the official website:
+The full documentation lives in the [project wiki](https://github.com/aiv-tmc/paxsy/wiki):
 
-[https://github.com/aiv-tmc/paxsy/wiki](https://github.com/aiv-tmc/paxsy/wiki)
+| Document | Contents |
+| --- | --- |
+| [Language Specification](https://github.com/aiv-tmc/paxsy/wiki/Language-Specification) | The authoritative description of the language: syntax, semantics, data types, memory management, `comptime`, modules, concurrency, inline assembly. |
+| [Standard Library Reference](https://github.com/aiv-tmc/paxsy/wiki/Standard-Library-Reference) | Every `std::` module: console I/O, strings, Unicode, dynamic arrays, math, RNG, regex, time, files, paths, directories, processes, networking, HTTP, URLs, JSON, serialisation, hashing, crypto, databases, logging, windows, input, graphics, images, audio, threads, sync, compression, terminal. |
+| [Toolchain User Manual](https://github.com/aiv-tmc/paxsy/wiki/Toolchain-User-Manual) | The compiler and build orchestrator, the `<project>.toml` configuration file, target formats, all commands, the `paxsy-lib` package manager, environment variables, and debugging support. |
+| [Code Style Guide](https://github.com/aiv-tmc/paxsy/wiki/Code-Style-Guide) | The conventions used across the standard library, the compiler, and user projects: formatting, naming, declarations, error handling, resource safety, and anti-patterns. |
 
-If you find any inconsistencies or missing information, please [open an issue](https://github.com/aiv-tmc/paxsy/issues) on GitHub.
+## Example
 
----
-
-## Building from Source (Detailed)
-
-The project uses a straightforward `Makefile` with the following structure:
+A small packet-processing program demonstrating structs, enums, `comptime` constants, `defer`, error handling, and `match`:
 
 ```
-CC       := gcc
-CFLAGS   := -std=c11 -Wall -Wextra -pedantic -I. -I./src
-OBJDIR   := obj
-SRCS     := $(shell find src -name '*.c')   # all C files in src/
-COMMON_SRCS := $(filter-out src/main.c src/libmain.c, $(SRCS))
+comptime MAX_PACKET_SIZE = 1500;
+comptime HEADER_SIZE = 4;
+
+comptime PacketType = Enum {
+    Data = 0,
+    Ack = 1,
+    Error = 2,
+};
+
+func parse_packet(raw: &UInt8, len: Int32): Packet! {
+    if raw == 0 {
+        return error ParseError.ZeroPointer;
+    }
+    if len < HEADER_SIZE {
+        return error ParseError.TooShort;
+    }
+    // ...
+}
+
+func main(): Void! {
+    let raw: UInt8[8] = {0, 0, 5, 0, 10, 20, 30, 40};
+    let pkt = try parse_packet(&raw[0], 8);
+    defer free pkt.payload;
+    print_summary(pkt);
+}
 ```
 
-The build produces the `paxsy` executable by compiling all source files except `src/libmain.c` (which is reserved for a possible static library). Object files are placed in the `obj/` directory mirroring the source tree.
+## Current Status
 
-### Available make targets
+The toolchain is under active development. Notable limitations of the current implementation:
 
-- **`all`** (default) – builds the `paxsy` binary.
-- **`clean`** – removes the `obj/` directory and the `paxsy` binary.
+- AArch64 is fully supported; x86-64 is under development.
+- The integrated debugger supports single-threaded programs only.
+- Shared library production on Windows is not yet implemented.
+- The package manager's remote mirrors are not yet operational; it uses a local package cache.
+- Some configuration fields (e.g. `[scripts]` hooks) are recognised but not yet executed.
 
-### Customising the build
+## Design Principles
 
-You can override the following variables when invoking `make`:
-
-| Variable      | Purpose                           | Default           |
-|---------------|-----------------------------------|-------------------|
-| `CC`          | C compiler command                | `gcc`             |
-| `CFLAGS`      | Compiler flags                    | `-std=c11 -Wall ...` |
-| `BUILD_LIB`   | Set to `0` to skip library build  | `1` (enabled)     |
-
-For example, to build with Clang and enable debug symbols:
-
-```bash
-make CC=clang CFLAGS="-std=c11 -g -O0"
-```
-
----
+1. **Readability over cleverness** — code is read far more often than it is written.
+2. **Explicit is better than implicit** — types, errors, and ownership are stated, not inferred from hidden state.
+3. **Fail fast and visibly** — errors are detected at their source and reported as values.
+4. **Minimalism** — abstractions are introduced to solve real problems, not to reorganise code.
 
 ## License
 
-This project is licensed under the **Mozilla Public License 2.0**. See the [LICENSE](LICENSE) file for full details.
-
----
-
-## Contributing
-
-Contributions are welcome! Whether you want to report a bug, suggest a feature, or submit a pull request, please follow these guidelines:
-
-1. Fork the repository on GitHub.
-2. Create a new branch for your feature or fix (`git checkout -b my-feature`).
-3. Make your changes, ensuring they follow the project's coding style (consistent with existing code).
-4. Run `make` to ensure the project compiles without warnings.
-5. Add or update tests if applicable.
-6. Commit and push your branch.
-7. Open a pull request against the `main` branch.
-
-For major changes, please open an issue first to discuss your proposal. We also appreciate contributions to the documentation and examples.
-
----
-
-## Authors
-
-Paxsy is developed by the Paxsy team and contributors. See the [AUTHORS](AUTHORS) file for a full list of contributors.
-
----
-
-## Links
-
-- **GitHub repository**: [https://github.com/aiv-tmc/paxsy](https://github.com/aiv-tmc/paxsy)
-- **Issue tracker**: [https://github.com/aiv-tmc/paxsy/issues](https://github.com/aiv-tmc/paxsy/issues)
-- **Official website**: [https://paxsy.org](https://paxsy.org)
-- **Documentation**: [https://github.com/aiv-tmc/paxsy/wiki](https://github.com/aiv-tmc/paxsy/wiki)
+Distributed under the MIT License. See `LICENSE` for details.

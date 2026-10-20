@@ -1,0 +1,16 @@
+extern func sqrt(x: Real64): Real64;
+
+extern {
+    func sin(x: Real64): Real64;
+    func cos(x: Real64): Real64;
+    let pi: Real64;
+}
+
+use std::type::sizeof;
+
+func main(): Void {
+    let r: Real64 = sqrt(4.0);
+    let s: Real64 = sin(r) + cos(r);
+    let n: Int64 = sizeof(Int32);
+    pass;
+}

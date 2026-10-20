@@ -13,21 +13,39 @@ endif
 " Keywords
 " ---------------------------------------------------------------------
 
-" Main control structures, declarations, operators
-syn keyword paxsyKeyword    func let comptime use module spawn defer
-syn keyword paxsyKeyword    return if else match case while do for
-syn keyword paxsyKeyword    break continue pass volatile asm alloc free
-syn keyword paxsyKeyword    extern null none error try catch
-syn keyword paxsyKeyword    true false and or not proc self
+" Core declarations and control flow
+syn keyword paxsyKeyword    func let comptime proc spawn receive
+syn keyword paxsyKeyword    defer return while do for break continue
+syn keyword paxsyKeyword    if else match case try catch pass asm
+syn keyword paxsyKeyword    error alloc free use module
 
-" Modifiers
+" Storage-class modifiers (extern, volatile)
 syn keyword paxsyStorageClass  extern volatile
 
-" Conditionals and loops (for more precise grouping)
+" Conditionals
 syn keyword paxsyConditional   if else match case
+
+" Loops
 syn keyword paxsyRepeat        while do for
+
+" Statements that alter control flow or execution
 syn keyword paxsyStatement     return defer break continue pass spawn
+
+" Exception handling
 syn keyword paxsyException     try catch error
+
+" ---------------------------------------------------------------------
+" Constants and special literals
+" ---------------------------------------------------------------------
+" Boolean literals, null/none, and self-reference
+" Highlighted as numbers per user request
+syn keyword paxsyConstant      true false null none self
+
+" ---------------------------------------------------------------------
+" Operator keywords
+" ---------------------------------------------------------------------
+" Logical and casting operators that look like keywords
+syn keyword paxsyOperatorKeyword and or not as
 
 " ---------------------------------------------------------------------
 " Data types
@@ -135,6 +153,8 @@ hi def link paxsyConditional   Conditional
 hi def link paxsyRepeat        Repeat
 hi def link paxsyStatement     Statement
 hi def link paxsyException     Exception
+hi def link paxsyConstant      Number
+hi def link paxsyOperatorKeyword Operator
 hi def link paxsyType          Type
 hi def link paxsyStructure     Structure
 hi def link paxsyOperator      Operator

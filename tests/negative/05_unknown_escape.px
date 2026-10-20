@@ -1,0 +1,6 @@
+// expect-line: 4
+// expect-text: unknown escape sequence
+func main(): Void {
+    let s = "bad\qescape";
+    pass;
+}

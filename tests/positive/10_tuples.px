@@ -1,0 +1,15 @@
+/*
+ * Tuple types (A, B), multiple return values, destructuring.
+ */
+func divide(a: Int32, b: Int32): (Int32, Int32) {
+    return {a / b, a % b};
+}
+
+func main(): Void {
+    let t: (Int32, Real64) = {5, 3.14};
+    let first: Int32 = t[0];
+    let second: Real64 = t[1];
+    let (quotient, remainder) = divide(10, 3);
+    let (c, d) = {1, 2.0};
+    pass;
+}

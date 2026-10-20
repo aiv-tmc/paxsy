@@ -1,0 +1,7 @@
+// expect-line: 5
+// expect-text: Expected ';'
+// expect-count: 2
+func main(): Void {
+    let x: Int32 = 5
+    pass;
+}

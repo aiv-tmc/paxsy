@@ -1,0 +1,8 @@
+func main(): Void {
+    let a: Int32 = 5;
+    let b: Int32 = 10;
+    let max = if a > b { a } else { b };
+    let is_positive: Bool = if a > 0;
+    let also_max: Int32 = if a > b { a } else { b };
+    pass;
+}

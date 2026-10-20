@@ -1,0 +1,8 @@
+// expect-line: 6
+// expect-text: Undeclared identifier
+func main(): Void {
+    let s: Char[6] = "ab
+cd";
+    x = y;
+    pass;
+}

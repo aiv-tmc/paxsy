@@ -1,0 +1,10 @@
+// expect-line: 3
+// expect-text: does not return a value on all paths
+func f(): Int32 {
+    pass;
+}
+
+func main(): Void {
+    let x: Int32 = f();
+    pass;
+}

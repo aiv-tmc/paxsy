@@ -1,0 +1,6 @@
+// expect-line: 4
+func main(): Void {
+    let x: Int32;
+    let y: Int32 = x;
+    pass;
+}

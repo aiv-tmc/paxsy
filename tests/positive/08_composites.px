@@ -1,0 +1,47 @@
+/*
+ * Spec-form composite types and brace literals.
+ */
+comptime Point = Struct {
+    x: Real64,
+    y: Real64,
+};
+
+comptime Value = Union {
+    as_int: Int32,
+    as_real: Real32,
+};
+
+comptime Color = Enum {
+    Red,
+    Green,
+    Blue,
+};
+
+comptime Status = Enum {
+    Ok = 0,
+    NotFound = 1,
+};
+
+func main(): Void {
+    let p: Point = Point {1.0, 2.0};
+    let q: Point = Point {.x = 3.0, .y = 4.0};
+    let px: Real64 = p.x;
+    q.y = px;
+    let v: Value = Value {42};
+    let bits: Int32 = v.as_int;
+    let a: Int32[4] = {1, 2, 3, 4};
+    let first: Int32 = a[0];
+    let s2 = a[1..2];
+    let c: Color = Color.Green;
+    let s: Status = Status.NotFound;
+    if c == Color.Green {
+        pass;
+    }
+    if s <> Status.Ok {
+        pass;
+    }
+    if first == 1 {
+        pass;
+    }
+    pass;
+}

@@ -1,0 +1,8 @@
+// expect-line: 4
+// expect-text: Expected '{'
+// expect-count: 2
+comptime P = Struct (x: Int32);
+
+func main(): Void {
+    pass;
+}

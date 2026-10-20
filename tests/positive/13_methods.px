@@ -1,0 +1,26 @@
+comptime Point = Struct {
+    x: Real64,
+    y: Real64,
+};
+
+comptime Vector3 = Struct {
+    x: Real64,
+    y: Real64,
+    z: Real64,
+};
+
+func Point.sum(this: Point): Real64 {
+    return this.x + this.y;
+}
+
+func {Point, Vector3}.dimensions(): Int32 {
+    return 0;
+}
+
+func main(): Void {
+    let p: Point = Point {1.0, 2.0};
+    let s: Real64 = Point.sum(p);
+    let s2: Real64 = p.sum();
+    let d: Int32 = Point.dimensions();
+    pass;
+}

@@ -1,0 +1,11 @@
+/*
+ * Empty string literals. The decoded length is 0, so with the implicit
+ * null terminator the type is Char[1]. Adjacent literal concatenation
+ * with an empty component leaves the other component unchanged.
+ */
+func main(): Void {
+    let e: Char[1] = "";
+    let c: Char[1] = "" "";
+    let j: Char[3] = "ab" "";
+    pass;
+}

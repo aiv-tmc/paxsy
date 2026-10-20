@@ -1,0 +1,9 @@
+// expect-line: 6
+// expect-text: requires an else branch
+func main(): Void {
+    let x: Int32 = 1;
+    let y: Int32 = match x {
+        case 1 { 10 }
+    };
+    pass;
+}

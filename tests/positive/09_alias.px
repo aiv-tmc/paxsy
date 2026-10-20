@@ -1,0 +1,17 @@
+/*
+ * Comptime type aliases behave identically to the aliased type.
+ */
+comptime UserId = Int32;
+comptime IntPtr = &Int32;
+
+func find(id: UserId): UserId {
+    return id;
+}
+
+func main(): Void {
+    let id: UserId = 42;
+    let same: Int32 = find(id);
+    let x: Int32 = 7;
+    let p: IntPtr = &x;
+    pass;
+}

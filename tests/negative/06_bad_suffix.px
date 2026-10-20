@@ -1,0 +1,6 @@
+// expect-line: 4
+// expect-text: invalid numeric suffix
+func main(): Void {
+    let x: Int32 = 12x;
+    pass;
+}
