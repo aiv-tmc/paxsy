@@ -22,7 +22,10 @@ bin/%.o: src/%.c | bin
 bin:
 	mkdir -p bin
 
+test: $(TARGET)
+	cd tests && python3 test_paxsy.py
+
 clean:
 	rm -f $(OBJ) $(TARGET)
 
-.PHONY: all clean
+.PHONY: all clean test
