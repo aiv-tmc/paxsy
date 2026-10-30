@@ -121,7 +121,7 @@ static Node *pp_parse_select(Parser *p) {
             pp_ex(p, TK_ASSIGN, "'=' in receive arm");
         }
         p->block_next++;
-        if (pp_ac(p, TK_SENDRECV)) {        /* on [let x =] <- ch { } */
+        if (pp_ac(p, TK_SENDRECV)) {         /* on [let x =] <- ch { } */
             arm->flags |= NF_RECV;
             arm->child[0] = pp_parse_expr(p);
         } else {                            /* on ch <- value { } */
@@ -143,8 +143,7 @@ Node *pp_parse_stmt(Parser *p) {
     case TK_KW_USE:      return pp_parse_use(p);
     case TK_KW_MODULE:   return pp_parse_module(p);
     case TK_KW_COMPTIME: return pp_parse_comptime(p);
-    case TK_KW_EXTERN:   return pp_parse_extern(p);
-    case TK_KW_FUNC:     return pp_parse_func(p, 0);
+    case TK_KW_FUNC:     return pp_parse_func(p);
     case TK_KW_LET:      return pp_parse_let(p);
     case TK_LBRACE:      return pp_parse_block(p);
     case TK_KW_IF:       return pp_parse_if(p, 0);

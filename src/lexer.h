@@ -6,12 +6,15 @@
  * The lexer never aborts on the first problem: it reports errors to the
  * diagnostics manager, skips the offending characters and keeps going so
  * that one run can surface several independent lexical errors.
+ *
+ * The Source record comes from source.h; including it here (rather than
+ * re-declaring the typedef) keeps strict C99 translation units free of
+ * the typedef-redefinition diagnostic that Clang emits otherwise.
  */
 
 #include "token.h"
 #include "diag.h"
-
-typedef struct Source Source;
+#include "source.h"   /* the Source record itself */
 
 typedef struct {
     Token *items;
