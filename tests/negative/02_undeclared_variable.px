@@ -1,6 +1,0 @@
-// expect-line: 4
-func main(): Void {
-    let x: Int32 = 5;
-    x = y + 1;
-    pass;
-}

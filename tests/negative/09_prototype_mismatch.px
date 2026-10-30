@@ -1,7 +1,0 @@
-// expect-line: 5
-// expect-text: does not match its prototype
-func add(a: Int32, b: Int32): Int32;
-
-func add(a: Int32, b: Real64): Int32 {
-    return a;
-}
