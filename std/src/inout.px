@@ -1,0 +1,117 @@
+/*
+ * Copyright (C) 2026 Paxsy contributors
+ * Distributed under the MIT License.
+ *
+ * Module: std::inout
+ * Console input and output on the standard streams.
+ */
+
+module std {
+    module inout {
+        comptime ERR_WRITE = 1;
+        comptime ERR_READ = 2;
+        comptime ERR_EOF = 3;
+
+        /* Raw stream operations supplied by the runtime. They are
+         * declared as prototypes without a definition: the linker
+         * resolves them against the runtime's object code. */
+        func sys_write(fd: Int32, buf: &Char, count: Int32): Int32;
+        func sys_read(fd: Int32, buf: &Char, count: Int32): Int32;
+
+        /// Writes `message` to standard output without a trailing
+        /// newline.
+        ///
+        /// Arguments:
+        ///   message - the string to write; must be NUL-terminated.
+        ///
+        /// Errors:
+        ///   Returns ERR_WRITE when the underlying write fails.
+        func print(message: Char[]): Void! {
+            let n = std::string::length(message);
+            if n == 0 {
+                return;
+            }
+            let written = sys_write(1, &message[0], n);
+            if written != n {
+                return error ERR_WRITE;
+            }
+        }
+
+        /// Writes `message` to standard output followed by a newline.
+        func println(message: Char[]): Void! {
+            try print(message);
+            try print("\n");
+        }
+
+        /// Reads a single line from standard input and returns it
+        /// without the terminating newline. The caller owns the
+        /// returned string and must release it with `free`.
+        ///
+        /// Errors:
+        ///   Returns ERR_EOF when the stream ends before any character
+        ///   is read and ERR_READ on allocation failure.
+        func readln(): Char[]! {
+            let tmp: &Char = alloc Char[1024];
+            if tmp == 0 {
+                return error ERR_READ;
+            }
+            defer free tmp;
+
+            let n: Int32 = 0;
+            for 0.. |i| {
+                if i >= 1023 {
+                    break;
+                }
+                let got = sys_read(0, tmp + i, 1);
+                if got <= 0 {
+                    if n == 0 {
+                        return error ERR_EOF;
+                    }
+                    break;
+                }
+                if tmp[i] == '\n' {
+                    break;
+                }
+                n += 1;
+            }
+
+            let out: &Char = alloc Char[n + 1];
+            if out == 0 {
+                return error ERR_READ;
+            }
+            for 0..<n |j| {
+                out[j] = tmp[j];
+            }
+            out[n] = 0;
+            return out;
+        }
+
+        /// Reads everything available on standard input until the end
+        /// of the stream. The caller owns the returned string.
+        ///
+        /// Errors:
+        ///   Returns ERR_EOF when the stream is empty and ERR_READ on
+        ///   allocation failure.
+        func read(): Char[]! {
+            comptime CAP = 4096;
+            let buf: &Char = alloc Char[CAP];
+            if buf == 0 {
+                return error ERR_READ;
+            }
+            let total: Int32 = 0;
+            while total < CAP - 1 {
+                let got = sys_read(0, buf + total, 1);
+                if got <= 0 {
+                    break;
+                }
+                total += 1;
+            }
+            if total == 0 {
+                free buf;
+                return error ERR_EOF;
+            }
+            buf[total] = 0;
+            return buf;
+        }
+    }
+}

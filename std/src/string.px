@@ -1,0 +1,41 @@
+/*
+ * Copyright (C) 2026 Paxsy contributors
+ * Distributed under the MIT License.
+ *
+ * Module: std::string
+ * Operations on NUL-terminated strings of Char code units.
+ */
+
+module std {
+    module string {
+        /// Returns the number of code units in `s`, excluding the
+        /// NUL terminator.
+        func length(s: Char[]): Int32 {
+            let n: Int32 = 0;
+            for 0.. |i| {
+                if s[i] == 0 {
+                    break;
+                }
+                n += 1;
+            }
+            return n;
+        }
+
+        /// Lexicographic comparison of two strings: a negative value
+        /// when `a` sorts before `b`, zero when they are equal and a
+        /// positive value otherwise.
+        func compare(a: Char[], b: Char[]): Int32 {
+            for 0.. |i| {
+                let ca = a[i] as Int32;
+                let cb = b[i] as Int32;
+                if ca != cb {
+                    return ca - cb;
+                }
+                if ca == 0 {
+                    return 0;
+                }
+            }
+            return 0;
+        }
+    }
+}
