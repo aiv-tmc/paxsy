@@ -1,0 +1,35 @@
+{
+    "name": "paxsy",
+    "displayName": "Paxsy",
+    "description": "Syntax highlighting for the Paxsy programming language (.px)",
+    "version": "1.0.0",
+    "publisher": "paxsy",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [
+            {
+                "id": "paxsy",
+                "aliases": [
+                    "Paxsy",
+                    "paxsy"
+                ],
+                "extensions": [
+                    ".px"
+                ],
+                "configuration": "./syntaxes/px.language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "paxsy",
+                "scopeName": "source.px",
+                "path": "./syntaxes/px.tmLanguage.json"
+            }
+        ]
+    }
+}

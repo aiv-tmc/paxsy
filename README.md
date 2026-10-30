@@ -1,135 +1,109 @@
-# Paxsy
+# <img src="logo.png" alt="paxsy" width="480">
 
-**Paxsy** is a statically-typed, compiled systems programming language designed for software that must be fast, predictable, and safe — without relying on a garbage collector. It targets native machine code and gives the programmer direct control over memory layout, allocation, and CPU behaviour, while providing modern facilities for error handling, compile-time evaluation, and concurrency.
+**paxsy** — the toolchain for the Paxsy systems programming language:
+a complete compiler frontend (lexer, parser, semantic analysis),
+a clean-code linter, a project manager and a package manager, in one
+small self-contained binary written in C99.
 
-Paxsy is built for operating system kernels, device drivers, embedded firmware, real-time controllers, game engines, network servers, and any domain where the cost of every allocation and every branch must be understood.
+* Website: <https://paxsy.org>
+* Documentation: [Toolchain User Manual](docs/ToolchainUserManual.md) ·
+  [Command reference](docs/cli.md)
 
 ## Features
 
-- **Native performance** — compiles to machine code with no hidden runtime, no tracing collector, and no interpreter.
-- **Determinism** — the same source, compiled with the same options, produces the same machine code and the same memory layout on every machine.
-- **Memory safety without GC** — explicit ownership conventions, zero-pointer checks, and a type system that distinguishes values from errors prevent use-after-free, double-free, and zero-pointer dereference.
-- **Errors as values** — no exceptions, no `panic`. Every failure is a typed `T!` value, propagated with `try` or handled with `catch`.
-- **Two concurrency models** — lightweight cooperative `routine`s and parallel native `async` threads, both communicating through typed `chan`nels. No shared mutable state, no data races by construction.
-- **First-class compile-time evaluation** — constants, types, functions, and blocks evaluated by the compiler, so array sizes, lookup tables, and configuration values are computed once at build time.
-- **Compact static typing** — type families (`Int`, `UInt`, `Real`, `Char`) and `Auto` let the compiler pick the smallest suitable representation, fixed permanently at first assignment.
+* **Full frontend pipeline** — tokenizing, parsing and semantic analysis
+  of the whole project, with caret-underlined diagnostics in colour.
+* **A real standard library** — `std::inout`, `std::string` and
+  friends, written in Paxsy itself under [`std/`](std), installed into a
+  local package cache and understood by the semantic analysis.
+* **A package manager** — fetch, search, install, update, remove and list
+  packages against the static repository at `paxsy.org`, with a local
+  cache so everything also works offline.
+* **Clean-code enforcement** — `paxsy clippy` checks the source against
+  the style guide (`--fix`, `--strict`, `--Wextra`).
+* **Project tooling** — minimal `init` (two files and a git repository),
+  silent `build`/`check`, `tree`, `bench`, `doc`, `meta`, `config`,
+  deterministic frontend archives (`state`/`shared`) for the upcoming
+  code generation backend.
+* **Editor support** — syntax highlighting for
+  [Vim](editors/vim) and [VSCode](editors/vscode).
 
-## Quick Start
+## Installation
 
-Build the toolchain from source and install it:
+One line, from the release server:
 
-```
-$ make
-$ ./install.sh
-```
-
-Create a new project, build it, and run it:
-
-```
-$ paxsy init myapp
-Created project 'myapp' with src/, lib/, include/, myapp.toml, and a Git repository.
-$ cd myapp
-$ paxsy build
-$ paxsy run
+```sh
+curl -fsSL https://paxsy.org/install.sh | sh
 ```
 
-The compiler is `paxsy`; the package manager is `paxsy-lib`. Every project is configured by a single file, `<project>.toml`, which is the single source of truth for the build.
+From a source checkout (no server needed) — builds, installs into
+`~/.local` and loads the standard library:
 
-## A Taste of Paxsy
-
-Resource safety is enforced by convention and visible in the types — every acquisition is paired with a `defer` that releases it:
-
-```
-func copy_data(src_path: Char[], dst_path: Char[]): Void! {
-    let src = try std::file::open(src_path);
-    defer std::file::close(src);
-
-    let dst = try std::file::create(dst_path);
-    defer std::file::close(dst);
-
-    let buf: &Int8 = alloc Int8[1024];
-    if buf == 0 {
-        return error 1;
-    }
-    defer free buf;
-
-    // ...
-}
+```sh
+scripts/install-dev.sh
 ```
 
-Concurrency is message-passing, not shared memory:
+Or pick one of the packaged routes: the AUR `PKGBUILD` for Arch Linux,
+or `flake.nix` for Nix (`nix run` / `nix profile install`).
+
+## Quick start
+
+```sh
+paxsy init hello
+cd hello
+paxsy check     # silence means success
+paxsy build     # writes build/report.txt
+paxsy clippy    # clean-code rules
+```
+
+A project is exactly two files — `src/main.px` (a greeting program) and
+`hello.toml` — plus an initialised git repository.
+
+## Building from source
+
+```sh
+make            # objects land in bin/, binary at ./paxsy
+```
+
+The build is plain C99 (`-std=c99 -Wall -Wextra`, warning-free) with no
+dependencies beyond the C library and POSIX. `make clean` removes the
+objects and the binary.
+
+## Repository layout
 
 ```
-let jobs: chan Job = chan 16;
-
-routine {
-    for 1..100 |i| {
-        jobs <- Job {.id = i, .payload = i};
-    }
-    close jobs;
-};
+paxsy/
+├── src/                  the toolchain (C99, one binary)
+├── std/                  the standard library (Paxsy)
+│   ├── std.toml
+│   └── src/              one .px file per module
+├── scripts/install-dev.sh   developer installation
+├── editors/              Vim and VSCode syntax highlighting
+├── docs/                 ToolchainUserManual.md, cli.md
+├── install.sh            release installer (paxsy.org)
+├── PKGBUILD, flake.nix   packaged installs
+└── Makefile
 ```
 
 ## Documentation
 
-The full documentation lives in the [project wiki](https://github.com/aiv-tmc/paxsy/wiki):
+* [docs/ToolchainUserManual.md](docs/ToolchainUserManual.md) — the full
+  manual: every command, the configuration file, the package
+  repository protocol, the environment.
+* [docs/cli.md](docs/cli.md) — a compact command reference.
 
-| Document | Contents |
-| --- | --- |
-| [Language Specification](https://github.com/aiv-tmc/paxsy/wiki/Language-Specification) | The authoritative description of the language: syntax, semantics, data types, memory management, `comptime`, modules, concurrency, inline assembly. |
-| [Standard Library Reference](https://github.com/aiv-tmc/paxsy/wiki/Standard-Library-Reference) | Every `std::` module: console I/O, strings, Unicode, dynamic arrays, math, RNG, regex, time, files, paths, directories, processes, networking, HTTP, URLs, JSON, serialisation, hashing, crypto, databases, logging, windows, input, graphics, images, audio, threads, sync, compression, terminal. |
-| [Toolchain User Manual](https://github.com/aiv-tmc/paxsy/wiki/Toolchain-User-Manual) | The compiler and build orchestrator, the `<project>.toml` configuration file, target formats, all commands, the `paxsy-lib` package manager, environment variables, and debugging support. |
-| [Code Style Guide](https://github.com/aiv-tmc/paxsy/wiki/Code-Style-Guide) | The conventions used across the standard library, the compiler, and user projects: formatting, naming, declarations, error handling, resource safety, and anti-patterns. |
+## Contributing
 
-## Example
+Library development loop without any network: edit under `std/`, then
 
-A small packet-processing program demonstrating structs, enums, `comptime` constants, `defer`, error handling, and `match`:
-
-```
-comptime MAX_PACKET_SIZE = 1500;
-comptime HEADER_SIZE = 4;
-
-comptime PacketType = Enum {
-    Data = 0,
-    Ack = 1,
-    Error = 2,
-};
-
-func parse_packet(raw: &UInt8, len: Int32): Packet! {
-    if raw == 0 {
-        return error ParseError.ZeroPointer;
-    }
-    if len < HEADER_SIZE {
-        return error ParseError.TooShort;
-    }
-    // ...
-}
-
-func main(): Void! {
-    let raw: UInt8[8] = {0, 0, 5, 0, 10, 20, 30, 40};
-    let pkt = try parse_packet(&raw[0], 8);
-    defer free pkt.payload;
-    print_summary(pkt);
-}
+```sh
+paxsy check std
+scripts/install-dev.sh --libs-only
 ```
 
-## Current Status
-
-The toolchain is under active development. Notable limitations of the current implementation:
-
-- AArch64 is fully supported; x86-64 is under development.
-- The integrated debugger supports single-threaded programs only.
-- Shared library production on Windows is not yet implemented.
-- The package manager's remote mirrors are not yet operational; it uses a local package cache.
-- Some configuration fields (e.g. `[scripts]` hooks) are recognised but not yet executed.
-
-## Design Principles
-
-1. **Readability over cleverness** — code is read far more often than it is written.
-2. **Explicit is better than implicit** — types, errors, and ownership are stated, not inferred from hidden state.
-3. **Fail fast and visibly** — errors are detected at their source and reported as values.
-4. **Minimalism** — abstractions are introduced to solve real problems, not to reorganise code.
+Style: four-space indentation, 80 columns, English identifiers and
+comments; `paxsy clippy --Wextra` should stay quiet.
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for details.
+MIT. See `paxsy --license`.

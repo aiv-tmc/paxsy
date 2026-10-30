@@ -1,0 +1,138 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Paxsy",
+    "scopeName": "source.px",
+    "fileTypes": [
+        "px"
+    ],
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#chars"
+        },
+        {
+            "include": "#numbers"
+        },
+        {
+            "include": "#types"
+        },
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#constants"
+        },
+        {
+            "include": "#operators"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.double-slash.px",
+                    "match": "//.*$"
+                },
+                {
+                    "name": "comment.block.px",
+                    "begin": "/\\*",
+                    "end": "\\*/"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.px",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.px",
+                    "match": "\\\\."
+                },
+                {
+                    "include": "#interpolation"
+                }
+            ]
+        },
+        "interpolation": {
+            "begin": "\\{",
+            "end": "\\}",
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.section.interpolation.begin.px"
+                }
+            },
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.section.interpolation.end.px"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "$self"
+                }
+            ]
+        },
+        "chars": {
+            "name": "string.quoted.single.px",
+            "match": "'(?:\\\\.|[^'\\\\])+'"
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.hex.px",
+                    "match": "\\b0[xX][0-9A-Fa-f_]+[Uu]?\\b"
+                },
+                {
+                    "name": "constant.numeric.binary.px",
+                    "match": "\\b0[bB][01_]+\\b"
+                },
+                {
+                    "name": "constant.numeric.octal.px",
+                    "match": "\\b0[oO][0-7_]+\\b"
+                },
+                {
+                    "name": "constant.numeric.decimal.px",
+                    "match": "\\b[0-9][0-9_]*(?:\\.[0-9_]+)?(?:[eEpP][+-]?[0-9_]+)?[UufF]?\\b"
+                }
+            ]
+        },
+        "types": {
+            "name": "support.type.px",
+            "match": "\\b(?:Int8|Int16|Int32|Int64|Int128|Int256|UInt8|UInt16|UInt32|UInt64|UInt128|UInt256|Real32|Real64|UTF8|UTF16|UTF32|Bool|Void|Auto|Int|UInt|Real|Char)\\b"
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.px",
+                    "match": "\\b(?:if|else|while|do|for|match|case|break|continue|return|defer|select|on|close|routine|async|await)\\b"
+                },
+                {
+                    "name": "keyword.declaration.px",
+                    "match": "\\b(?:let|func|comptime|module|use|extern|chan|asm|volatile)\\b"
+                },
+                {
+                    "name": "keyword.other.px",
+                    "match": "\\b(?:Struct|Union|Enum|try|catch|error|pass|alloc|free)\\b"
+                },
+                {
+                    "name": "keyword.operator.word.px",
+                    "match": "\\b(?:as|and|or|not)\\b"
+                }
+            ]
+        },
+        "constants": {
+            "name": "constant.language.px",
+            "match": "\\b(?:true|false)\\b"
+        },
+        "operators": {
+            "name": "keyword.operator.px",
+            "match": "<<=|>>>=|>>=|<<<|>>>|<<|>>|<=|>=|==|!=|<-|::|\\.\\.|\\+=|-=|\\*=|/=|%=|&=|\\$=|\\^=|\\|=|\\+|-|\\*|/|%|=|<|>|&|\\||\\^|~|@|\\$|!|\\."
+        }
+    }
+}
