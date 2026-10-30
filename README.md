@@ -1,4 +1,4 @@
-# <img src="logo.png" alt="paxsy" width="480">
+# <img src="logo.png" alt="paxsy" width="240">
 
 **paxsy** — the toolchain for the Paxsy systems programming language:
 a complete compiler frontend (lexer, parser, semantic analysis),
