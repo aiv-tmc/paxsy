@@ -194,6 +194,9 @@ class PackageTests(unittest.TestCase):
         cached = self.tmp / "cache/cache" / self.PKG
         cached.parent.mkdir(parents=True)
         shutil.copytree(self.pkg_src, cached)
+        # A complete cache entry carries the completion marker with
+        # its version; a directory without it counts as partial.
+        (cached / ".paxsy-pkg").write_text("1.0.0\n")
         r = run_paxsy("install", self.PKG, env=self.env)
         self.assertEqual(r.returncode, 0)
         self.assertTrue((self.tmp / "cache/installed" / self.PKG / "fake.toml").is_file())
@@ -203,6 +206,207 @@ class PackageTests(unittest.TestCase):
     def test_install_unknown_package_fails(self):
         self.assertEqual(run_paxsy("install", "nope", env=self.env).returncode, 1)
 
+
+class FrontendRecoveryTests(unittest.TestCase):
+    """Regression tests for the phase-0 frontend hardening: statement
+    level error recovery, numeric literal validation and deterministic
+    archive emission."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="paxsy-test-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        run_paxsy("init", "demo", cwd=self.tmp)
+        self.proj = self.tmp / "demo"
+
+    def test_multiple_syntax_errors_in_one_file(self):
+        """The parser recovers at statement boundaries, so a file with
+        two broken declarations surfaces both errors in one run."""
+        (self.proj / "src/main.px").write_text(
+            "func main(): Void {\n    pass;\n}\n"
+            "func broken( {\n    let x = ;\n}\n"
+            "func also_broken( {\n    pass;\n}\n")
+        r = run_paxsy("check", cwd=self.proj)
+        self.assertEqual(r.returncode, 1)
+        self.assertGreaterEqual(r.stderr.count("error:"), 2)
+        self.assertLess(r.stderr.count("error:"), 6)
+
+    def test_numeric_literal_validation(self):
+        (self.proj / "src/main.px").write_text(
+            "func main(): Void {\n    pass;\n}\n"
+            "func bad(): Void {\n"
+            "    let a = 0b12;\n"
+            "    let b = 1__2;\n"
+            "    let c = 0x1.2;\n"
+            "}\n")
+        r = run_paxsy("check", cwd=self.proj)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("invalid digit '2'", r.stderr)
+        self.assertIn("consecutive '_' separators", r.stderr)
+        self.assertIn("hexadecimal float requires a 'p' exponent", r.stderr)
+
+    def test_state_archive_is_deterministic(self):
+        """Two consecutive state runs must produce byte-identical
+        archives: source discovery sorts its file list, so the tar
+        member order is stable."""
+        self.assertEqual(run_paxsy("state", cwd=self.proj).returncode, 0)
+        first = (self.proj / "target/demo.a").read_bytes()
+        self.assertEqual(run_paxsy("state", cwd=self.proj).returncode, 0)
+        second = (self.proj / "target/demo.a").read_bytes()
+        self.assertEqual(first, second)
+        self.assertEqual(first[257:262], b"ustar")
+
+
+class CodegenEndToEndTests(unittest.TestCase):
+    """End-to-end tests for the executable backend: build must produce
+    a working binary in target/ and run must execute it."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="paxsy-test-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        run_paxsy("init", "demo", cwd=self.tmp)
+        self.proj = self.tmp / "demo"
+
+    def test_hello_world_builds_and_runs(self):
+        r = run_paxsy("build", cwd=self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = run_paxsy("run", cwd=self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "Hello, World\n")
+
+    def test_control_flow_and_calls(self):
+        (self.proj / "src/main.px").write_text(
+            "func add(a: Int32, b: Int32): Int32 {\n"
+            "    let sum = a + b;\n"
+            "    return sum;\n"
+            "}\n"
+            "\n"
+            "func main(): Void! {\n"
+            "    try std::inout::println(\"start\");\n"
+            "    let total = 0;\n"
+            "    for 1..5 |i| {\n"
+            "        total += i;\n"
+            "    }\n"
+            "    if total == 10 {\n"
+            "        try std::inout::println(add(total, 32));\n"
+            "    } else {\n"
+            "        try std::inout::println(\"bad\");\n"
+            "    }\n"
+            "}\n")
+        r = run_paxsy("build", cwd=self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = run_paxsy("run", cwd=self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "start\n42\n")
+
+    def test_error_codes_propagate(self):
+        """A T! function returns {value, err}; try unwraps and
+        propagates, and main exits with the error code."""
+        (self.proj / "src/main.px").write_text(
+            "func might_fail(x: Int32): Int32! {\n"
+            "    if x > 5 {\n"
+            "        return error 7;\n"
+            "    }\n"
+            "    return x;\n"
+            "}\n"
+            "\n"
+            "func main(): Void! {\n"
+            "    let a = try might_fail(1);\n"
+            "    try std::inout::println(a);\n"
+            "    let b = try might_fail(9);\n"
+            "    try std::inout::println(b);\n"
+            "}\n")
+        r = run_paxsy("build", cwd=self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = run_paxsy("run", cwd=self.proj)
+        self.assertEqual(r.stdout, "1\n")
+        self.assertEqual(r.returncode, 7)
+
+    def test_match_lowers_to_switch(self):
+        (self.proj / "src/main.px").write_text(
+            "func classify(x: Int32): Int32 {\n"
+            "    match x {\n"
+            "    case 1 {\n"
+            "        return 10;\n"
+            "    }\n"
+            "    case 2 or 3 {\n"
+            "        return 20;\n"
+            "    }\n"
+            "    else {\n"
+            "        return 0;\n"
+            "    }\n"
+            "}\n"
+            "}\n"
+            "\n"
+            "func main(): Void! {\n"
+            "    try std::inout::println(classify(1));\n"
+            "    try std::inout::println(classify(3));\n"
+            "    try std::inout::println(classify(99));\n"
+            "}\n")
+        r = run_paxsy("build", "--emit-llvm", cwd=self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = run_paxsy("run", cwd=self.proj)
+        self.assertEqual(r.stdout, "10\n20\n0\n")
+        ll = (self.proj / "target/demo.ll").read_text()
+        self.assertIn("switch i32", ll)
+        self.assertIn("unreachable", ll)   # merge block after all-rets
+        self.assertIn("px_res_i32", ll)    # T! ABI structs
+
+    def test_emit_cuda_writes_kernels(self):
+        (self.proj / "src/main.px").write_text(
+            "func sum_range(): Int32 {\n"
+            "    let acc = 0;\n"
+            "    for 1..10 |i| {\n"
+            "        acc += i;\n"
+            "    }\n"
+            "    return acc;\n"
+            "}\n"
+            "\n"
+            "func main(): Void! {\n"
+            "    try std::inout::println(sum_range());\n"
+            "}\n")
+        r = run_paxsy("build", "--emit-cuda", cwd=self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        cu = (self.proj / "target/demo.cu").read_text()
+        self.assertIn("__global__ void px_kernel_0", cu)
+        self.assertIn("atomicAdd(px_out, px_i)", cu)
+        self.assertIn("px_kernel_0<<<blocks, threads>>>", cu)
+        r = run_paxsy("run", cwd=self.proj)
+        self.assertEqual(r.stdout, "45\n")
+
+    def test_run_without_build_fails(self):
+        r = run_paxsy("run", cwd=self.proj)
+        self.assertEqual(r.returncode, 1)
+
+    def test_gpu_map_pattern(self):
+        """A loop of the form arr[i] = expr(i) over a pointer is a GPU
+        map candidate: the CUDA artifact holds a per-thread store
+        kernel without atomics, and the host result is verified on
+        the CPU by summing the filled array."""
+        (self.proj / "src/main.px").write_text(
+            "func fill(a: &Int32, n: Int32): Void {\n"
+            "    for 0..n |i| {\n"
+            "        a[i] = i * 2;\n"
+            "    }\n"
+            "}\n"
+            "\n"
+            "func sum_arr(a: &Int32, n: Int32): Int32 {\n"
+            "    let acc = 0;\n"
+            "    for 0..n |i| { acc += a[i]; }\n"
+            "    return acc;\n"
+            "}\n"
+            "\n"
+            "func main(): Void! {\n"
+            "    let vals: Int32[5] = {0, 0, 0, 0, 0};\n"
+            "    fill(&vals, 5);\n"
+            "    try std::inout::println(sum_arr(&vals, 5));\n"
+            "}\n")
+        r = run_paxsy("build", "--emit-cuda", cwd=self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        cu = (self.proj / "target/demo.cu").read_text()
+        self.assertIn("__global__ void px_kernel_0", cu)
+        self.assertNotIn("atomicAdd", cu.split("px_kernel_0")[1].split("}")[0])
+        r = run_paxsy("run", cwd=self.proj)
+        self.assertEqual(r.stdout, "20\n")   # 0+2+4+6+8
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

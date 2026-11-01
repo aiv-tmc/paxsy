@@ -20,7 +20,7 @@ syntax keyword pxControl if else while do for match case break continue
 syntax keyword pxControl return defer select on close routine async await
 
 " Declaration keywords, module system and directives.
-syntax keyword pxDecl let func comptime module use extern chan asm volatile
+syntax keyword pxDecl let func comptime module use chan asm volatile
 
 " Error handling and the deliberate-empty-statement keyword.
 syntax keyword pxError try catch error pass

@@ -114,7 +114,7 @@
                 },
                 {
                     "name": "keyword.declaration.px",
-                    "match": "\\b(?:let|func|comptime|module|use|extern|chan|asm|volatile)\\b"
+                    "match": "\\b(?:let|func|comptime|module|use|chan|asm|volatile)\\b"
                 },
                 {
                     "name": "keyword.other.px",

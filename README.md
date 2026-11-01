@@ -1,9 +1,4 @@
-<table>
-  <tr>
-    <td width="40%" valign="top">
-      <img src="logo.png" alt="paxsy" width="240">
-    </td>
-    <td valign="top">
+# <img src="logo.png" alt="paxsy" width="480">
 
 **paxsy** — the toolchain for the Paxsy systems programming language:
 a complete compiler frontend (lexer, parser, semantic analysis),
@@ -13,10 +8,6 @@ small self-contained binary written in C99.
 * Website: <https://paxsy.org>
 * Documentation: [Toolchain User Manual](docs/ToolchainUserManual.md) ·
   [Command reference](docs/cli.md)
-
-    </td>
-  </tr>
-</table>
 
 ## Features
 
