@@ -1,0 +1,67 @@
+# release.yml - publish a GitHub Release from a version tag.
+#
+# Trigger: push a tag like v1.0.0. Builds the compiler with gcc and
+# clang, runs the full suite, assembles the release tarball (binary,
+# lib/std, docs, vim files, install.sh), signs it with a checksum
+# and publishes the Release with notes generated from the tag range.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test
+      - run: make test-asan
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: build
+        run: make clean && make -j CFLAGS="-std=c99 -O2 -Wall -Wextra -Werror"
+      - name: version
+        id: v
+        run: echo "ver=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: assemble tarball
+        run: |
+          set -e
+          ver="${{ steps.v.outputs.ver }}"
+          dist="paxsy-$ver"
+          mkdir -p "$dist"
+          cp paxsy install.sh "$dist/"
+          cp -r lib/std "$dist/std"
+          cp docs/cli.md README.md "$dist/"
+          mkdir -p "$dist/editors/vim/ftdetect" "$dist/editors/vim/syntax"
+          cp editors/vim/ftdetect/px.vim "$dist/editors/vim/ftdetect/"
+          cp editors/vim/syntax/px.vim "$dist/editors/vim/syntax/"
+          tar -czf "$dist.tar.gz" "$dist"
+          sha256sum "$dist.tar.gz" > "$dist.tar.gz.sha256"
+      - name: smoke the tarball
+        run: |
+          set -e
+          ver="${{ steps.v.outputs.ver }}"
+          tar -xzf "paxsy-$ver.tar.gz"
+          cd "paxsy-$ver"
+          ./install.sh --help >/dev/null 2>&1 || true
+          test -x ./paxsy
+          ./paxsy --version
+      - name: publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            paxsy-*.tar.gz
+            paxsy-*.tar.gz.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true
