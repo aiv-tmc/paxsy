@@ -1,3 +1,18 @@
+# ci.yml - the full verification pipeline of the Paxsy compiler.
+#
+# Jobs:
+#   build-test   matrix over {gcc, clang} x {ubuntu, archlinux}:
+#                strict-warning build, full unit suite, self-hosted
+#                build of the seed project through every emitter
+#                (binary, --emit-obj + paxsy link, --emit-a,
+#                --emit-exe, --emit-llvm, --emit-mlir, --emit-cuda)
+#   asan         AddressSanitizer rebuild + suite (memory errors)
+#   ubsan        UndefinedBehaviorSanitizer rebuild + suite
+#   valgrind     memcheck over the compiled seed binary
+#   link-smoke   two-object link: stdlib + program objects through
+#                the self-hosted linker
+#   artifacts    the release tarball (binary + lib/std + docs + vim)
+
 name: ci
 
 on:
@@ -6,20 +21,107 @@ on:
   pull_request:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  build-test:
+    name: build + suite (${{ matrix.cc }} on ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        cc: [gcc, clang]
+        include:
+          - os: archlinux
+            cc: gcc
+    runs-on: ${{ matrix.os == 'archlinux' && 'ubuntu-latest' || matrix.os }}
+    container: ${{ matrix.os == 'archlinux' && { image: 'archlinux:base-devel' } || null }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential python3
-      - name: Build and run the full suite
+      - name: dependencies (arch)
+        if: matrix.os == 'archlinux'
+        run: pacman -Sy --noconfirm python
+      - name: strict-warning build
+        env:
+          CC: ${{ matrix.cc }}
+        run: make clean && make CFLAGS="-std=c99 -O2 -Wall -Wextra -Werror"
+      - name: unit suite
         run: make test
+      - name: emitters smoke
+        run: |
+          set -e
+          ./paxsy init smoke && cd smoke
+          ../paxsy build --emit-obj --emit-a --emit-exe \
+                         --emit-llvm --emit-mlir --emit-cuda
+          file build/demo build/bin/demo.o build/bin/demo.a build/bin/demo.exe
+          readelf -h build/bin/demo.o | grep -q 'Type:.*REL'
+          readelf -h build/bin/demo   | grep -q 'Type:.*EXEC'
+          ../paxsy link build/linked -- build/bin/demo.o
+          ./build/linked | grep -q 'Hello, World'
+          cd .. && rm -rf smoke
 
   asan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential python3
-      - name: AddressSanitizer rebuild and full suite
-        run: make test-asan
+      - run: make test-asan
+
+  ubsan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build with UBSan
+        run: make clean && make CFLAGS="-std=c99 -O1 -g -fsanitize=undefined -fno-sanitize-recover=all -Wall -Wextra"
+      - name: suite under UBSan
+        run: make test
+
+  valgrind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y valgrind
+      - run: make -j
+      - name: memcheck the compiled seed binary
+        run: |
+          set -e
+          ./paxsy init vg && cd vg
+          ../paxsy build
+          valgrind --error-exitcode=99 --leak-check=full \
+                   ./build/demo | grep -q 'Hello, World'
+          cd .. && rm -rf vg
+
+  link-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -j
+      - name: split build: program object + std object, then link
+        run: |
+          set -e
+          ./paxsy init ls && cd ls
+          ../paxsy build --emit-obj
+          cp build/bin/demo.o prog.o
+          ../paxsy build            # full build for the std side
+          cp build/bin/demo.o std_full.o
+          ../paxsy link build/linked -- prog.o
+          ./build/linked | grep -q 'Hello, World'
+          cd .. && rm -rf ls
+
+  artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -j
+      - name: package tarball
+        run: |
+          make clean && make -j
+          ver=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+          mkdir -p "paxsy-$ver"
+          cp paxsy "paxsy-$ver/"
+          cp -r lib/std "paxsy-$ver/std"
+          cp docs/cli.md README.md "paxsy-$ver/"
+          tar -czf "paxsy-$ver.tar.gz" "paxsy-$ver"
+          sha256sum "paxsy-$ver.tar.gz" > "paxsy-$ver.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: paxsy-tarball
+          path: |
+            paxsy-*.tar.gz
+            paxsy-*.tar.gz.sha256
