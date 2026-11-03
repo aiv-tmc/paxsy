@@ -1,10 +1,19 @@
 {
-  # flake.nix - Nix build for the paxsy frontend toolchain.
-  # Exposes a package for x86_64-linux and aarch64-linux built with the
-  # standard C toolchain; use `nix build` (or `nix run`) at the flake
-  # root, or add the flake as an input to consume `packages.default`.
+  # flake.nix - Nix build for the Paxsy compiler.
+  # Exposes a package for x86_64-linux and aarch64-linux built with
+  # the standard C toolchain; use `nix build` (or `nix run`) at the
+  # flake root, or add the flake as an input to consume
+  # `packages.default`.
+  #
+  # The derivation also installs the Paxsy-written standard library
+  # (lib/std of the source tree) under $out/lib/paxsy/std; the
+  # compiler resolves the std sources relative to its own executable
+  # path (<exe>/../lib/paxsy/std for a canonical bin/ layout), so a
+  # nix-profile install finds the library without any environment
+  # setup. The compiler emits x86-64 machine code in-process and
+  # needs no runtime archive.
 
-  description = "Frontend toolchain for the Paxsy systems programming language";
+  description = "Compiler for the Paxsy systems programming language";
 
   outputs = { self, nixpkgs }:
     let
@@ -22,8 +31,15 @@
             version = "1.0.0";
             src = self;
 
+            buildPhase = ''
+              make
+            '';
+
             installPhase = ''
               install -Dm755 paxsy $out/bin/paxsy
+              mkdir -p $out/lib/paxsy
+              cp -r lib/std $out/lib/paxsy/std
+              chmod -R u+w $out/lib/paxsy/std
               install -Dm644 docs/cli.md $out/share/doc/paxsy/cli.md
               install -Dm644 editors/vim/ftdetect/px.vim \
                 $out/share/vim/vimfiles/ftdetect/px.vim

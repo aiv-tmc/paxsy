@@ -1,20 +1,19 @@
 #!/bin/sh
-# install.sh - one-line installer for the paxsy toolchain.
+# install.sh - one-line installer for the Paxsy compiler.
 #
 #   curl -fsSL https://paxsy.org/install.sh | sh
 #
-# Downloads the release tarball from paxsy.org, builds the frontend
-# with the system C compiler and installs it together with the
-# standard library and the Vim syntax files.
+# Downloads the release tarball from paxsy.org, builds the compiler
+# with the system C compiler and installs the binary, the Vim syntax
+# files and the Paxsy-written standard library. The compiler emits
+# x86-64 machine code in-process; no assembler, external linker or
+# runtime archive is involved, so the installer ships none of them.
 #
 # Environment knobs:
 #   INSTALL_PATH  destination for the binary (default /usr/local/bin)
 #   VERSION       release to fetch (default: the latest one)
 #   NO_VIM=1      skip the Vim syntax files
-#   NO_STDLIB=1   skip installing the bundled standard library
 #   VIMFILES      Vim runtime directory (default /usr/share/vim/vimfiles)
-#   PAXSY_LIBRARY_DIR  package cache for the standard library
-#                      (default ~/.paxsy of the invoking user)
 
 set -eu
 
@@ -36,7 +35,7 @@ else
 fi
 
 # The binary and the Vim files may require elevated rights; the
-# standard library cache stays in the invoking user's home.
+# standard library lands next to the binary under the same prefix.
 SUDO=""
 if [ ! -w "$INSTALL_PATH" ]; then
     if command -v sudo >/dev/null 2>&1; then
@@ -65,6 +64,15 @@ make -C "$SRC" >/dev/null
 say "installing paxsy to $INSTALL_PATH"
 $SUDO install -Dm755 "$SRC/paxsy" "$INSTALL_PATH/paxsy"
 
+# The standard library is Paxsy source compiled on every build; the
+# compiler locates it relative to its own executable path, so it is
+# installed into the conventional system location beside the binary.
+if [ -d "$SRC/lib/std" ]; then
+    LIBDIR="$INSTALL_PATH/../lib/paxsy"
+    $SUDO mkdir -p "$LIBDIR"
+    $SUDO cp -r "$SRC/lib/std" "$LIBDIR/std"
+fi
+
 # Vim support is installed unless explicitly disabled.
 if [ "${NO_VIM:-0}" != "1" ]; then
     say "installing Vim syntax files to $VIMFILES"
@@ -74,14 +82,5 @@ if [ "${NO_VIM:-0}" != "1" ]; then
         "$VIMFILES/syntax/px.vim"
 fi
 
-# The standard library is unpacked into the package cache; it is
-# installed as the invoking user, never through sudo.
-if [ "${NO_STDLIB:-0}" != "1" ]; then
-    say "installing the standard library"
-    PREFIX="$INSTALL_PATH/.." \
-        PAXSY_LIBRARY_DIR="${PAXSY_LIBRARY_DIR:-$HOME/.paxsy}" \
-        sh "$SRC/scripts/install-dev.sh" --libs-only
-fi
-
 say "done"
-"$INSTALL_PATH/paxsy" --version || true$INSTALL_PATH/paxsy" --version || true
+"$INSTALL_PATH/paxsy" --version || true
