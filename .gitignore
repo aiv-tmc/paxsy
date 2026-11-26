@@ -1,0 +1,11 @@
+/bin/
+/paxsy
+/build/
+/dist/
+/target/
+/debug/
+*.o
+*.trace
+*.log
+__pycache__/
+*.py[cod]
