@@ -20,7 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: make test
-      - run: make test-asan
+      - name: build with AddressSanitizer
+        run: make clean && make CFLAGS="-std=c99 -O0 -g -fsanitize=address -Wall -Wextra"
+      - name: suite under AddressSanitizer
+        run: cd tests && ASAN_OPTIONS=detect_leaks=0 PAXSY_CMD=../paxsy python3 run_asan.py
 
   release:
     needs: test
@@ -42,7 +45,9 @@ jobs:
           mkdir -p "$dist"
           cp paxsy install.sh "$dist/"
           cp -r lib/std "$dist/std"
-          cp docs/cli.md README.md "$dist/"
+          cp README.md "$dist/"
+          mkdir -p "$dist/docs"
+          cp docs/ToolchainUserManual.md docs/LanguageSpecification.md docs/CodeStyleGuide.md docs/StandardLibraryReference.md "$dist/docs/"
           mkdir -p "$dist/editors/vim/ftdetect" "$dist/editors/vim/syntax"
           cp editors/vim/ftdetect/px.vim "$dist/editors/vim/ftdetect/"
           cp editors/vim/syntax/px.vim "$dist/editors/vim/syntax/"
