@@ -1,0 +1,84 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: args
+ * Snapshot access to the program's command-line argument vector.
+ *
+ * A Paxsy program starts without a runtime to capture the original
+ * stack layout, so the argument vector is recovered from the kernel
+ * through the /proc/self/cmdline pseudo-file, which the kernel keeps
+ * filled with the argument bytes separated by single zero bytes.
+ * init() reads that file into a static buffer and records the offset
+ * of every argument; count() and get() then answer from the snapshot
+ * without further system calls. The snapshot is never copied: the
+ * returned strings point into module state and stay valid for the
+ * program's lifetime. Calling init() again replaces the snapshot.
+ *
+ * Limits: the snapshot occupies a fixed 4 KiB buffer and at most 64
+ * entries are indexed; input beyond either limit is not indexed.
+ */
+
+use sys;
+
+// Static snapshot of the argument bytes as read from the kernel.
+let __buf: Char[4096];
+
+// Offset of each argument's first byte within __buf.
+let __offsets: UInt64[64];
+
+// Number of indexed arguments.
+let __count: UInt64;
+
+module args {
+    // Captures the argument vector and returns the argument count.
+    // Called once at program start; later calls replace the snapshot.
+    func init(): UInt64! {
+        let fd_u = try sys::open("/proc/self/cmdline", sys::O_RDONLY, 0);
+        let fd = fd_u as UInt32;
+        // Read until the kernel reports end of file or the buffer
+        // fills.
+        let total: UInt64 = 0;
+        while total < 4096 {
+            let dst = (&__buf[0] as UInt64 + total) as &Void;
+            let n = try sys::read(fd, dst, 4096 - total);
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        try sys::close(fd);
+        // An argument begins at offset 0 and immediately after every
+        // interior zero byte.
+        __count = 0;
+        let i: UInt64 = 0;
+        let at_start = true;
+        while i < total {
+            let ch = @((&__buf[0] as UInt64 + i) as &Char);
+            if at_start and ch as UInt64 != 0 and __count < 64 {
+                __offsets[__count] = i;
+                __count += 1;
+            }
+            at_start = ch as UInt64 == 0;
+            i += 1;
+        }
+        return __count;
+    }
+
+    // Returns the number of arguments captured by init, or zero
+    // before init has run. The first argument is the path by which
+    // the program was invoked.
+    func count(): UInt64 {
+        return __count;
+    }
+
+    // Returns the i-th argument. The index must be smaller than
+    // count; an out-of-range index yields the zero pointer. The
+    // returned string aliases the snapshot.
+    func get(i: UInt64): Char[] {
+        if i >= __count {
+            return 0;
+        }
+        return ((&__buf[0] as UInt64) + __offsets[i]) as Char[];
+    }
+}

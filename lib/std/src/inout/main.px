@@ -1,0 +1,186 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: inout
+ * Access to the program's standard input and standard output
+ * streams — the default channels for text-based interaction with
+ * the user and the surrounding environment.
+ *
+ * Output functions write NUL-terminated strings to descriptor 1
+ * through a retry loop that absorbs short writes; programs that
+ * emit many small writes should use std::io::Writer to batch them.
+ * Input functions read from descriptor 0 into a heap buffer that
+ * doubles while more input arrives, and hand the caller ownership
+ * of the NUL-terminated result.
+ *
+ * Error policy: every code is errno-style, matching the rest of
+ * the library. Failed writes and reads report EIO (5). End of
+ * input reports 0, which mirrors the read(2) return value that
+ * signals end of file; no errno value exists for end of file, and
+ * since kernel error codes are never zero the value cannot collide
+ * with one.
+ *
+ * Ownership: strings returned by readln and read are heap
+ * allocations owned by the caller; the caller releases them with
+ * free when they are no longer needed. On any failure the
+ * functions release the buffer before reporting the error, so no
+ * allocation is left behind.
+ */
+
+use sys;
+use heap;
+
+// Counts the bytes of the NUL-terminated string `s`, terminator
+// not included.
+func __io_len(s: Char[]): UInt64 {
+    let p = s as UInt64;
+    let n: UInt64 = 0;
+    while @((p + n) as &Char) as UInt64 != 0 {
+        n += 1;
+    }
+    return n;
+}
+
+// Writes `len` bytes starting at `base` to `fd`, retrying after
+// short writes until every byte is accepted. A zero return on a
+// nonempty request means the stream will accept nothing further
+// and is reported as a write error rather than looping forever.
+func __io_write_all(fd: UInt32, base: UInt64, len: UInt64): Void! {
+    let total: UInt64 = 0;
+    while total < len {
+        let n = sys::write(fd, (base + total) as &Void, len - total) catch {
+            return error inout::ERR_WRITE;
+        };
+        if n == 0 {
+            return error inout::ERR_WRITE;
+        }
+        total += n;
+    }
+}
+
+module inout {
+    // errno-style code reported when the underlying write fails.
+    static ERR_WRITE = 5;
+
+    // errno-style code reported when the underlying read fails.
+    static ERR_READ = 5;
+
+    // Code reported when the stream ends before a readln character.
+    // Zero mirrors the read(2) end-of-file return; errno codes are
+    // nonzero, so the value is unambiguous.
+    static ERR_EOF = 0;
+
+    // File descriptor of standard input.
+    static FD_IN = 0;
+
+    // File descriptor of standard output.
+    static FD_OUT = 1;
+
+    // Capacity of the first input buffer; every later capacity
+    // doubles while input keeps arriving.
+    static INIT_CAP = 128;
+
+    // Writes the string `message` to standard output without a
+    // trailing newline; the bytes are emitted in order up to the
+    // null terminator. The caller retains ownership of the string.
+    func print(message: Char[]): Void! {
+        try __io_write_all(FD_OUT, message as UInt64, __io_len(message));
+    }
+
+    // Writes the string `message` to standard output followed by a
+    // single newline byte. The newline travels as its own write so
+    // a failure between the two is reported to the caller; the
+    // message may already be partially emitted at that point.
+    func println(message: Char[]): Void! {
+        try __io_write_all(FD_OUT, message as UInt64, __io_len(message));
+        let nl: Char[1];
+        nl[0] = 10 as Char;
+        try __io_write_all(FD_OUT, &nl[0] as UInt64, 1);
+    }
+
+    // Reads one line from standard input and returns it as a newly
+    // allocated, NUL-terminated string owned by the caller. The
+    // newline delimiter is consumed but not included. When the
+    // stream ends mid-line, the bytes read so far are returned as
+    // the final line; when it ends before any character, ERR_EOF
+    // is reported. The buffer is released before any error is
+    // reported.
+    func readln(): Char[]! {
+        let cap: UInt64 = INIT_CAP;
+        let buf = try heap::alloc(cap);
+        let len: UInt64 = 0;
+        while true {
+            if len == cap {
+                cap *= 2;
+                let grown = heap::realloc(buf, cap) catch |e| {
+                    heap::free(buf);
+                    return error e;
+                };
+                buf = grown;
+            }
+            let base = buf as UInt64;
+            let n = sys::read(FD_IN, (base + len) as &Void, cap - len) catch {
+                heap::free(buf);
+                return error ERR_READ;
+            };
+            if n == 0 {
+                if len == 0 {
+                    heap::free(buf);
+                    return error ERR_EOF;
+                }
+                // Unterminated tail at end of stream: hand it out
+                // as the final line.
+                @((base + len) as &Char) = 0 as Char;
+                return buf as Char[];
+            }
+            // Scan only the freshly read region for the delimiter.
+            let i = len;
+            len += n;
+            while i < len {
+                if @((base + i) as &Char) as UInt64 == 10 {
+                    // Terminate at the delimiter and drop the rest
+                    // of the chunk; a line ends at the first
+                    // newline.
+                    @((base + i) as &Char) = 0 as Char;
+                    return buf as Char[];
+                }
+                i += 1;
+            }
+        }
+    }
+
+    // Reads all available input from standard input until the end
+    // of the stream and returns it as a newly allocated,
+    // NUL-terminated string owned by the caller. Useful for piped
+    // input or a file redirected to standard input. Empty input
+    // yields an empty string, not an error.
+    func read(): Char[]! {
+        let cap: UInt64 = INIT_CAP;
+        let buf = try heap::alloc(cap);
+        let len: UInt64 = 0;
+        while true {
+            if len == cap {
+                cap *= 2;
+                let grown = heap::realloc(buf, cap) catch |e| {
+                    heap::free(buf);
+                    return error e;
+                };
+                buf = grown;
+            }
+            let base = buf as UInt64;
+            let n = sys::read(FD_IN, (base + len) as &Void, cap - len) catch {
+                heap::free(buf);
+                return error ERR_READ;
+            };
+            if n == 0 {
+                // End of stream: terminate what accumulated and
+                // hand ownership to the caller, even when nothing
+                // arrived.
+                @((base + len) as &Char) = 0 as Char;
+                return buf as Char[];
+            }
+            len += n;
+        }
+    }
+}

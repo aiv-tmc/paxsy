@@ -1,0 +1,171 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: log
+ * Application logging with severity levels.
+ *
+ * log filters messages through a module-wide severity threshold and
+ * forwards the survivors to a sink. The default sink writes
+ * "[LEVEL] message" lines to standard error with a retry loop that
+ * absorbs short writes; set_output() replaces it with a
+ * caller-supplied function, which receives the numeric level and the
+ * message and may itself propagate an error.
+ *
+ * State: the threshold and the sink live in file-private variables,
+ * so every function of the module observes the same configuration.
+ * The state starts at LEVEL_INFO with the default sink.
+ *
+ * Error policy: an unrecognised level reports 22 (EINVAL) as
+ * ERR_INVALID_LEVEL; a null sink function reports 22 as
+ * ERR_INVALID_SINK. A failure inside the sink propagates as ERR_IO
+ * (5, EIO); messages below the threshold emit nothing and therefore
+ * cannot fail. fatal() logs and returns normally — the caller decides
+ * whether to propagate an error out of the current function.
+ */
+
+use sys;
+use string;
+
+// Module-wide logger state. Every function of the module reads and
+// writes these variables, so configuration is process-wide.
+let __cur_level: Int32 = 1;
+let __sink: func(level: Int32, message: Char[]): Void!;
+let __sink_valid: Bool = false;
+
+module log {
+    // Severity of a log message, from most to least verbose.
+    static LEVEL_DEBUG = 0;
+    static LEVEL_INFO = 1;
+    static LEVEL_WARNING = 2;
+    static LEVEL_ERROR = 3;
+    static LEVEL_FATAL = 4;
+
+    // errno-style code reported when the sink cannot write a message.
+    static ERR_IO = 5;
+
+    // errno-style code reported for an unrecognised severity level.
+    static ERR_INVALID_LEVEL = 22;
+
+    // errno-style code reported for a sink the module cannot use.
+    static ERR_INVALID_SINK = 22;
+
+    // Sets the minimum level of messages that the logger will emit.
+    // Messages below the threshold are discarded before any output
+    // happens.
+    func set_level(level: Int32): Void! {
+        if level < LEVEL_DEBUG or level > LEVEL_FATAL {
+            return error ERR_INVALID_LEVEL;
+        }
+        __cur_level = level;
+    }
+
+    // Installs `sink` as the output function for every message that
+    // passes the threshold, replacing the default standard-error
+    // writer. A null function value reports ERR_INVALID_SINK. The
+    // sink runs with the logger's callers on the stack, so it must be
+    // cheap and must not call back into this module.
+    func set_output(sink: func(level: Int32, message: Char[]): Void!): Void! {
+        if (sink as UInt64) == 0 {
+            return error ERR_INVALID_SINK;
+        }
+        __sink = sink;
+        __sink_valid = true;
+    }
+
+    // Emits `message` at LEVEL_DEBUG.
+    func debug(message: Char[]): Void! {
+        try __emit(LEVEL_DEBUG, message);
+    }
+
+    // Emits `message` at LEVEL_INFO.
+    func info(message: Char[]): Void! {
+        try __emit(LEVEL_INFO, message);
+    }
+
+    // Emits `message` at LEVEL_WARNING.
+    func warning(message: Char[]): Void! {
+        try __emit(LEVEL_WARNING, message);
+    }
+
+    // Emits `message` at LEVEL_ERROR.
+    func error(message: Char[]): Void! {
+        try __emit(LEVEL_ERROR, message);
+    }
+
+    // Emits `message` at LEVEL_FATAL and returns normally. The caller
+    // is responsible for propagating an error with `return error` if
+    // the failure is to be reported to main.
+    func fatal(message: Char[]): Void! {
+        try __emit(LEVEL_FATAL, message);
+    }
+}
+
+// The single dispatch point: discard messages below the threshold,
+// then hand the rest to the installed sink or the default writer.
+func __emit(level: Int32, message: Char[]): Void! {
+    if level < __cur_level {
+        return;
+    }
+    if __sink_valid {
+        try __sink(level, message);
+        return;
+    }
+    try __default_sink(level, message);
+}
+
+// Writes "[LEVEL] message\n" to standard error, retrying after short
+// writes, and maps any kernel failure to ERR_IO.
+func __default_sink(level: Int32, message: Char[]): Void! {
+    __write_str(__level_name(level)) catch {
+        return error log::ERR_IO;
+    };
+    __write_str("] ") catch {
+        return error log::ERR_IO;
+    };
+    __write_str(message) catch {
+        return error log::ERR_IO;
+    };
+    __write_all(10 as UInt8) catch {
+        return error log::ERR_IO;
+    };
+}
+
+// Maps a severity level to its tag in "[LEVEL" form; the argument is
+// always in range because __emit never sees other values.
+func __level_name(level: Int32): Char[] {
+    if level == 0 { return "[DEBUG"; }
+    if level == 1 { return "[INFO"; }
+    if level == 2 { return "[WARNING"; }
+    if level == 3 { return "[ERROR"; }
+    return "[FATAL";
+}
+
+// Writes one byte to standard error, retrying while the kernel
+// accepts only part of the request.
+func __write_all(b: UInt8): Void! {
+    let buf: UInt8[1];
+    buf[0] = b;
+    try __write_fd(2, &buf[0] as UInt64, 1);
+}
+
+// Writes a NUL-terminated string to standard error in a single retry
+// loop.
+func __write_str(s: Char[]): Void! {
+    try __write_fd(2, s as UInt64, string::len(s));
+}
+
+// Writes exactly `len` bytes to `fd`, retrying after short writes,
+// and reports any kernel error to the caller.
+func __write_fd(fd: UInt32, base: UInt64, len: UInt64): Void! {
+    let total: UInt64 = 0;
+    while total < len {
+        let n = sys::write(fd, (base + total) as &Void, len - total) catch {
+            return error log::ERR_IO;
+        };
+        if n == 0 {
+            return error log::ERR_IO;
+        }
+        total += n;
+    }
+}

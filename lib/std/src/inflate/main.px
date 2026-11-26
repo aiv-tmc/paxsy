@@ -1,0 +1,64 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: inflate
+ * DEFLATE decompression (RFC 1951).
+ *
+ * inflate() unpacks one raw DEFLATE stream — the compression format
+ * at the heart of gzip, zlib, and zip members — into a caller buffer
+ * and returns the number of bytes written. The decoder follows the
+ * classic count/symbols canonical-Huffman design: each code is
+ * described by how many symbols use each code length, and decoding
+ * walks the lengths one bit at a time, narrowing the candidate range
+ * until one symbol remains. No per-length lookup tables are built,
+ * which keeps the code and its stack footprint small at the cost of a
+ * few extra bit reads per symbol.
+ *
+ * The block-decoding machinery — the Huffman table, the LSB-first bit
+ * loader, and the three block decoders — lives in the internal module
+ * inflate_block; this file holds only the block loop.
+ *
+ * Error codes: 22 (EINVAL) covers every malformed stream — bad block
+ * type, over-subscribed or invalid Huffman codes, and references past
+ * the start of the output; 27 (EFBIG) reports a destination too small
+ * for the unpacked content.
+ */
+
+use inflate_block;
+
+module inflate {
+    // errno-style codes for malformed streams and output capacity.
+    static ERR_MALFORMED = 22;
+    static ERR_DST_TOO_SMALL = 27;
+
+    // Decompresses the DEFLATE stream at src[0..src_len] into
+    // dst[0..dst_cap] and returns the unpacked byte count.
+    func inflate(src: Char[], src_len: UInt64, dst: Char[], dst_cap: UInt64): UInt64! {
+        let s = inflate_block::Inflator {(src as UInt64) as &UInt8, src_len, 0, 0, 0,
+                                         (dst as UInt64) as &UInt8, dst_cap, 0};
+        while true {
+            let last = try inflate_block::bits(&s, 1);
+            let btype = try inflate_block::bits(&s, 2);
+            if btype == 0 {
+                try inflate_block::stored(&s);
+            } else if btype == 1 {
+                let lit: inflate_block::Huffman;
+                let dist: inflate_block::Huffman;
+                try inflate_block::fixed(&lit, &dist);
+                try inflate_block::codes(&s, &lit, &dist);
+            } else if btype == 2 {
+                let lit: inflate_block::Huffman;
+                let dist: inflate_block::Huffman;
+                try inflate_block::dynamic(&s, &lit, &dist);
+                try inflate_block::codes(&s, &lit, &dist);
+            } else {
+                return error ERR_MALFORMED;
+            }
+            if last == 1 {
+                break;
+            }
+        }
+        return s.out_pos;
+    }
+}

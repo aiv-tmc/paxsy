@@ -1,0 +1,164 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: regex_engine (internal)
+ * Backtracking virtual machine for the regular expression
+ * modules.
+ *
+ * The engine executes a compiled program against a subject string
+ * with an explicit DFS stack of (pc, sp, saves) frames, so
+ * pathological patterns grow the heap stack instead of the native
+ * call stack. A SPLIT pushes its fallback branch with a snapshot
+ * of every SAVE slot and continues along its preferred branch;
+ * when a branch dies, the most recent alternative is popped and
+ * its slots are restored, which is the backtracking step.
+ *
+ * __run reports 1 when the program reaches MATCH and fills the
+ * caller's SAVE slots, 0 when every alternative is exhausted, and
+ * REGEX_ERR_MATCH when a stack allocation fails; the stack is
+ * released on every path.
+ */
+
+use heap;
+use mem;
+use regex_types;
+use regex_class;
+
+// Pushes one backtracking alternative onto the VM stack, growing
+// the stack when full. The alternative carries a snapshot of
+// every SAVE slot.
+func __spush(v: &regex_types::VM, pc: UInt64, sp: UInt64, sv: &UInt64): Void! {
+    if (@v).slen == (@v).scap {
+        let vv = @v;
+        vv.scap *= 2;
+        let grown = heap::realloc(vv.stk as &Void, vv.scap * regex_types::FRAME) catch {
+            @v = vv;
+            return error regex_types::REGEX_ERR_MATCH;
+        };
+        vv.stk = grown as UInt64;
+        @v = vv;
+    }
+    let f = (@v).stk + (@v).slen * regex_types::FRAME;
+    @(f as &UInt64) = pc;
+    @((f + 8) as &UInt64) = sp;
+    mem::copy((f + 16) as &Void, sv as &Void, regex_types::SAVE_SLOTS * 8);
+    (@v).slen = (@v).slen + 1;
+}
+
+// Pops one backtracking alternative, restoring its SAVE slots,
+// and reports whether an alternative was available.
+func __spop(v: &regex_types::VM, pc_out: &UInt64, sp_out: &UInt64, sv: &UInt64): Bool {
+    if (@v).slen == 0 {
+        return false;
+    }
+    (@v).slen = (@v).slen - 1;
+    let f = (@v).stk + (@v).slen * regex_types::FRAME;
+    @pc_out = @(f as &UInt64);
+    @sp_out = @((f + 8) as &UInt64);
+    mem::copy(sv as &Void, (f + 16) as &Void, regex_types::SAVE_SLOTS * 8);
+    return true;
+}
+
+// Resets every SAVE slot to the unset sentinel.
+func __saves_clear(sv: &UInt64): Void {
+    let k: UInt64 = 0;
+    while k < regex_types::SAVE_SLOTS {
+        @(((sv as UInt64) + k * 8) as &UInt64) = regex_types::UNSET;
+        k += 1;
+    }
+}
+
+module regex_engine {
+    // Runs `prog` against text[start..tlen]. On a match the
+    // `saves` array receives the SAVE slots (slot 1 is the end
+    // offset of the whole match); it is cleared to the unset
+    // sentinel on entry.
+    func __run(prog: &Void, text: Char[], start: UInt64, tlen: UInt64, saves: &UInt64): UInt64! {
+        let base = prog as UInt64;
+        let tb = text as UInt64;
+        let svb = saves as UInt64;
+        __saves_clear(saves);
+        let v = regex_types::VM {(try heap::alloc(regex_types::FRAME * 64)) as UInt64, 0, 64};
+        // The stack is released whichever way the run ends.
+        errdefer heap::free(v.stk as &Void);
+        try __spush(&v, 0, start, saves);
+        let running = true;
+        while running {
+            let pc: UInt64;
+            let sp: UInt64;
+            if not __spop(&v, &pc, &sp, saves) {
+                running = false;
+            } else {
+                let go = true;
+                while go {
+                    let p = base + pc * regex_types::INST;
+                    let op = @(p as &UInt64);
+                    if op == regex_types::OP_CHAR {
+                        let a = @((p + 8) as &UInt64);
+                        if sp < tlen and @((tb + sp) as &Char) as UInt64 == a {
+                            sp += 1;
+                            pc += 1;
+                        } else {
+                            go = false;
+                        }
+                    } else if op == regex_types::OP_ANY {
+                        if sp < tlen {
+                            sp += 1;
+                            pc += 1;
+                        } else {
+                            go = false;
+                        }
+                    } else if op == regex_types::OP_CLASS {
+                        let a = @((p + 8) as &UInt64);
+                        let b = @((p + 16) as &UInt64);
+                        if sp < tlen {
+                            let hit = regex_class::__class_test(a, @((tb + sp) as &Char) as UInt64) == 1;
+                            if b == 1 {
+                                hit = not hit;
+                            }
+                            if hit {
+                                sp += 1;
+                                pc += 1;
+                            } else {
+                                go = false;
+                            }
+                        } else {
+                            go = false;
+                        }
+                    } else if op == regex_types::OP_BOL {
+                        if sp == 0 {
+                            pc += 1;
+                        } else {
+                            go = false;
+                        }
+                    } else if op == regex_types::OP_EOL {
+                        if sp >= tlen {
+                            pc += 1;
+                        } else {
+                            go = false;
+                        }
+                    } else if op == regex_types::OP_SAVE {
+                        let a = @((p + 8) as &UInt64);
+                        @((svb + a * 8) as &UInt64) = sp;
+                        pc += 1;
+                    } else if op == regex_types::OP_JMP {
+                        pc = @((p + 8) as &UInt64);
+                    } else if op == regex_types::OP_SPLIT {
+                        let a = @((p + 8) as &UInt64);
+                        let b = @((p + 16) as &UInt64);
+                        try __spush(&v, b, sp, saves);
+                        pc = a;
+                    } else {
+                        // OP_MATCH: the working slots hold the
+                        // result.
+                        heap::free(v.stk as &Void);
+                        return 1;
+                    }
+                }
+            }
+        }
+        heap::free(v.stk as &Void);
+        return 0;
+    }
+}

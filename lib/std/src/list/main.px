@@ -1,0 +1,257 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: list
+ * List, a doubly linked list storing elements of any type.
+ *
+ * Every node is one allocation: a 32-byte header area holding the
+ * Node struct (prev, next, data — 24 bytes) followed by the payload
+ * at offset 32, which keeps the payload 16-byte aligned. The data
+ * field of Node points at the payload inside the same block, so
+ * releasing the block releases the node and its element together.
+ *
+ * Nodes of a list made with make come from the heap and are released
+ * individually by every removing operation. Nodes of a list made with
+ * make_in_pool come from the supplied pool; pop and remove_at return
+ * them to the pool, while clear and destroy leave pool blocks to the
+ * pool's own bulk reclamation and only unlink them. The pool field is
+ * zero for a heap list.
+ *
+ * Indexed access walks the list from the head and takes time
+ * proportional to the index.
+ *
+ * Ownership: the caller of make owns the list; destroy (usually
+ * scheduled with defer or errdefer) releases it.
+ */
+
+use heap;
+
+module list {
+    // A doubly linked list.
+    static List = Struct {
+        head: &Node,
+        tail: &Node,
+        len: UInt64,
+        elem_size: UInt64,
+        elem_align: UInt64,
+        pool: &Void,
+    };
+
+    // One list node; the payload lives in the same block at offset
+    // NODE_HDR and data points at it.
+    static Node = Struct {
+        prev: &Node,
+        next: &Node,
+        data: &Void,
+    };
+
+    // Returned when a node allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returned when an index is not less than len or an operation
+    // requires a non-empty list.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // Offset of the payload inside a node block: the 24-byte Node
+    // struct padded up to a 16-byte boundary.
+    static NODE_HDR = 32;
+
+    // Returns an empty list storing elements of type T whose nodes
+    // come from the heap.
+    func make(static T): List = List {0, 0, 0, sizeof(T), alignof(T), 0};
+
+    // Returns an empty list storing elements of type T whose nodes
+    // come from `pool`. The pool must outlive the list, and its block
+    // size must cover NODE_HDR plus an aligned T payload.
+    func make_in_pool(static T, pool: &heap::Pool): List {
+        return List {0, 0, 0, sizeof(T), alignof(T), pool as &Void};
+    }
+
+    // Allocates one node block from the list's node source and links
+    // its payload pointer.
+    func __new_node(l: &List): &Node! {
+        let block: &Void = 0;
+        if (@l).pool != 0 {
+            block = try heap::pool_alloc((@l).pool as &heap::Pool);
+        } else {
+            block = try heap::alloc(NODE_HDR + (@l).elem_size);
+        }
+        let node = block as &Node;
+        (@node).prev = 0;
+        (@node).next = 0;
+        (@node).data = (block as UInt64 + NODE_HDR) as &Void;
+        return node;
+    }
+
+    // Returns a node block to the source it came from.
+    func __drop_node(l: &List, node: &Node): Void {
+        if (@l).pool != 0 {
+            heap::pool_free((@l).pool as &heap::Pool, node as &Void);
+        } else {
+            heap::free(node as &Void);
+        }
+    }
+
+    // Returns the node at index `i` by walking from the head; the
+    // caller guarantees i < len.
+    func __node_at(l: &List, i: UInt64): &Node {
+        let node = (@l).head;
+        let k: UInt64 = 0;
+        while k < i {
+            node = (@node).next;
+            k += 1;
+        }
+        return node;
+    }
+
+    // Splices `node` out of the list without releasing it.
+    func __unlink(l: &List, node: &Node): Void {
+        if (@node).prev != 0 {
+            (@((@node).prev)).next = (@node).next;
+        } else {
+            (@l).head = (@node).next;
+        }
+        if (@node).next != 0 {
+            (@((@node).next)).prev = (@node).prev;
+        } else {
+            (@l).tail = (@node).prev;
+        }
+        (@l).len -= 1;
+    }
+
+    // Appends `v` at the back of the list.
+    func push_back(static T, l: &List, v: T): Void! {
+        let node = try __new_node(l);
+        @(((@node).data) as &T) = v;
+        (@node).prev = (@l).tail;
+        if (@l).tail != 0 {
+            (@((@l).tail)).next = node;
+        } else {
+            (@l).head = node;
+        }
+        (@l).tail = node;
+        (@l).len += 1;
+    }
+
+    // Appends `v` at the front of the list.
+    func push_front(static T, l: &List, v: T): Void! {
+        let node = try __new_node(l);
+        @(((@node).data) as &T) = v;
+        (@node).next = (@l).head;
+        if (@l).head != 0 {
+            (@((@l).head)).prev = node;
+        } else {
+            (@l).tail = node;
+        }
+        (@l).head = node;
+        (@l).len += 1;
+    }
+
+    // Removes and returns the first element.
+    func pop_front(static T, l: &List): T! {
+        if (@l).len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        let node = (@l).head;
+        let v = @(((@node).data) as &T);
+        __unlink(l, node);
+        __drop_node(l, node);
+        return v;
+    }
+
+    // Removes and returns the last element.
+    func pop_back(static T, l: &List): T! {
+        if (@l).len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        let node = (@l).tail;
+        let v = @(((@node).data) as &T);
+        __unlink(l, node);
+        __drop_node(l, node);
+        return v;
+    }
+
+    // Returns the first element without removing it.
+    func front(static T, l: &List): T! {
+        if (@l).len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return @(((@((@l).head)).data) as &T);
+    }
+
+    // Returns the last element without removing it.
+    func back(static T, l: &List): T! {
+        if (@l).len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return @(((@((@l).tail)).data) as &T);
+    }
+
+    // Returns the element at index `i`; takes time proportional to
+    // `i`.
+    func get(static T, l: &List, i: UInt64): T! {
+        if i >= (@l).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return @(((@__node_at(l, i)).data) as &T);
+    }
+
+    // Inserts `v` before index `i`, which may equal len.
+    func insert(static T, l: &List, i: UInt64, v: T): Void! {
+        if i > (@l).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        if i == (@l).len {
+            try push_back(T, l, v);
+            return;
+        }
+        if i == 0 {
+            try push_front(T, l, v);
+            return;
+        }
+        let at = __node_at(l, i);
+        let node = try __new_node(l);
+        @(((@node).data) as &T) = v;
+        (@node).prev = (@at).prev;
+        (@node).next = at;
+        (@((@at).prev)).next = node;
+        (@at).prev = node;
+        (@l).len += 1;
+    }
+
+    // Removes and returns the element at index `i`.
+    func remove_at(static T, l: &List, i: UInt64): T! {
+        if i >= (@l).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        let node = __node_at(l, i);
+        let v = @(((@node).data) as &T);
+        __unlink(l, node);
+        __drop_node(l, node);
+        return v;
+    }
+
+    // Unlinks every node and resets the length to zero. Heap nodes
+    // are released individually; pool nodes stay with their pool,
+    // which reclaims them in bulk.
+    func clear(l: &List): Void {
+        let node = (@l).head;
+        while node != 0 {
+            let next = (@node).next;
+            if (@l).pool == 0 {
+                heap::free(node as &Void);
+            }
+            node = next;
+        }
+        (@l).head = 0;
+        (@l).tail = 0;
+        (@l).len = 0;
+    }
+
+    // Releases every node (heap lists only) and returns the list to
+    // the empty state produced by make.
+    func destroy(l: &List): Void {
+        clear(l);
+    }
+}

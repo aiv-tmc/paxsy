@@ -1,0 +1,319 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: net_dns (internal)
+ * DNS resolution machinery behind net::resolve.
+ *
+ * resolve() turns a hostname into an IPv4 address through the classic
+ * UDP exchange with a resolver: one query datagram carrying an id, the
+ * recursion-desired flag, and a single A-record question; one answer
+ * datagram carrying resource records. The query is assembled byte by
+ * byte in a stack buffer — twelve header bytes, the name as
+ * length-prefixed labels, and the type/class words — and the answer is
+ * parsed strictly: the id must match, the response bit must be set,
+ * and every field offset is checked against the received length before
+ * it is used. Answer names are only skipped, never materialised, which
+ * sidesteps the name-compression pointers entirely: a label length
+ * with the two high bits set consumes exactly two bytes, anything else
+ * consumes length plus one.
+ *
+ * The first A record (type 1, class 1) of the answer section wins and
+ * is returned in the packed form of net::addr_ipv4: the four wire
+ * bytes read in little-endian order, so the value's memory image is
+ * exactly the address the kernel expects. Other record types are
+ * walked past by their declared data length, so mixed answers do not
+ * confuse the walk. The socket's receive deadline bounds each wait;
+ * datagrams with a foreign id are discarded and the wait restarts,
+ * because late replies to earlier queries share the wildcard port on
+ * busy machines.
+ *
+ * Scope: A records over UDP only, no TCP fallback for truncated
+ * answers, no AAAA/TXT/other types, and no resolv.conf parsing — the
+ * query goes to a well-known open resolver. Hostname labels must fit
+ * the wire limits: 63 bytes per label, 255 total.
+ *
+ * The module is self-contained: it carries its own syscall staging
+ * cells rather than importing the net module it serves, which keeps
+ * the dependency direction one-way.
+ */
+
+use sys;
+
+// errno-style codes: malformed packets, exhausted patience, bad names.
+static __ERR_PACKET = 22;
+static __ERR_TIMEOUT = 110;
+static __ERR_NAME = 22;
+
+// The resolver's address (8.8.8.8) and service port, and the receive
+// deadline installed on the query socket.
+static __RESOLVER_IP = 8;
+static __RESOLVER_PORT = 53;
+static __TIMEOUT_SEC = 3;
+
+// Staging cells shared with the assembly sequences below.
+let __dns_num: UInt64;
+let __dns_a1: UInt64;
+let __dns_a2: UInt64;
+let __dns_a3: UInt64;
+let __dns_a4: UInt64;
+let __dns_a5: UInt64;
+let __dns_a6: UInt64;
+let __dns_ret: UInt64;
+
+// Query id source: advanced by an odd stride before every query, so
+// ids cycle through all 16-bit values and concurrent queries from this
+// process never share one.
+let __dns_next_id: UInt64 = 23255;
+
+// Executes a three-argument socket-family system call.
+func __dns3(): UInt64 {
+    volatile asm "mov rax, [__dns_num]";
+    volatile asm "mov rdi, [__dns_a1]";
+    volatile asm "mov rsi, [__dns_a2]";
+    volatile asm "mov rdx, [__dns_a3]";
+    volatile asm "syscall";
+    volatile asm "mov [__dns_ret], rax";
+    return __dns_ret;
+}
+
+// Executes a six-argument socket-family system call; also serves the
+// five-argument setsockopt with a zeroed last register.
+func __dns6(): UInt64 {
+    volatile asm "mov rax, [__dns_num]";
+    volatile asm "mov rdi, [__dns_a1]";
+    volatile asm "mov rsi, [__dns_a2]";
+    volatile asm "mov rdx, [__dns_a3]";
+    volatile asm "mov r10, [__dns_a4]";
+    volatile asm "mov r8, [__dns_a5]";
+    volatile asm "mov r9, [__dns_a6]";
+    volatile asm "syscall";
+    volatile asm "mov [__dns_ret], rax";
+    return __dns_ret;
+}
+
+// Converts a raw kernel return value into the error contract: negative
+// values in -4095..-1 become `error <errno>`, anything else passes
+// through.
+func __dns_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+// Reads a big-endian 16-bit word at offset `off` of `b`.
+func __be16(b: UInt64, off: UInt64): UInt64 {
+    return ((@((b + off) as &UInt8) as UInt64) << 8) $ (@((b + off + 1) as &UInt8) as UInt64);
+}
+
+// Writes a big-endian 16-bit word at offset `off` of `b`.
+func __put16(b: UInt64, off: UInt64, v: UInt64): Void {
+    @((b + off) as &UInt8) = ((v >> 8) & 255) as UInt8;
+    @((b + off + 1) as &UInt8) = (v & 255) as UInt8;
+}
+
+// Skips one encoded name starting at offset `off` of a packet of `len`
+// bytes, following the compression-pointer rule (two high bits set
+// means a two-byte pointer). Returns the first offset past the name.
+func __skip_name(b: UInt64, off: UInt64, len: UInt64): UInt64! {
+    let pos = off;
+    while true {
+        if pos >= len {
+            return error __ERR_PACKET;
+        }
+        let l = @((b + pos) as &UInt8);
+        if l == 0 {
+            return pos + 1;
+        }
+        if (l & 0xC0) != 0 {
+            if pos + 2 > len {
+                return error __ERR_PACKET;
+            }
+            return pos + 2;
+        }
+        pos += (l as UInt64) + 1;
+    }
+}
+
+// Closes the query socket on an error path, swallowing any close
+// failure to preserve the original error.
+func __close_fd(fd: UInt64): Void {
+    sys::close(fd as UInt32) catch |c| { };
+}
+
+module net_dns {
+    // Resolves `name` to its first IPv4 address through the resolver,
+    // in the packed form of net::addr_ipv4. Malformed names report 22;
+    // an unanswered query reports 110 (ETIMEDOUT); malformed or
+    // answer-less responses report 22.
+    func resolve(name: Char[]): UInt32! {
+        __dns_next_id += 38455;
+        let id = __dns_next_id & 0xFFFF;
+        let buf: UInt8[512];
+        let b = &buf[0] as UInt64;
+        // Header: id, the recursion-desired flag, one question, no
+        // other sections.
+        __put16(b, 0, id);
+        __put16(b, 2, 0x0100);
+        __put16(b, 4, 1);
+        __put16(b, 6, 0);
+        __put16(b, 8, 0);
+        __put16(b, 10, 0);
+        // Question name: dot-separated labels, each length-prefixed,
+        // zero-terminated.
+        let p = name as UInt64;
+        let pos: UInt64 = 12;
+        let label_start: UInt64 = 0;
+        let name_len: UInt64 = 0;
+        while true {
+            let c = @((p + label_start + name_len) as &UInt8);
+            if c == 0 {
+                break;
+            }
+            if c == 46 {
+                if name_len == 0 or name_len > 63 or pos + name_len + 1 >= 512 {
+                    return error __ERR_NAME;
+                }
+                @((b + pos) as &UInt8) = name_len as UInt8;
+                let k: UInt64 = 0;
+                while k < name_len {
+                    @((b + pos + 1 + k) as &UInt8) = @((p + label_start + k) as &UInt8);
+                    k += 1;
+                }
+                pos += name_len + 1;
+                label_start += name_len + 1;
+                name_len = 0;
+            } else {
+                name_len += 1;
+                if label_start + name_len > 255 {
+                    return error __ERR_NAME;
+                }
+            }
+        }
+        if name_len == 0 or name_len > 63 or pos + 5 >= 512 {
+            // A trailing or empty label is not a hostname.
+            return error __ERR_NAME;
+        }
+        @((b + pos) as &UInt8) = name_len as UInt8;
+        let k: UInt64 = 0;
+        while k < name_len {
+            @((b + pos + 1 + k) as &UInt8) = @((p + label_start + k) as &UInt8);
+            k += 1;
+        }
+        pos += name_len + 1;
+        @((b + pos) as &UInt8) = 0 as UInt8;
+        pos += 1;
+        // QTYPE A, QCLASS IN.
+        __put16(b, pos, 1);
+        __put16(b, pos + 2, 1);
+        pos += 4;
+
+        // One datagram socket carries the exchange; the first send
+        // binds an ephemeral port implicitly.
+        __dns_num = 41;
+        __dns_a1 = 2;
+        __dns_a2 = 2;
+        __dns_a3 = 0;
+        let fd = try __dns_check(__dns3());
+        errdefer { __close_fd(fd); }
+        // Bound each wait on the answer so a silent resolver cannot
+        // hang the caller.
+        let tv: UInt64[2];
+        tv[0] = __TIMEOUT_SEC;
+        tv[1] = 0;
+        __dns_num = 54;
+        __dns_a1 = fd;
+        __dns_a2 = 1;
+        __dns_a3 = 20;
+        __dns_a4 = &tv[0] as UInt64;
+        __dns_a5 = 16;
+        __dns_a6 = 0;
+        try __dns_check(__dns6());
+        // Resolver address: family, port, and 8.8.8.8 in wire order.
+        let sa: UInt8[16];
+        let z: UInt64 = 0;
+        while z < 16 {
+            sa[z] = 0 as UInt8;
+            z += 1;
+        }
+        sa[0] = 2 as UInt8;
+        sa[2] = (__RESOLVER_PORT / 256) as UInt8;
+        sa[3] = (__RESOLVER_PORT % 256) as UInt8;
+        sa[4] = __RESOLVER_IP as UInt8;
+        sa[5] = __RESOLVER_IP as UInt8;
+        sa[6] = __RESOLVER_IP as UInt8;
+        sa[7] = __RESOLVER_IP as UInt8;
+        __dns_num = 44;
+        __dns_a1 = fd;
+        __dns_a2 = b;
+        __dns_a3 = pos;
+        __dns_a4 = 0;
+        __dns_a5 = &sa[0] as UInt64;
+        __dns_a6 = 16;
+        try __dns_check(__dns6());
+
+        while true {
+            __dns_num = 45;
+            __dns_a1 = fd;
+            __dns_a2 = b;
+            __dns_a3 = 512;
+            __dns_a4 = 0;
+            __dns_a5 = 0;
+            __dns_a6 = 0;
+            let n = __dns_check(__dns6()) catch |e| {
+                if (e as UInt64) == 11 {
+                    return error __ERR_TIMEOUT;
+                }
+                return error e;
+            };
+            if n < 12 {
+                continue;
+            }
+            if __be16(b, 0) != id {
+                // Somebody else's datagram.
+                continue;
+            }
+            if (@((b + 2) as &UInt8) & 0x80) == 0 {
+                // Not a response.
+                continue;
+            }
+            let answers = __be16(b, 6);
+            // Skip the question section to reach the answers.
+            let cur = __skip_name(b, 12, n) catch { continue; };
+            if cur + 4 > n {
+                continue;
+            }
+            cur += 4;
+            let ip: UInt32 = 0;
+            let i: UInt64 = 0;
+            while i < answers {
+                let name_end = __skip_name(b, cur, n) catch { break; };
+                if name_end + 10 > n {
+                    break;
+                }
+                let rtype = __be16(b, name_end);
+                let rclass = __be16(b, name_end + 2);
+                let rdlen = __be16(b, name_end + 8);
+                let rdata = name_end + 10;
+                if rdata + rdlen > n {
+                    break;
+                }
+                if rtype == 1 and rclass == 1 and rdlen == 4 {
+                    // The four wire bytes read little-endian: the
+                    // packed address form of net::addr_ipv4.
+                    ip = @((b + rdata) as &UInt32);
+                    break;
+                }
+                cur = rdata + rdlen;
+                i += 1;
+            }
+            if ip == 0 {
+                return error __ERR_PACKET;
+            }
+            __close_fd(fd);
+            return ip;
+        }
+    }
+}

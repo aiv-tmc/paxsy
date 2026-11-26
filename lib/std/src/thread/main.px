@@ -1,0 +1,181 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: thread
+ * Direct access to Linux clone tasks.
+ *
+ * A task receives a fresh stack and shares the process address
+ * space and selected process resources with its parent; it has its
+ * own task identifier and is joined with wait4. The clone flags
+ * and the wait model define a shared-address-space task rather
+ * than a POSIX pthread object. The module is deliberately
+ * low-level; programs that can use the language-level concurrency
+ * primitives should prefer them.
+ *
+ * Spawning needs a raw clone because the child continues on a
+ * fresh stack: a normal function epilogue there would pop a bogus
+ * frame, so spawn inlines the whole syscall sequence and, in the
+ * child branch, switches rsp and jmps straight to the trampoline —
+ * the child never runs Paxsy code that returns.
+ *
+ * Handshake: the entry function travels through a file-private
+ * cell (__t_fn) and a one-spawn-at-a-time flag (__t_ready). The
+ * parent of each spawn waits for the previous child to copy the
+ * entry out of the cell before overwriting it, so concurrent
+ * spawns cannot overwrite each other's entry function.
+ *
+ * Resources: a thread owns its 1 MiB stack; join() releases it
+ * after the thread exits. Exit codes travel through the low byte
+ * of the wait4 status word.
+ */
+
+use heap;
+use sys;
+
+// Staging cells for the inlined clone in spawn. They mirror the
+// sys module's cells; spawn needs its own because the trampoline
+// symbol must stay visible to this file's assembly.
+let __t_num: UInt64;
+let __t_a1: UInt64;
+let __t_a2: UInt64;
+let __t_a3: UInt64;
+let __t_a4: UInt64;
+let __t_a5: UInt64;
+let __t_ret: UInt64;
+
+// Handshake cells for the next spawn, described in the file header.
+let __t_fn: func(): UInt64;
+let __t_stack: UInt64;
+let __t_ready: UInt64;
+
+// First frame of a spawned thread, entered by a jmp from spawn
+// with rsp already on the new stack. Hands the flag back to the
+// parent, runs the entry function, and terminates the thread with
+// its return value. The never-true reference at the end binds the
+// symbol for the assembler, which is the only caller of this
+// function.
+func __t_trampoline(): UInt64 {
+    __t_ready = 0;
+    let f = __t_fn;
+    let rc = f();
+    sys::exit(rc as Int32);
+    if __t_ready == 18446744073709551615 {
+        return __t_trampoline();
+    }
+    return 0;
+}
+
+module thread {
+    // Handle to a spawned clone task: the kernel task id plus the
+    // 1 MiB stack the task owns. The task must be joined exactly
+    // once.
+    static Thread = Struct {
+        tid: UInt64,
+        stack: &Void,
+    };
+
+    // errno-style code reported when the kernel refuses a spawn.
+    static THREAD_ERR_CANNOT_CREATE = 11;
+
+    // errno-style code reported when a join cannot reach the
+    // thread.
+    static THREAD_ERR_CANNOT_JOIN = 3;
+
+    // errno-style code reported for a zero or otherwise invalid
+    // handle.
+    static THREAD_ERR_INVALID_THREAD = 22;
+
+    // Stack size granted to every spawned thread.
+    static STACK_SIZE = 1048576;
+
+    // clone(2) flag values for a thread: shared address space,
+    // file system state, file descriptors, and signal handlers,
+    // plus CLONE_THREAD so the task joins the caller's thread
+    // group.
+    static CLONE_VM = 256;
+    static CLONE_FS = 512;
+    static CLONE_FILES = 1024;
+    static CLONE_SIGHAND = 2048;
+    static CLONE_THREAD = 65536;
+
+    // Spawns a thread that runs `entry` on its own stack and
+    // returns its handle. The entry function's return value
+    // becomes the thread's exit code. The stack is released when
+    // the spawn is refused.
+    func spawn(entry: func(): UInt64): Thread! {
+        let stack = try heap::alloc(STACK_SIZE);
+        let top = (stack as UInt64) + STACK_SIZE;
+        top = top - (top % 16);
+        while __t_ready != 0 {
+            // Another spawn is still handing its entry to its
+            // child; wait for the cell instead of overwriting it.
+            sys::sched_yield() catch {
+            };
+        }
+        __t_fn = entry;
+        __t_stack = top - 8;
+        __t_ready = 1;
+        __t_num = 56;
+        __t_a1 = CLONE_VM $ CLONE_FS $ CLONE_FILES $ CLONE_SIGHAND $ CLONE_THREAD;
+        __t_a2 = top - 8;
+        __t_a3 = 0;
+        __t_a4 = 0;
+        __t_a5 = 0;
+        volatile asm "mov rax, [__t_num]";
+        volatile asm "mov rdi, [__t_a1]";
+        volatile asm "mov rsi, [__t_a2]";
+        volatile asm "mov rdx, [__t_a3]";
+        volatile asm "mov r10, [__t_a4]";
+        volatile asm "mov r8, [__t_a5]";
+        volatile asm "syscall";
+        volatile asm "mov [__t_ret], rax";
+        if __t_ret == 0 {
+            // Child: switch to the new stack and jump straight into
+            // the trampoline; this path never returns to Paxsy
+            // code.
+            volatile asm "mov rsp, [__t_stack]";
+            volatile asm "mov rbp, rsp";
+            volatile asm "jmp __t_trampoline";
+        }
+        while __t_ready != 0 {
+            // Wait until the child has copied the entry out of the
+            // cell before reporting the handle.
+            sys::sched_yield() catch {
+            };
+        }
+        if (__t_ret as Int64) < 0 {
+            // The kernel refused: release the stack and report.
+            heap::free(stack);
+            return error THREAD_ERR_CANNOT_CREATE;
+        }
+        return Thread {__t_ret, stack};
+    }
+
+    // Waits for `t` to exit, releases its stack, and returns the
+    // low byte of its exit status.
+    func join(t: Thread): UInt64! {
+        if t.tid == 0 {
+            return error THREAD_ERR_INVALID_THREAD;
+        }
+        let st: UInt64[1];
+        sys::wait4(t.tid, &st[0] as &Void, 0, 0) catch {
+            return error THREAD_ERR_CANNOT_JOIN;
+        };
+        heap::free(t.stack);
+        return st[0] & 255;
+    }
+
+    // Yields the CPU to the scheduler.
+    func yield(): Void {
+        sys::sched_yield() catch {
+            // The kernel never fails sched_yield.
+            return;
+        };
+    }
+
+    // Returns the kernel thread id of the calling thread.
+    func current(): UInt64! {
+        return sys::gettid();
+    }
+}

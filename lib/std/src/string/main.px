@@ -1,0 +1,298 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: string
+ * Operations over NUL-terminated strings of Char code units.
+ *
+ * The functions treat strings as read-only input and never allocate.
+ * Functions that produce a new string write into a caller-supplied
+ * buffer and report error 36 (ENAMETOOLONG) when the buffer is too
+ * small, so callers never have to guess output sizes. Index-returning
+ * searches return the offset of the first hit, or the string length
+ * when nothing matches; every such result is a valid insertion or
+ * split point, which keeps the usual "not found" check to a single
+ * comparison. Comparison and case conversion are ASCII-only: case
+ * folding touches A-Z and a-z, and ordering is unsigned code-unit
+ * lexical.
+ */
+
+use mem;
+
+module string {
+    // Returned when a caller-supplied buffer cannot hold the result.
+    static ERR_NAME_TOO_LONG = 36;
+
+    // Returns the number of code units before the NUL terminator of
+    // `s`.
+    func len(s: Char[]): UInt64 {
+        let p = s as UInt64;
+        let i: UInt64 = 0;
+        while true {
+            if @((p + i) as &Char) == 0 as Char {
+                break;
+            }
+            i += 1;
+        }
+        return i;
+    }
+
+    // Counts the bytes before the NUL terminator of `s`. Alias of
+    // `len` kept for the classic C-style naming.
+    func strlen(s: Char[]): UInt64 {
+        return len(s);
+    }
+
+    // Compares `a` and `b` byte by byte, terminator aware: 1 when
+    // equal, 0 otherwise. Alias of `compare`.
+    func streq(a: Char[], b: Char[]): Int32 {
+        if compare(a, b) == 0 {
+            return 1;
+        }
+        return 0;
+    }
+
+    // Copies `src`, terminator included, into `dst` and returns the
+    // length of the string. Alias of `copy` with the classic name.
+    func strcpy(dst: Char[], src: Char[], cap: UInt64): UInt64! {
+        return copy(dst, src, cap);
+    }
+
+    // Copies `src`, terminator included, into `dst` and returns the
+    // length of the string. When `cap` is too small for the string and
+    // its terminator, reports error 36 and leaves `dst` unmodified.
+    func copy(dst: Char[], src: Char[], cap: UInt64): UInt64! {
+        let total = len(src);
+        if total >= cap {
+            return error ERR_NAME_TOO_LONG;
+        }
+        mem::copy(dst as &Void, src as &Void, total + 1);
+        return total;
+    }
+
+    // Writes the concatenation of `a` and `b`, NUL-terminated, into
+    // `out` and returns the written length. Reports error 36 when
+    // `cap` cannot hold the result.
+    func concat(out: Char[], a: Char[], b: Char[], cap: UInt64): UInt64! {
+        let d = out as UInt64;
+        let na = len(a);
+        let nb = len(b);
+        if nb > 18446744073709551615 - na or na + nb >= cap {
+            return error ERR_NAME_TOO_LONG;
+        }
+        mem::copy(d as &Void, a as &Void, na);
+        mem::copy((d + na) as &Void, b as &Void, nb);
+        @((d + na + nb) as &Char) = 0 as Char;
+        return na + nb;
+    }
+
+    // Compares `a` and `b` code unit by code unit, treating units as
+    // unsigned. Returns a negative value when `a` orders before `b`,
+    // zero when the strings are equal, and a positive value otherwise.
+    func compare(a: Char[], b: Char[]): Int32 {
+        let p = a as UInt64;
+        let q = b as UInt64;
+        let i: UInt64 = 0;
+        while true {
+            let x = @((p + i) as &Char) as UInt64;
+            let y = @((q + i) as &Char) as UInt64;
+            if x != y {
+                if x < y {
+                    return -1;
+                }
+                return 1;
+            }
+            if x == 0 {
+                break;
+            }
+            i += 1;
+        }
+        return 0;
+    }
+
+    // Returns the offset of the first occurrence of `needle` in
+    // `haystack`, or the length of `haystack` when the needle is
+    // absent. An empty needle matches at offset zero.
+    func find_substring(haystack: Char[], needle: Char[]): UInt64 {
+        let h = haystack as UInt64;
+        let n = needle as UInt64;
+        let hlen = len(haystack);
+        let nlen = len(needle);
+        if nlen == 0 {
+            return 0;
+        }
+        if nlen > hlen {
+            return hlen;
+        }
+        let last = hlen - nlen;
+        let first = @((n) as &Char);
+        let i: UInt64 = 0;
+        while i <= last {
+            if @((h + i) as &Char) != first {
+                i += 1;
+                continue;
+            }
+            let j: UInt64 = 1;
+            while j < nlen {
+                if @((h + i + j) as &Char) != @((n + j) as &Char) {
+                    break;
+                }
+                j += 1;
+            }
+            if j == nlen {
+                return i;
+            }
+            i += 1;
+        }
+        return hlen;
+    }
+
+    // Returns the offset of the first occurrence of `ch` in `s`, or
+    // the length of `s` when the code unit is absent.
+    func find_char(s: Char[], ch: Char): UInt64 {
+        let p = s as UInt64;
+        let i: UInt64 = 0;
+        while true {
+            let c = @((p + i) as &Char);
+            if c == ch {
+                return i;
+            }
+            if c == 0 as Char {
+                return i;
+            }
+            i += 1;
+        }
+    }
+
+    // Returns true when `s` begins with `prefix`; an empty prefix
+    // matches any string.
+    func starts_with(s: Char[], prefix: Char[]): Bool {
+        let p = s as UInt64;
+        let q = prefix as UInt64;
+        let i: UInt64 = 0;
+        while true {
+            let c = @((q + i) as &Char);
+            if c == 0 as Char {
+                return true;
+            }
+            if @((p + i) as &Char) != c {
+                return false;
+            }
+            i += 1;
+        }
+    }
+
+    // Returns true when `s` ends with `suffix`; an empty suffix
+    // matches any string.
+    func ends_with(s: Char[], suffix: Char[]): Bool {
+        let slen = len(s);
+        let xlen = len(suffix);
+        if xlen > slen {
+            return false;
+        }
+        let p = s as UInt64;
+        let q = suffix as UInt64;
+        let off = slen - xlen;
+        let i: UInt64 = 0;
+        while i < xlen {
+            if @((p + off + i) as &Char) != @((q + i) as &Char) {
+                return false;
+            }
+            i += 1;
+        }
+        return true;
+    }
+
+    // Writes the `count` code units starting at offset `start` of
+    // `s`, NUL-terminated, into `out` and returns the written length.
+    // Reports error 36 when the range runs past the end of `s` or
+    // `cap` is too small.
+    func slice_into(s: Char[], start: UInt64, count: UInt64, out: Char[], cap: UInt64): UInt64! {
+        let slen = len(s);
+        if start > slen or count > slen - start or count >= cap {
+            return error ERR_NAME_TOO_LONG;
+        }
+        let src = (s as UInt64) + start;
+        mem::copy(out as &Void, src as &Void, count);
+        @((out as UInt64 + count) as &Char) = 0 as Char;
+        return count;
+    }
+
+    // Writes `s` with leading and trailing ASCII whitespace removed,
+    // NUL-terminated, into `out` and returns the written length.
+    // Whitespace is space, tab, newline, carriage return, vertical
+    // tab, and form feed.
+    func trim_into(s: Char[], out: Char[], cap: UInt64): UInt64! {
+        let p = s as UInt64;
+        let slen = len(s);
+        let lo: UInt64 = 0;
+        while lo < slen and __is_ws(@((p + lo) as &Char)) {
+            lo += 1;
+        }
+        let hi = slen;
+        while hi > lo and __is_ws(@((p + hi - 1) as &Char)) {
+            hi -= 1;
+        }
+        let n = hi - lo;
+        if n >= cap {
+            return error ERR_NAME_TOO_LONG;
+        }
+        mem::copy(out as &Void, (p + lo) as &Void, n);
+        @((out as UInt64 + n) as &Char) = 0 as Char;
+        return n;
+    }
+
+    // Writes the ASCII-uppercased form of `s`, NUL-terminated, into
+    // `out` and returns the written length. Code units above 0x7F
+    // pass through unchanged.
+    func to_upper_into(s: Char[], out: Char[], cap: UInt64): UInt64! {
+        let n = len(s);
+        if n >= cap {
+            return error ERR_NAME_TOO_LONG;
+        }
+        let p = s as UInt64;
+        let d = out as UInt64;
+        let i: UInt64 = 0;
+        while i < n {
+            let c = @((p + i) as &Char);
+            if c >= 'a' and c <= 'z' {
+                c = (c as UInt64 - 32) as Char;
+            }
+            @((d + i) as &Char) = c;
+            i += 1;
+        }
+        @((d + n) as &Char) = 0 as Char;
+        return n;
+    }
+
+    // Writes the ASCII-lowercased form of `s`, NUL-terminated, into
+    // `out` and returns the written length. Code units above 0x7F
+    // pass through unchanged.
+    func to_lower_into(s: Char[], out: Char[], cap: UInt64): UInt64! {
+        let n = len(s);
+        if n >= cap {
+            return error ERR_NAME_TOO_LONG;
+        }
+        let p = s as UInt64;
+        let d = out as UInt64;
+        let i: UInt64 = 0;
+        while i < n {
+            let c = @((p + i) as &Char);
+            if c >= 'A' and c <= 'Z' {
+                c = (c as UInt64 + 32) as Char;
+            }
+            @((d + i) as &Char) = c;
+            i += 1;
+        }
+        @((d + n) as &Char) = 0 as Char;
+        return n;
+    }
+
+    // Reports whether `c` is one of the six ASCII whitespace units:
+    // space, tab (9), newline (10), vertical tab (11), form feed (12),
+    // and carriage return (13).
+    func __is_ws(c: Char): Bool {
+        let v = c as UInt64;
+        return v == 32 or (v >= 9 and v <= 13);
+    }
+}

@@ -1,0 +1,131 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: console
+ * Formatted terminal output: a thin convenience layer over the
+ * write(2) system call that adds formatting and retry looping.
+ *
+ * Everything printed by a program reaches the outside world as a
+ * write(2) call; the formatting for integers and real values lives
+ * in fmt, and string handling in string — this module only owns
+ * the file descriptors and the loop around short writes.
+ *
+ * Error policy: the low-level write and write_error functions
+ * propagate kernel errors to the caller. The high-level print
+ * functions return Void and drop write failures, because a console
+ * has no lower-level channel to report them on; programs that care
+ * about output integrity should call write directly and handle the
+ * error themselves.
+ */
+
+use sys;
+use string;
+use fmt;
+
+module console {
+    // Writes exactly `len` bytes from `ptr` to standard output,
+    // retrying after short writes, and returns the number of bytes
+    // written.
+    func write(ptr: Char[], len: UInt64): UInt64! {
+        let p = ptr as UInt64;
+        let total: UInt64 = 0;
+        while total < len {
+            let n = try sys::write(1, (p + total) as &Void, len - total);
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        return total;
+    }
+
+    // Writes exactly `len` bytes from `ptr` to standard error,
+    // retrying after short writes, and returns the number of bytes
+    // written.
+    func write_error(ptr: Char[], len: UInt64): UInt64! {
+        let p = ptr as UInt64;
+        let total: UInt64 = 0;
+        while total < len {
+            let n = try sys::write(2, (p + total) as &Void, len - total);
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        return total;
+    }
+
+    // Prints the NUL-terminated string `s` to standard output.
+    func print(s: Char[]): Void {
+        write(s, string::len(s)) catch |e| { return; };
+    }
+
+    // Prints the decimal representation of `v` to standard output.
+    func print_u64(v: UInt64): Void {
+        let buf: Char[20];
+        let n = fmt::u64_dec(v, &buf[0]);
+        write(&buf[0], n) catch |e| { return; };
+    }
+
+    // Prints the decimal representation of `v`, with a leading
+    // minus sign for negative values, to standard output.
+    func print_i64(v: Int64): Void {
+        let buf: Char[20];
+        let n = fmt::i64_dec(v, &buf[0]);
+        write(&buf[0], n) catch |e| { return; };
+    }
+
+    // Prints `v` as a decimal with exactly `precision` fraction
+    // digits. Digits past the fifteenth fraction digit carry no
+    // information for a double; precision is expected to stay at
+    // or below 15.
+    func print_real(v: Real64, precision: UInt64): Void {
+        let buf: Char[40];
+        let n = fmt::real_to_str_fixed(v, precision, &buf[0]) catch |e| { return; };
+        write(&buf[0], n) catch |e| { return; };
+    }
+
+    // Prints the lowercase hexadecimal representation of `v`,
+    // with no leading zeros, to standard output.
+    func print_hex(v: UInt64): Void {
+        let buf: Char[16];
+        let n = fmt::u64_hex(v, &buf[0]);
+        write(&buf[0], n) catch |e| { return; };
+    }
+
+    // Prints `v` in hexadecimal prefixed with "0x", the shape most
+    // useful for addresses and raw bit patterns.
+    func print_hex_prefixed(v: UInt64): Void {
+        print_char(48 as Char);
+        print_char(120 as Char);
+        print_hex(v);
+    }
+
+    // Prints a single byte `ch` to standard output. Bytes outside
+    // the printable ASCII range are written unchanged.
+    func print_char(ch: Char): Void {
+        let buf: Char[1];
+        buf[0] = ch;
+        write(&buf[0], 1) catch |e| { return; };
+    }
+
+    // Prints the word "true" or "false" for `b`.
+    func print_bool(b: Bool): Void {
+        let yes: Char[4] = {116 as Char, 114 as Char, 117 as Char, 101 as Char};
+        let no: Char[5] = {102 as Char, 97 as Char, 108 as Char, 115 as Char, 101 as Char};
+        if b {
+            write(&yes[0], 4) catch |e| { return; };
+        } else {
+            write(&no[0], 5) catch |e| { return; };
+        }
+    }
+
+    // Prints a single newline byte, terminating the current output
+    // line.
+    func newline(): Void {
+        let buf: Char[1];
+        buf[0] = 10 as Char;
+        write(&buf[0], 1) catch |e| { return; };
+    }
+}

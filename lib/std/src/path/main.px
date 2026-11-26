@@ -1,0 +1,226 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: path
+ * Purely lexical Unix path manipulation.
+ *
+ * No function in this module checks whether a path exists — the
+ * question these functions answer is what the path says, not what
+ * the filesystem holds. Results are produced either as pointers into
+ * the input (basename, extension) or into caller-supplied buffers
+ * (dirname_into, join_into, normalize_into), following the
+ * bounded-copy discipline of the string module: error 36
+ * (ENAMETOOLONG) when the buffer is too small, and a terminating
+ * zero is always written within the capacity on success. All
+ * functions assume the '/' separator.
+ */
+
+use string;
+use mem;
+
+module path {
+    // errno-style codes: capacity overflow and lexical range errors.
+    static PATH_ERR_LONG = 36;
+    static PATH_ERR_RANGE = 22;
+
+    // ASCII code of the path separator.
+    static SEP = 47;
+
+    // Returns a pointer to the final component of `p`, after
+    // stripping trailing separators; for a path of only separators
+    // the result is "/". The pointer aliases the input and stays
+    // valid exactly as long as the input does.
+    func basename(p: Char[]): Char[] {
+        let s = p as UInt64;
+        let len = string::len(p);
+        let end = len;
+        while end > 0 and @((s + end - 1) as &Char) as UInt64 == SEP {
+            end -= 1;
+        }
+        if end == 0 {
+            // Only separators: the basename of "/" is "/".
+            return (s + len - 1) as Char[];
+        }
+        let start = end;
+        while start > 0 and @((s + start - 1) as &Char) as UInt64 != SEP {
+            start -= 1;
+        }
+        return (s + start) as Char[];
+    }
+
+    // Returns a pointer to the extension of `p` — the bytes after
+    // the last dot of the basename, excluding a leading dot (so
+    // ".profile" has no extension). With no dot the result points at
+    // the terminator: an empty, still valid string. The pointer
+    // aliases the input.
+    func extension(p: Char[]): Char[] {
+        let b = basename(p);
+        let s = b as UInt64;
+        let len = string::len(b);
+        let i: UInt64 = len;
+        while i > 1 {
+            if @((s + i - 1) as &Char) as UInt64 == 46 {
+                return (s + i) as Char[];
+            }
+            i -= 1;
+        }
+        return (s + len) as Char[];
+    }
+
+    // Writes the directory portion of `p` into `out` NUL-terminated
+    // and returns its length. Trailing separators are stripped
+    // before the search, the result never ends in a separator except
+    // the lone root "/", a path with no separator yields ".", and a
+    // path of only separators yields "/". Error 36 when `cap` is too
+    // small.
+    func dirname_into(p: Char[], out: Char[], cap: UInt64): UInt64! {
+        let s = p as UInt64;
+        let len = string::len(p);
+        let end = len;
+        while end > 0 and @((s + end - 1) as &Char) as UInt64 == SEP {
+            end -= 1;
+        }
+        if end == 0 {
+            // Only separators: the dirname is the root.
+            if cap < 2 {
+                return error PATH_ERR_LONG;
+            }
+            @(out as &Char) = SEP as Char;
+            @((out as UInt64 + 1) as &Char) = 0 as Char;
+            return 1;
+        }
+        let start = end;
+        while start > 0 and @((s + start - 1) as &Char) as UInt64 != SEP {
+            start -= 1;
+        }
+        if start == 0 {
+            // No separator at all: a relative path lives in ".".
+            if cap < 2 {
+                return error PATH_ERR_LONG;
+            }
+            @(out as &Char) = 46 as Char;
+            @((out as UInt64 + 1) as &Char) = 0 as Char;
+            return 1;
+        }
+        // The dirname is the span before `start`, with any separator
+        // run before it collapsed; an empty result means the root.
+        let dend = start - 1;
+        while dend > 0 and @((s + dend - 1) as &Char) as UInt64 == SEP {
+            dend -= 1;
+        }
+        if dend == 0 {
+            if cap < 2 {
+                return error PATH_ERR_LONG;
+            }
+            @(out as &Char) = SEP as Char;
+            @((out as UInt64 + 1) as &Char) = 0 as Char;
+            return 1;
+        }
+        if dend >= cap {
+            return error PATH_ERR_LONG;
+        }
+        mem::copy(out as &Void, s as &Void, dend);
+        @((out as UInt64 + dend) as &Char) = 0 as Char;
+        return dend;
+    }
+
+    // Writes "a/b" into `out` NUL-terminated and returns the length.
+    // The separator is inserted only when `a` is nonempty and does
+    // not already end in one; `b` is used verbatim, so a `b`
+    // starting with a separator produces a doubled one. Error 36 on
+    // capacity overflow.
+    func join_into(a: Char[], b: Char[], out: Char[], cap: UInt64): UInt64! {
+        let al = string::len(a);
+        let bl = string::len(b);
+        let need_sep: UInt64 = 1;
+        if al > 0 and @((a as UInt64 + al - 1) as &Char) as UInt64 == SEP {
+            need_sep = 0;
+        }
+        let total = al + need_sep + bl;
+        if total >= cap {
+            return error PATH_ERR_LONG;
+        }
+        mem::copy(out as &Void, a as &Void, al);
+        if need_sep == 1 {
+            @((out as UInt64 + al) as &Char) = SEP as Char;
+        }
+        mem::copy((out as UInt64 + al + need_sep) as &Void, b as &Void, bl);
+        @((out as UInt64 + total) as &Char) = 0 as Char;
+        return total;
+    }
+
+    // Lexically normalizes `p` into `out` NUL-terminated: separator
+    // runs collapse to one, "." segments vanish, and ".." segments
+    // pop the previous real segment. An absolute path keeps its
+    // leading separator and can never be popped past the root; a
+    // relative path that resolves to nothing becomes ".". A ".."
+    // above the root reports error 22; error 36 reports capacity
+    // overflow.
+    func normalize_into(p: Char[], out: Char[], cap: UInt64): UInt64! {
+        let s = p as UInt64;
+        let len = string::len(p);
+        let o = out as UInt64;
+        let absolute: UInt64 = 0;
+        if len > 0 and @(s as &Char) as UInt64 == SEP {
+            absolute = 1;
+            if cap < 2 {
+                return error PATH_ERR_LONG;
+            }
+            @(o as &Char) = SEP as Char;
+        }
+        let n: UInt64 = absolute;
+        let i: UInt64 = 0;
+        while i < len {
+            // Skip the separator run before each segment.
+            while i < len and @((s + i) as &Char) as UInt64 == SEP {
+                i += 1;
+            }
+            if i >= len {
+                break;
+            }
+            let seg_start = i;
+            while i < len and @((s + i) as &Char) as UInt64 != SEP {
+                i += 1;
+            }
+            let seg_len = i - seg_start;
+            if seg_len == 1 and @((s + seg_start) as &Char) as UInt64 == 46 {
+                continue;
+            }
+            if seg_len == 2 and @((s + seg_start) as &Char) as UInt64 == 46 and @((s + seg_start + 1) as &Char) as UInt64 == 46 {
+                // Pop the last written component together with its
+                // separator, never past the root.
+                if n == 0 or (absolute == 1 and n == 1) {
+                    return error PATH_ERR_RANGE;
+                }
+                n -= 1;
+                while n > absolute and @((o + n - 1) as &Char) as UInt64 != SEP {
+                    n -= 1;
+                }
+                continue;
+            }
+            // Append the component and a trailing separator; the
+            // separator is stripped at the end.
+            if n + seg_len + 1 >= cap {
+                return error PATH_ERR_LONG;
+            }
+            mem::copy((o + n) as &Void, (s + seg_start) as &Void, seg_len);
+            n += seg_len;
+            @((o + n) as &Char) = SEP as Char;
+            n += 1;
+        }
+        // Strip the trailing separator, keeping the root's own.
+        if n > absolute and n > 0 {
+            n -= 1;
+        }
+        if n == 0 and absolute == 0 {
+            if cap < 2 {
+                return error PATH_ERR_LONG;
+            }
+            @(o as &Char) = 46 as Char;
+            n = 1;
+        }
+        @((o + n) as &Char) = 0 as Char;
+        return n;
+    }
+}

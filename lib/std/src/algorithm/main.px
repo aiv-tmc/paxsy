@@ -1,0 +1,280 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: algorithm
+ * Generic elementwise algorithms over views.
+ *
+ * Every function takes the element type as a static parameter and
+ * operates in place on the view: no allocation, no copying of the
+ * container. Ordering-sensitive algorithms take a comparator closure;
+ * the natural order for arithmetic types is one call to natural away.
+ *
+ * sort is an introspective quicksort: it partitions around a
+ * median-of-three pivot, switches to insertion sort below sixteen
+ * elements, and falls back to heapsort once the recursion depth
+ * passes twice the floor of log2 of the length, so the worst case
+ * stays O(n log n) comparisons without a stack that grows with the
+ * input.
+ */
+
+module algorithm {
+    // Returned when a position argument exceeds the length of the
+    // view.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // Runs below this length are finished with insertion sort, which
+    // is faster than partitioning for tiny inputs.
+    static INSERTION_CUTOFF = 16;
+
+    // Returns the natural less-than order for an arithmetic type.
+    func natural(static T): func(a: T, b: T): Bool = |a: T, b: T| a < b;
+
+    // Exchanges two elements of the view.
+    func __swap(static T, items: T[..], i: UInt64, j: UInt64): Void {
+        let t = items[i];
+        items[i] = items[j];
+        items[j] = t;
+    }
+
+    // Insertion-sorts the half-open range [lo, hi) of the view.
+    func __insertion(static T, items: T[..], lo: UInt64, hi: UInt64,
+        less: func(a: T, b: T): Bool): Void {
+        let i = lo + 1;
+        while i < hi {
+            let v = items[i];
+            let j = i;
+            while j > lo and less(v, items[j - 1]) {
+                items[j] = items[j - 1];
+                j -= 1;
+            }
+            items[j] = v;
+            i += 1;
+        }
+    }
+
+    // Sinks the root of the heap rooted at `root` inside [lo, hi).
+    func __sift_down(static T, items: T[..], lo: UInt64, root: UInt64,
+        hi: UInt64, less: func(a: T, b: T): Bool): Void {
+        let i = root;
+        while true {
+            let child = lo + (i - lo) * 2 + 1;
+            if child >= hi {
+                break;
+            }
+            // Select the child that orders after the other; it is the
+            // one that may belong above the sinking element.
+            let best = child;
+            if child + 1 < hi and less(items[child], items[child + 1]) {
+                best = child + 1;
+            }
+            if not less(items[i], items[best]) {
+                break;
+            }
+            __swap(T, items, i, best);
+            i = best;
+        }
+    }
+
+    // Heapsorts the half-open range [lo, hi): the fallback that keeps
+    // the worst case logarithmic when partitioning goes bad.
+    func __heapsort(static T, items: T[..], lo: UInt64, hi: UInt64,
+        less: func(a: T, b: T): Bool): Void {
+        let n = hi - lo;
+        let i = n / 2;
+        while i > 0 {
+            i -= 1;
+            __sift_down(T, items, lo, lo + i, hi, less);
+        }
+        let end = hi;
+        while end > lo + 1 {
+            end -= 1;
+            __swap(T, items, lo, end);
+            __sift_down(T, items, lo, lo, end, less);
+        }
+    }
+
+    // Partitions [lo, hi) around a median-of-three pivot and returns
+    // the pivot's final index.
+    func __partition(static T, items: T[..], lo: UInt64, hi: UInt64,
+        less: func(a: T, b: T): Bool): UInt64 {
+        let mid = lo + (hi - lo) / 2;
+        // Order lo, mid, hi-1 so the median sits at mid.
+        if less(items[mid], items[lo]) {
+            __swap(T, items, lo, mid);
+        }
+        if less(items[hi - 1], items[lo]) {
+            __swap(T, items, lo, hi - 1);
+        }
+        if less(items[hi - 1], items[mid]) {
+            __swap(T, items, mid, hi - 1);
+        }
+        // Park the pivot at hi-2 and sweep the interior.
+        __swap(T, items, mid, hi - 2);
+        let pivot = items[hi - 2];
+        let i = lo;
+        let j = hi - 2;
+        while true {
+            i += 1;
+            while less(items[i], pivot) {
+                i += 1;
+            }
+            j -= 1;
+            while less(pivot, items[j]) {
+                j -= 1;
+            }
+            if i >= j {
+                break;
+            }
+            __swap(T, items, i, j);
+        }
+        __swap(T, items, i, hi - 2);
+        return i;
+    }
+
+    // The recursive core: quicksort steps while the depth budget
+    // lasts, heapsort when it runs out.
+    func __sort_rec(static T, items: T[..], lo: UInt64, hi: UInt64,
+        less: func(a: T, b: T): Bool, depth: UInt64): Void {
+        while hi - lo > INSERTION_CUTOFF {
+            if depth == 0 {
+                __heapsort(T, items, lo, hi, less);
+                return;
+            }
+            depth -= 1;
+            let p = __partition(T, items, lo, hi, less);
+            // Recurse into the smaller side, loop into the larger:
+            // the stack stays logarithmic even without the budget.
+            if p - lo < hi - p {
+                __sort_rec(T, items, lo, p, less, depth);
+                lo = p + 1;
+            } else {
+                __sort_rec(T, items, p + 1, hi, less, depth);
+                hi = p;
+            }
+        }
+        __insertion(T, items, lo, hi, less);
+    }
+
+    // Sorts the view in place so that adjacent elements satisfy
+    // `less`.
+    func sort(static T, items: T[..], less: func(a: T, b: T): Bool): Void {
+        if items.len < 2 {
+            return;
+        }
+        // The depth budget is 2 * floor(log2(len)).
+        let depth: UInt64 = 0;
+        let n = items.len;
+        while n > 1 {
+            n >>= 1;
+            depth += 2;
+        }
+        __sort_rec(T, items, 0, items.len, less, depth);
+    }
+
+    // Returns the index of an element equal to `key` in a view sorted
+    // according to `less`, or items.len when it is absent. Two
+    // elements are equal when neither orders before the other.
+    func binary_search(static T, items: T[..], key: T,
+        less: func(a: T, b: T): Bool): UInt64 {
+        let lo: UInt64 = 0;
+        let hi = items.len;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if less(items[mid], key) {
+                lo = mid + 1;
+            } else if less(key, items[mid]) {
+                hi = mid;
+            } else {
+                return mid;
+            }
+        }
+        return items.len;
+    }
+
+    // Returns the index of the first element for which `pred` is
+    // true, or items.len when there is none.
+    func find(static T, items: T[..], pred: func(v: T): Bool): UInt64 {
+        let i: UInt64 = 0;
+        while i < items.len {
+            if pred(items[i]) {
+                return i;
+            }
+            i += 1;
+        }
+        return items.len;
+    }
+
+    // Returns the number of elements for which `pred` is true.
+    func count(static T, items: T[..], pred: func(v: T): Bool): UInt64 {
+        let n: UInt64 = 0;
+        let i: UInt64 = 0;
+        while i < items.len {
+            if pred(items[i]) {
+                n += 1;
+            }
+            i += 1;
+        }
+        return n;
+    }
+
+    // Reverses the order of the elements in place.
+    func reverse(static T, items: T[..]): Void {
+        let i: UInt64 = 0;
+        let j = items.len;
+        while i + 1 < j {
+            j -= 1;
+            __swap(T, items, i, j);
+            i += 1;
+        }
+    }
+
+    // Overwrites every element with `v`.
+    func fill(static T, items: T[..], v: T): Void {
+        let i: UInt64 = 0;
+        while i < items.len {
+            items[i] = v;
+            i += 1;
+        }
+    }
+
+    // Rotates the view so that the element at `mid` becomes the first
+    // element: the three reversals [0,mid), [mid,len), [0,len) move
+    // every element exactly twice. `mid` equal to items.len is the
+    // identity rotation.
+    func rotate(static T, items: T[..], mid: UInt64): Void! {
+        if mid > items.len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        __reverse_span(T, items, 0, mid);
+        __reverse_span(T, items, mid, items.len - mid);
+        __reverse_span(T, items, 0, items.len);
+    }
+
+    // Reverses the `n` elements starting at index `at`.
+    func __reverse_span(static T, items: T[..], at: UInt64, n: UInt64): Void {
+        let i: UInt64 = 0;
+        while i + 1 < n {
+            n -= 1;
+            __swap(T, items, at + i, at + n);
+            i += 1;
+        }
+    }
+
+    // Reorders the view so that elements satisfying `pred` precede
+    // the others and returns the index of the first element of the
+    // second side. The scan swaps each accepted element into the
+    // growing first side.
+    func partition(static T, items: T[..], pred: func(v: T): Bool): UInt64 {
+        let first: UInt64 = 0;
+        let i: UInt64 = 0;
+        while i < items.len {
+            if pred(items[i]) {
+                __swap(T, items, first, i);
+                first += 1;
+            }
+            i += 1;
+        }
+        return first;
+    }
+}

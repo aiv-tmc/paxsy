@@ -1,0 +1,126 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: dir
+ * Directory listing built directly on getdents64(2).
+ *
+ * getdents64 fills a caller buffer with dirent64 records laid out
+ * as: an 8-byte inode number, an 8-byte signed offset, a 2-byte
+ * record length, a 1-byte entry type, and the NUL-terminated name.
+ * The constants below pin those offsets so Paxsy code can walk the
+ * records with plain address arithmetic; entry_first and entry_next
+ * implement the walk, and entry_name and entry_kind expose the two
+ * fields callers usually need, with no per-entry allocation.
+ *
+ * The one-shot list() helper opens a directory, reads its entries
+ * into a caller buffer, and closes it again. Buffers of a few
+ * kilobytes are enough for any directory that fits the module's
+ * single-read model; list() reports the byte count so callers can
+ * size their expectations accordingly.
+ */
+
+use sys;
+
+module dir {
+    // Byte offsets of the fixed fields inside a dirent64 record.
+    static D_RECLEN_OFF = 16;
+    static D_TYPE_OFF = 18;
+    static D_NAME_OFF = 19;
+
+    // Smallest possible record: fixed header plus a one-byte empty
+    // name.
+    static D_REC_MIN = 20;
+
+    // d_type values reported by entry_kind.
+    static DT_UNKNOWN = 0;
+    static DT_FIFO = 1;
+    static DT_CHR = 2;
+    static DT_DIR = 4;
+    static DT_BLK = 6;
+    static DT_REG = 8;
+    static DT_LNK = 10;
+    static DT_SOCK = 12;
+
+    // An open directory, identified by its kernel file descriptor.
+    static Dir = Struct {
+        fd: UInt64,
+    };
+
+    // Opens the directory at `path` for listing. The O_DIRECTORY
+    // flag makes the kernel reject the open when the path is not a
+    // directory.
+    func Dir.open(path: Char[]): Dir! {
+        let fd = try sys::open(path, sys::O_RDONLY $ sys::O_DIRECTORY, 0);
+        return Dir {fd};
+    }
+
+    // Reads the next batch of entries into `buf` and returns the
+    // number of bytes written, which is zero at end of directory.
+    // The content of `buf` stays valid until the next read on the
+    // same Dir.
+    func Dir.read(this: Dir, buf: &Void, cap: UInt64): UInt64! {
+        return sys::getdents64(this.fd as UInt32, buf, cap);
+    }
+
+    // Closes the underlying file descriptor. The Dir value must not
+    // be used afterwards.
+    func Dir.close(this: Dir): Void! {
+        try sys::close(this.fd as UInt32);
+    }
+
+    // One-shot listing: opens the directory at `path`, reads its
+    // entries into `buf`, closes the directory, and returns the
+    // number of valid entry bytes. If reading fails, the directory
+    // is still closed and the read error — or, when closing also
+    // fails, the close error — is reported.
+    func list(path: Char[], buf: &Void, cap: UInt64): UInt64! {
+        let d = try Dir.open(path);
+        let n = sys::getdents64(d.fd as UInt32, buf, cap) catch |e| {
+            Dir.close(d) catch |c| {
+                return error c;
+            };
+            return error e;
+        };
+        try Dir.close(d);
+        return n;
+    }
+
+    // Returns a pointer to the first record in a buffer filled by
+    // list or Dir.read, or the zero pointer when the byte count is
+    // too small to hold a complete record.
+    func entry_first(buf: &Void, count: UInt64): &Void {
+        if count < D_REC_MIN {
+            return 0;
+        }
+        return buf;
+    }
+
+    // Returns a pointer to the record following `entry` within the
+    // `count` valid bytes starting at `buf`, or the zero pointer
+    // when no further complete record fits. The returned pointer
+    // aliases the listing buffer.
+    func entry_next(entry: &Void, buf: &Void, count: UInt64): &Void {
+        let limit = (buf as UInt64) + count;
+        let cur = entry as UInt64;
+        let rec = @((cur + D_RECLEN_OFF) as &UInt16) as UInt64;
+        let next = cur + rec;
+        if next + D_REC_MIN > limit {
+            return 0;
+        }
+        return next as &Void;
+    }
+
+    // Returns a pointer to the NUL-terminated name of the record.
+    // The pointer aliases the listing buffer and stays valid until
+    // the buffer is reused.
+    func entry_name(entry: &Void): Char[] {
+        return ((entry as UInt64) + D_NAME_OFF) as Char[];
+    }
+
+    // Returns the type byte of the record, one of the DT_*
+    // constants.
+    func entry_kind(entry: &Void): Char {
+        return @((entry as UInt64 + D_TYPE_OFF) as &Char);
+    }
+}

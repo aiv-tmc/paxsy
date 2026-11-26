@@ -1,0 +1,242 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: graphics
+ * Direct rendering into the Linux console framebuffer.
+ *
+ * The kernel exposes the video memory as an mmap-able character
+ * device (/dev/fb0), so drawing is writing pixels into mapped memory.
+ * create_context() opens the device, learns the screen geometry and
+ * pixel layout through the fb_var_screeninfo and fb_fix_screeninfo
+ * ioctls, and maps the memory; from then on every drawing call is
+ * plain pointer arithmetic. Only 32-bit packed pixels are served: one
+ * byte each of blue, green, red, and an ignored pad byte.
+ *
+ * The ioctls and the file-backed mmap travel through file-private
+ * staging cells with volatile assembly, because the sys module's mmap
+ * wrapper covers anonymous mappings only; open, close, and munmap go
+ * through sys. Drawing calls silently clip at the screen edges, so
+ * callers can pass geometry without pre-clipping.
+ */
+
+use sys;
+
+// Staging cells for the ioctl and mmap sequences below.
+let __gr_num: UInt64;
+let __gr_a1: UInt64;
+let __gr_a2: UInt64;
+let __gr_a3: UInt64;
+let __gr_a4: UInt64;
+let __gr_a5: UInt64;
+let __gr_a6: UInt64;
+let __gr_ret: UInt64;
+
+// fb ioctls and the field offsets used from the two info structs.
+static __FBIOGET_VSCREENINFO = 0x4600;
+static __FBIOGET_FSCREENINFO = 0x4602;
+static __VAR_XRES = 0;
+static __VAR_YRES = 4;
+static __VAR_BPP = 24;
+static __FIX_SMEM_LEN = 4;
+static __FIX_LINE_LEN = 48;
+
+// PROT_READ|PROT_WRITE and MAP_SHARED for the mmap call.
+static __PROT_RW = 3;
+static __MAP_SHARED = 1;
+
+// Executes a three-argument system call (ioctl).
+func __gr3(): UInt64 {
+    volatile asm "mov rax, [__gr_num]";
+    volatile asm "mov rdi, [__gr_a1]";
+    volatile asm "mov rsi, [__gr_a2]";
+    volatile asm "mov rdx, [__gr_a3]";
+    volatile asm "syscall";
+    volatile asm "mov [__gr_ret], rax";
+    return __gr_ret;
+}
+
+// Executes the six-argument mmap system call with a real file
+// descriptor.
+func __gr6(): UInt64 {
+    volatile asm "mov rax, [__gr_num]";
+    volatile asm "mov rdi, [__gr_a1]";
+    volatile asm "mov rsi, [__gr_a2]";
+    volatile asm "mov rdx, [__gr_a3]";
+    volatile asm "mov r10, [__gr_a4]";
+    volatile asm "mov r8, [__gr_a5]";
+    volatile asm "mov r9, [__gr_a6]";
+    volatile asm "syscall";
+    volatile asm "mov [__gr_ret], rax";
+    return __gr_ret;
+}
+
+// Converts a raw kernel return value into the error contract.
+func __gr_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+// Closes the framebuffer descriptor after a failed setup step,
+// swallowing any close failure to preserve the original error.
+func __close_fd(fd: UInt64): Void {
+    sys::close(fd as UInt32) catch |c| { };
+}
+
+module graphics {
+    // A mapped framebuffer: base address, geometry, and the
+    // descriptor and mapping length needed to release everything in
+    // destroy_context.
+    static GraphicsContext = Struct {
+        fb: &Void,
+        width: UInt64,
+        height: UInt64,
+        pitch: UInt64,
+        fd: UInt64,
+        map_len: UInt64,
+    };
+
+    // errno-style codes: no usable framebuffer, and a zero context.
+    static ERR_NO_DEVICE = 19;
+    static ERR_INVALID_CTX = 22;
+
+    // Opens /dev/fb0, reads the screen geometry, and maps the video
+    // memory. ERR_NO_DEVICE is reported when no framebuffer exists,
+    // the ioctls fail, or the pixel depth is not 32 bits.
+    func create_context(): GraphicsContext! {
+        let fd = sys::open("/dev/fb0", sys::O_RDWR, 0) catch {
+            return error ERR_NO_DEVICE;
+        };
+        let varinfo: UInt8[160];
+        __gr_num = 16;
+        __gr_a1 = fd;
+        __gr_a2 = __FBIOGET_VSCREENINFO;
+        __gr_a3 = &varinfo[0] as UInt64;
+        __gr_check(__gr3()) catch {
+            __close_fd(fd);
+            return error ERR_NO_DEVICE;
+        };
+        let width = @((&varinfo[0] as UInt64 + __VAR_XRES) as &UInt32) as UInt64;
+        let height = @((&varinfo[0] as UInt64 + __VAR_YRES) as &UInt32) as UInt64;
+        let bpp = @((&varinfo[0] as UInt64 + __VAR_BPP) as &UInt32) as UInt64;
+        let fixinfo: UInt8[68];
+        __gr_a2 = __FBIOGET_FSCREENINFO;
+        __gr_a3 = &fixinfo[0] as UInt64;
+        __gr_check(__gr3()) catch {
+            __close_fd(fd);
+            return error ERR_NO_DEVICE;
+        };
+        let map_len = @((&fixinfo[0] as UInt64 + __FIX_SMEM_LEN) as &UInt32) as UInt64;
+        let pitch = @((&fixinfo[0] as UInt64 + __FIX_LINE_LEN) as &UInt32) as UInt64;
+        if bpp != 32 {
+            __close_fd(fd);
+            return error ERR_NO_DEVICE;
+        }
+        __gr_num = 9;
+        __gr_a1 = 0;
+        __gr_a2 = map_len;
+        __gr_a3 = __PROT_RW;
+        __gr_a4 = __MAP_SHARED;
+        __gr_a5 = fd;
+        __gr_a6 = 0;
+        let fb = __gr_check(__gr6()) catch {
+            __close_fd(fd);
+            return error ERR_NO_DEVICE;
+        };
+        return GraphicsContext {fb as &Void, width, height, pitch, fd, map_len};
+    }
+
+    // Unmaps the video memory and closes the device.
+    func destroy_context(ctx: &GraphicsContext): Void! {
+        let cc = @ctx;
+        if cc.fd == 0 {
+            return error ERR_INVALID_CTX;
+        }
+        try sys::munmap(cc.fb, cc.map_len);
+        try sys::close(cc.fd as UInt32);
+        @ctx = GraphicsContext {(0 as UInt64) as &Void, 0, 0, 0, 0, 0};
+    }
+
+    // Sets the pixel at (x, y) to the given color, clipped at the
+    // screen edges.
+    func put_pixel(ctx: GraphicsContext, x: UInt64, y: UInt64, r: Char, g: Char, b: Char): Void! {
+        if ctx.fd == 0 {
+            return error ERR_INVALID_CTX;
+        }
+        __put(ctx, x, y, r, g, b);
+    }
+
+    // Fills the rectangle from (x, y) with the given size and color,
+    // clipped to the screen.
+    func fill_rect(ctx: GraphicsContext, x: UInt64, y: UInt64, w: UInt64, h: UInt64, r: Char, g: Char, b: Char): Void! {
+        if ctx.fd == 0 {
+            return error ERR_INVALID_CTX;
+        }
+        let yy = y;
+        while yy < y + h {
+            let xx = x;
+            while xx < x + w {
+                __put(ctx, xx, yy, r, g, b);
+                xx += 1;
+            }
+            yy += 1;
+        }
+    }
+
+    // Draws a straight line from (x0, y0) to (x1, y1) by Bresenham's
+    // algorithm, clipped to the screen.
+    func draw_line(ctx: GraphicsContext, x0: UInt64, y0: UInt64, x1: UInt64, y1: UInt64, r: Char, g: Char, b: Char): Void! {
+        if ctx.fd == 0 {
+            return error ERR_INVALID_CTX;
+        }
+        let dx = if x1 > x0 { x1 - x0 } else { x0 - x1 };
+        let dy = if y1 > y0 { y1 - y0 } else { y0 - y1 };
+        let sx: UInt64 = 1;
+        if x0 > x1 {
+            sx = 0xFFFFFFFFFFFFFFFF;
+        }
+        let sy: UInt64 = 1;
+        if y0 > y1 {
+            sy = 0xFFFFFFFFFFFFFFFF;
+        }
+        let err: Int64 = (dx as Int64) - (dy as Int64);
+        let cx = x0;
+        let cy = y0;
+        while true {
+            __put(ctx, cx, cy, r, g, b);
+            if cx == x1 and cy == y1 {
+                break;
+            }
+            let e2 = err * 2;
+            if e2 > -(dy as Int64) {
+                err -= dy as Int64;
+                cx += sx;
+            }
+            if e2 < dx as Int64 {
+                err += dx as Int64;
+                cy += sy;
+            }
+        }
+    }
+
+    // Fills the whole screen with the given color.
+    func clear(ctx: GraphicsContext, r: Char, g: Char, b: Char): Void! {
+        try fill_rect(ctx, 0, 0, ctx.width, ctx.height, r, g, b);
+    }
+}
+
+// Writes one packed pixel, clipping at the screen edges; the mapped
+// format is one byte each of blue, green, red, and an ignored pad.
+func __put(ctx: graphics::GraphicsContext, x: UInt64, y: UInt64, r: Char, g: Char, b: Char): Void {
+    if x >= ctx.width or y >= ctx.height {
+        return;
+    }
+    let p = (ctx.fb as UInt64) + y * ctx.pitch + x * 4;
+    @(p as &Char) = b;
+    @((p + 1) as &Char) = g;
+    @((p + 2) as &Char) = r;
+    @((p + 3) as &Char) = 0 as Char;
+}

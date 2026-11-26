@@ -1,0 +1,75 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: serialize
+ * Portable binary encoding of supported value types, built on the
+ * compile-time builtins sizeof and offsetof of the language.
+ *
+ * The encoding is defined exactly, so bytes produced on one
+ * architecture are readable on another: multi-byte integers are
+ * stored little-endian, floating-point values as their IEEE-754
+ * bit patterns, Bool as one byte, fixed arrays as their elements
+ * with no count, and structs as their fields in declaration
+ * order. Enums are encoded using their declared underlying
+ * integer type.
+ *
+ * The supported target is little-endian and its scalar storage
+ * layout already matches the portable encoding, so a value's
+ * encoded form is its in-memory byte sequence. Structs encode as
+ * their fields in declaration order with no padding bytes, which
+ * coincides with the native layout whenever the field sequence
+ * introduces no padding; records that mix field widths should be
+ * declared as packed Structs, whose layout is byte-exact by
+ * definition, or encoded field by field.
+ *
+ * Pointers, views, channels, and the opaque handles of the
+ * library are not serialisable: their byte patterns name memory
+ * that is meaningless in another process. In particular a Char[]
+ * string is a pointer and does not serialise as its text — encode
+ * the bytes through a fixed Char array or write them with a
+ * length prefix by hand.
+ */
+
+use mem;
+
+module serialize {
+    // errno-style code for a type that cannot be serialised.
+    static ERR_UNSUPPORTED_TYPE = 22;
+
+    // errno-style code reported by encode when the destination
+    // does not hold the encoded form.
+    static ERR_BUFFER_TOO_SMALL = 34;
+
+    // errno-style code reported by decode when the bytes are not a
+    // valid encoding of the requested type.
+    static ERR_INVALID_DATA = 22;
+
+    // Returns the number of bytes the value occupies in the binary
+    // representation.
+    func size(static T, value: &T): UInt64! {
+        return sizeof(T);
+    }
+
+    // Serialises `value` into `buffer` and returns the number of
+    // bytes written, which equals size(T, value). The buffer must
+    // hold at least sizeof(T) bytes; the example idiom
+    // `let buf: Char[sizeof(Point)];` guarantees that.
+    func encode(static T, value: &T, buffer: &Char): UInt64! {
+        mem::copy(buffer as &Void, value as &Void, sizeof(T));
+        return sizeof(T);
+    }
+
+    // Deserialises a value of type T from the first `count` bytes
+    // of `buffer`, which must hold exactly one encoded value of
+    // that type. A count that does not match the encoded size is
+    // ERR_INVALID_DATA.
+    func decode(static T, buffer: &Char, count: UInt64): T! {
+        if count != sizeof(T) {
+            return error ERR_INVALID_DATA;
+        }
+        let v: T;
+        mem::copy(&v as &Void, buffer as &Void, sizeof(T));
+        return v;
+    }
+}

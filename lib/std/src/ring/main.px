@@ -1,0 +1,138 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: ring
+ * ByteRing, a fixed-capacity FIFO of bytes.
+ *
+ * The ring never allocates after creation and never grows: a push on
+ * a full ring reports ERR_WOULD_BLOCK rather than blocking, which
+ * makes rings the right buffer between a producer and a consumer that
+ * must not allocate. The oldest byte lives at read_pos and the next
+ * write lands at (read_pos + len) mod cap; bulk transfers run as two
+ * linear copies when they cross the ring boundary.
+ *
+ * Ownership: the caller of make owns the ring; destroy (usually
+ * scheduled with defer) releases the backing block.
+ */
+
+use heap;
+use mem;
+
+module ring {
+    // A fixed-capacity byte ring.
+    static ByteRing = Struct {
+        data: &Char,
+        read_pos: UInt64,
+        len: UInt64,
+        cap: UInt64,
+    };
+
+    // Returned when the backing block cannot be allocated.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returned by the single-byte push and pop when the ring is full
+    // or empty.
+    static ERR_WOULD_BLOCK = 11;
+
+    // Returned when the requested capacity is zero.
+    static ERR_INVALID_SIZE = 22;
+
+    // Allocates a ring that holds up to `cap` bytes.
+    func make(cap: UInt64): ByteRing! {
+        if cap == 0 {
+            return error ERR_INVALID_SIZE;
+        }
+        let data = try heap::alloc(cap);
+        return ByteRing {data as &Char, 0, 0, cap};
+    }
+
+    // Releases the backing block.
+    func destroy(r: &ByteRing): Void {
+        if (@r).data != 0 {
+            heap::free((@r).data as &Void);
+        }
+        (@r).data = 0;
+        (@r).read_pos = 0;
+        (@r).len = 0;
+        (@r).cap = 0;
+    }
+
+    // Pushes one byte onto the back of the ring; reports
+    // ERR_WOULD_BLOCK when the ring is full.
+    func push(r: &ByteRing, b: Char): Void! {
+        if (@r).len == (@r).cap {
+            return error ERR_WOULD_BLOCK;
+        }
+        let at = ((@r).read_pos + (@r).len) % (@r).cap;
+        @(((@r).data as UInt64 + at) as &Char) = b;
+        (@r).len += 1;
+    }
+
+    // Pops the oldest byte from the front of the ring; reports
+    // ERR_WOULD_BLOCK when the ring is empty.
+    func pop(r: &ByteRing): Char! {
+        if (@r).len == 0 {
+            return error ERR_WOULD_BLOCK;
+        }
+        let b = @(((@r).data as UInt64 + (@r).read_pos) as &Char);
+        (@r).read_pos = ((@r).read_pos + 1) % (@r).cap;
+        (@r).len -= 1;
+        return b;
+    }
+
+    // Transfers up to `count` bytes from `src` into the ring, limited
+    // by the free space, and returns the number transferred. The bulk
+    // form never fails.
+    func write(r: &ByteRing, src: Char[], count: UInt64): UInt64 {
+        let n = (@r).cap - (@r).len;
+        if n > count {
+            n = count;
+        }
+        let at = ((@r).read_pos + (@r).len) % (@r).cap;
+        // First run: from the write position to the end of the block.
+        let first = (@r).cap - at;
+        if first > n {
+            first = n;
+        }
+        let base = (@r).data as UInt64;
+        mem::copy((base + at) as &Void, src as &Void, first);
+        if n > first {
+            mem::copy(base as &Void,
+                (src as UInt64 + first) as &Void, n - first);
+        }
+        (@r).len += n;
+        return n;
+    }
+
+    // Transfers up to `count` bytes from the front of the ring into
+    // `dst`, limited by the available content, and returns the number
+    // transferred. The bulk form never fails.
+    func read(r: &ByteRing, dst: Char[], count: UInt64): UInt64 {
+        let n = (@r).len;
+        if n > count {
+            n = count;
+        }
+        let at = (@r).read_pos;
+        // First run: from the read position to the end of the block.
+        let first = (@r).cap - at;
+        if first > n {
+            first = n;
+        }
+        let base = (@r).data as UInt64;
+        mem::copy(dst as &Void, (base + at) as &Void, first);
+        if n > first {
+            mem::copy((dst as UInt64 + first) as &Void,
+                base as &Void, n - first);
+        }
+        (@r).read_pos = (at + n) % (@r).cap;
+        (@r).len -= n;
+        return n;
+    }
+
+    // Sets the ring length to zero; the capacity is unchanged.
+    func clear(r: &ByteRing): Void {
+        (@r).read_pos = 0;
+        (@r).len = 0;
+    }
+}

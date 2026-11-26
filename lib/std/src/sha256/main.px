@@ -1,0 +1,166 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: sha256
+ * SHA-256 message digest (FIPS 180-4).
+ *
+ * A from-scratch implementation built only on the language's
+ * fixed-width integer arithmetic: all operations are UInt32 XOR, AND,
+ * NOT, shifts, and additions, where each addition wraps modulo 2^32 as
+ * fixed-width unsigned arithmetic does. The message schedule and the
+ * 64-round compression function follow the standard exactly; the round
+ * constants and the initial state are the published SHA-256 values.
+ *
+ * The entry point is one-shot: sha256() pads the message internally
+ * (the 0x80 bit, zeros, and the 64-bit big-endian bit length) and
+ * writes the 32-byte digest to the caller's buffer. The module
+ * allocates nothing. There is no streaming API because the one-shot
+ * form covers the module's role; a streaming variant would hold the
+ * same State across calls.
+ */
+
+use mem;
+
+// The 64 SHA-256 round constants (fractional parts of the cube roots
+// of the first 64 primes), as a UInt32 table.
+let K: UInt32[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+// The eight working state words, updated once per 64-byte block.
+static State = Struct {
+    h: UInt32[8],
+};
+
+// Rotates a 32-bit word right by `n` bits.
+func __rotr(x: UInt32, n: UInt32): UInt32 = (x >> n) $ (x << (32 - n));
+
+// Reads one big-endian 32-bit word from `p`.
+func __be32(p: UInt64): UInt32 {
+    let w = (@(p as &UInt8) as UInt32) << 24;
+    w = w $ ((@((p + 1) as &UInt8) as UInt32) << 16);
+    w = w $ ((@((p + 2) as &UInt8) as UInt32) << 8);
+    w = w $ (@((p + 3) as &UInt8) as UInt32);
+    return w;
+}
+
+// Compresses one 64-byte message block into the state.
+func __block(st: &State, blk: &UInt8): Void {
+    let w: UInt32[64];
+    let b = blk as UInt64;
+    let t: UInt64 = 0;
+    while t < 16 {
+        w[t] = __be32(b + t * 4);
+        t += 1;
+    }
+    while t < 64 {
+        let x = w[t - 15];
+        let y = w[t - 2];
+        let s0 = __rotr(x, 7) ^ __rotr(x, 18) ^ (x >> 3);
+        let s1 = __rotr(y, 17) ^ __rotr(y, 19) ^ (y >> 10);
+        w[t] = w[t - 16] + s0 + w[t - 7] + s1;
+        t += 1;
+    }
+    let a = (@st).h[0];
+    let bb = (@st).h[1];
+    let c = (@st).h[2];
+    let d = (@st).h[3];
+    let e = (@st).h[4];
+    let f = (@st).h[5];
+    let g = (@st).h[6];
+    let h = (@st).h[7];
+    t = 0;
+    while t < 64 {
+        let s1 = __rotr(e, 6) ^ __rotr(e, 11) ^ __rotr(e, 25);
+        let ch = (e & f) ^ (~e & g);
+        let t1 = h + s1 + ch + K[t] + w[t];
+        let s0 = __rotr(a, 2) ^ __rotr(a, 13) ^ __rotr(a, 22);
+        let maj = (a & bb) ^ (a & c) ^ (bb & c);
+        let t2 = s0 + maj;
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = bb;
+        bb = a;
+        a = t1 + t2;
+        t += 1;
+    }
+    (@st).h[0] = (@st).h[0] + a;
+    (@st).h[1] = (@st).h[1] + bb;
+    (@st).h[2] = (@st).h[2] + c;
+    (@st).h[3] = (@st).h[3] + d;
+    (@st).h[4] = (@st).h[4] + e;
+    (@st).h[5] = (@st).h[5] + f;
+    (@st).h[6] = (@st).h[6] + g;
+    (@st).h[7] = (@st).h[7] + h;
+}
+
+module sha256 {
+    // Computes the SHA-256 digest of the `len` bytes at `data` and
+    // writes the 32-byte digest to `out`.
+    func sha256(data: &Void, len: UInt64, out: Char[32]): Void {
+        let st = State {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+        let p = data as UInt64;
+        let off: UInt64 = 0;
+        // Consume every full 64-byte block directly from the message.
+        while off + 64 <= len {
+            __block(&st, (p + off) as &UInt8);
+            off += 64;
+        }
+        // Assemble the final one or two padded blocks in a local
+        // buffer: remaining bytes, the 0x80 bit, zeros, and the 64-bit
+        // big-endian bit length of the whole message.
+        let tail: UInt8[128];
+        let tail_len = len - off;
+        mem::copy(&tail[0] as &Void, (p + off) as &Void, tail_len);
+        @((&tail[0] as UInt64 + tail_len) as &UInt8) = 0x80;
+        let blocks: UInt64;
+        let len_pos: UInt64;
+        if tail_len < 56 {
+            blocks = 1;
+            len_pos = 56;
+        } else {
+            blocks = 2;
+            len_pos = 120;
+        }
+        // Zero the padding span; the buffer content beyond tail_len + 1
+        // is unspecified until this loop fills it.
+        let z: UInt64 = tail_len + 1;
+        while z < len_pos {
+            @((&tail[0] as UInt64 + z) as &UInt8) = 0 as UInt8;
+            z += 1;
+        }
+        let bit_len = len * 8;
+        let k: UInt64 = 0;
+        while k < 8 {
+            @((&tail[0] as UInt64 + len_pos + k) as &UInt8) = ((bit_len >> ((7 - k) * 8)) & 255) as UInt8;
+            k += 1;
+        }
+        __block(&st, &tail[0]);
+        if blocks == 2 {
+            __block(&st, (&tail[0] as UInt64 + 64) as &UInt8);
+        }
+        // Emit the state as eight big-endian words.
+        let o = out as UInt64;
+        let i: UInt64 = 0;
+        while i < 8 {
+            let word = st.h[i];
+            @((o + i * 4) as &UInt8) = ((word >> 24) & 255) as UInt8;
+            @((o + i * 4 + 1) as &UInt8) = ((word >> 16) & 255) as UInt8;
+            @((o + i * 4 + 2) as &UInt8) = ((word >> 8) & 255) as UInt8;
+            @((o + i * 4 + 3) as &UInt8) = (word & 255) as UInt8;
+            i += 1;
+        }
+    }
+}

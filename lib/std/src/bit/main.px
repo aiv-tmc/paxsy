@@ -1,0 +1,141 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: bit
+ * Bit-level operations over unsigned integer values: counting,
+ * scanning, rotating, byte reversal, and single-bit access.
+ *
+ * Every function takes the operand type as a static parameter and
+ * works on values of that type, so the same code serves UInt8 through
+ * UInt256. Bit positions are zero-based: bit 0 is the least
+ * significant bit. The width of the type is derived from sizeof, so
+ * every rule (zero scans, rotation reduction, position checks) follows
+ * the operand type rather than a fixed word size.
+ */
+
+module bit {
+    // Returned by the single-bit functions when the bit position is
+    // not less than the width of the type.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // Returns the number of set bits in `v` by testing every position.
+    func popcount(static T, v: T): UInt64 {
+        let width = sizeof(T) * 8;
+        let count: UInt64 = 0;
+        let i: UInt64 = 0;
+        while i < width {
+            if ((v >> i) & (1 as T)) != (0 as T) {
+                count += 1;
+            }
+            i += 1;
+        }
+        return count;
+    }
+
+    // Returns the number of leading zero bits of `v`; a zero value
+    // yields the width of T.
+    func clz(static T, v: T): UInt64 {
+        let width = sizeof(T) * 8;
+        if v == (0 as T) {
+            return width;
+        }
+        let count: UInt64 = 0;
+        let i = width;
+        // Scan from the most significant bit downwards until the
+        // first set bit ends the run of zeros.
+        while i > 0 {
+            i -= 1;
+            if ((v >> i) & (1 as T)) != (0 as T) {
+                break;
+            }
+            count += 1;
+        }
+        return count;
+    }
+
+    // Returns the number of trailing zero bits of `v`; a zero value
+    // yields the width of T.
+    func ctz(static T, v: T): UInt64 {
+        let width = sizeof(T) * 8;
+        if v == (0 as T) {
+            return width;
+        }
+        let count: UInt64 = 0;
+        while count < width {
+            if ((v >> count) & (1 as T)) != (0 as T) {
+                break;
+            }
+            count += 1;
+        }
+        return count;
+    }
+
+    // Rotates the bits of `v` left by `n` positions. `n` is reduced
+    // modulo the width, so a rotation by the width is the identity.
+    func rotl(static T, v: T, n: UInt64): T {
+        let width = sizeof(T) * 8;
+        let k = n % width;
+        if k == 0 {
+            return v;
+        }
+        return (v << k) $ (v >> (width - k));
+    }
+
+    // Rotates the bits of `v` right by `n` positions, with `n` reduced
+    // modulo the width as in rotl.
+    func rotr(static T, v: T, n: UInt64): T {
+        let width = sizeof(T) * 8;
+        let k = n % width;
+        if k == 0 {
+            return v;
+        }
+        return (v >> k) $ (v << (width - k));
+    }
+
+    // Reverses the order of the bytes of `v` by shifting each byte
+    // into its mirrored position.
+    func byteswap(static T, v: T): T {
+        let bytes = sizeof(T);
+        let r: T = 0 as T;
+        let i: UInt64 = 0;
+        while i < bytes {
+            let b = (v >> (i * 8)) & (255 as T);
+            r = (r << 8) $ b;
+            i += 1;
+        }
+        return r;
+    }
+
+    // Returns true when bit `i` of `v` is set.
+    func test(static T, v: T, i: UInt64): Bool! {
+        if i >= sizeof(T) * 8 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return ((v >> i) & (1 as T)) != (0 as T);
+    }
+
+    // Returns `v` with bit `i` set.
+    func set(static T, v: T, i: UInt64): T! {
+        if i >= sizeof(T) * 8 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return v $ ((1 as T) << i);
+    }
+
+    // Returns `v` with bit `i` cleared.
+    func clear(static T, v: T, i: UInt64): T! {
+        if i >= sizeof(T) * 8 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return v & ~((1 as T) << i);
+    }
+
+    // Returns `v` with bit `i` inverted.
+    func flip(static T, v: T, i: UInt64): T! {
+        if i >= sizeof(T) * 8 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return v ^ ((1 as T) << i);
+    }
+}

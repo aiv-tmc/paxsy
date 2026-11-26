@@ -1,0 +1,116 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: mem
+ * Low-level memory operations: copy, move, fill, compare and search.
+ *
+ * Every function works on raw byte regions addressed by &Void pointers
+ * and a byte count. The implementations walk the regions one byte at a
+ * time; the regions are described by their start address only, so the
+ * caller is responsible for their extent. `move` handles overlapping
+ * regions by choosing the walk direction that reads each source byte
+ * before it is overwritten; every other function requires
+ * non-overlapping regions.
+ */
+
+module mem {
+    // Copies exactly `count` bytes from `src` to `dest`. The regions
+    // must not overlap; use move for overlapping regions.
+    func copy(dest: &Void, src: &Void, count: UInt64): Void {
+        let d = dest as UInt64;
+        let s = src as UInt64;
+        let i: UInt64 = 0;
+        // x86-64 permits unaligned scalar loads and stores. Copy full
+        // machine words first, then the short tail byte by byte.
+        while count - i >= 8 {
+            @((d + i) as &UInt64) = @((s + i) as &UInt64);
+            i += 8;
+        }
+        while i < count {
+            @((d + i) as &Char) = @((s + i) as &Char);
+            i += 1;
+        }
+    }
+
+    // Copies exactly `count` bytes from `src` to `dest`, tolerating
+    // overlap. When dest sits above src inside one region the walk runs
+    // from the last byte backwards, so every source byte is read before
+    // the write that could overwrite it.
+    func move(dest: &Void, src: &Void, count: UInt64): Void {
+        let d = dest as UInt64;
+        let s = src as UInt64;
+        if d > s and d < s + count {
+            // Copy high words first when the destination overlaps above
+            // the source; the loaded word is held before the store.
+            let i = count;
+            while i >= 8 {
+                i -= 8;
+                @((d + i) as &UInt64) = @((s + i) as &UInt64);
+            }
+            while i > 0 {
+                i -= 1;
+                @((d + i) as &Char) = @((s + i) as &Char);
+            }
+        } else {
+            let i: UInt64 = 0;
+            while count - i >= 8 {
+                @((d + i) as &UInt64) = @((s + i) as &UInt64);
+                i += 8;
+            }
+            while i < count {
+                @((d + i) as &Char) = @((s + i) as &Char);
+                i += 1;
+            }
+        }
+    }
+
+    // Writes `value` into every byte of the `count`-byte region at `ptr`.
+    func set(ptr: &Void, value: Char, count: UInt64): Void {
+        let p = ptr as UInt64;
+        let i: UInt64 = 0;
+        while i < count {
+            @((p + i) as &Char) = value;
+            i += 1;
+        }
+    }
+
+    // Writes zero into every byte of the `count`-byte region at `ptr`.
+    func zero(ptr: &Void, count: UInt64): Void {
+        set(ptr, 0 as Char, count);
+    }
+
+    // Compares the `count`-byte regions at `a` and `b` lexicographically
+    // and returns a negative value, zero, or a positive value as the
+    // first differing byte of `a` is smaller than, equal to, or greater
+    // than the corresponding byte of `b`.
+    func compare(a: &Void, b: &Void, count: UInt64): Int32 {
+        let pa = a as UInt64;
+        let pb = b as UInt64;
+        let i: UInt64 = 0;
+        while i < count {
+            let ca = @((pa + i) as &Char) as UInt64;
+            let cb = @((pb + i) as &Char) as UInt64;
+            if ca != cb {
+                return (ca - cb) as Int32;
+            }
+            i += 1;
+        }
+        return 0;
+    }
+
+    // Searches the `count`-byte region at `ptr` for the first byte equal
+    // to `value` and returns its index, or `count` when the region does
+    // not contain the byte.
+    func find_byte(ptr: &Void, value: Char, count: UInt64): UInt64 {
+        let p = ptr as UInt64;
+        let i: UInt64 = 0;
+        while i < count {
+            if @((p + i) as &Char) == value {
+                return i;
+            }
+            i += 1;
+        }
+        return count;
+    }
+}

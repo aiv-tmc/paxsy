@@ -1,0 +1,329 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: fs
+ * High-level filesystem operations over paths.
+ *
+ * The file module speaks in open handles; this module speaks in
+ * paths. It provides the one-shot operations a program reaches for
+ * constantly — testing existence, copying, moving, removing,
+ * atomically replacing content, measuring a tree, walking a tree —
+ * pairing acquisition and release internally so the caller needs no
+ * cleanup.
+ *
+ * write_file publishes atomically: the content is written to a
+ * temporary file next to the target and renamed over it, so a
+ * concurrent reader sees the old content or the new content, never
+ * a partial file; a crash between write and rename leaves a stale
+ * ".tmp" file that the next call overwrites. move_file renames
+ * within one filesystem and falls back to copy-and-remove across
+ * filesystems (error 18), which is not atomic. tree_size and walk
+ * recurse with a 4096-byte path buffer per level (error 36 beyond
+ * it) and a depth cap of 64 (error 40, doubling as symlink-cycle
+ * protection).
+ *
+ * Arguments for rename, unlink, and rmdir travel through
+ * file-private staging cells in .bss and volatile assembly
+ * sequences.
+ */
+
+use sys;
+use file;
+use str;
+use stat;
+use dir;
+use path;
+use mem;
+use string;
+use heap;
+
+// Staging cells shared with the assembly sequences below.
+let __fs_num: UInt64;
+let __fs_a1: UInt64;
+let __fs_a2: UInt64;
+let __fs_ret: UInt64;
+
+// Executes a two-argument system call (rename).
+func __fs2(): UInt64 {
+    volatile asm "mov rax, [__fs_num]";
+    volatile asm "mov rdi, [__fs_a1]";
+    volatile asm "mov rsi, [__fs_a2]";
+    volatile asm "syscall";
+    volatile asm "mov [__fs_ret], rax";
+    return __fs_ret;
+}
+
+// Executes a one-argument system call (unlink, rmdir).
+func __fs1(): UInt64 {
+    volatile asm "mov rax, [__fs_num]";
+    volatile asm "mov rdi, [__fs_a1]";
+    volatile asm "syscall";
+    volatile asm "mov [__fs_ret], rax";
+    return __fs_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything else
+// passes through.
+func __fs_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+// Issues rename(2) from `src` to `dst`.
+func __rename(src: Char[], dst: Char[]): Void! {
+    __fs_num = 82;
+    __fs_a1 = src as UInt64;
+    __fs_a2 = dst as UInt64;
+    try __fs_check(__fs2());
+}
+
+// Issues unlink(2) on `path`.
+func __unlink(path: Char[]): Void! {
+    __fs_num = 87;
+    __fs_a1 = path as UInt64;
+    try __fs_check(__fs1());
+}
+
+// Reports whether `name` is "." or "..", the two entries a walk
+// must never descend into.
+func __is_dot(name: Char[]): Bool {
+    if @(name as &Char) as UInt64 != 46 {
+        return false;
+    }
+    let second = @((name as UInt64 + 1) as &Char) as UInt64;
+    return second == 0 or second == 46;
+}
+
+// Maps a metadata record to the walk's entry kind.
+func __kind_of(st: stat::Stat): fs::EntryKind {
+    if stat::is_dir(st) {
+        return fs::EntryKind.Directory;
+    }
+    if stat::is_reg(st) {
+        return fs::EntryKind.Regular;
+    }
+    if stat::is_lnk(st) {
+        return fs::EntryKind.Symlink;
+    }
+    return fs::EntryKind.Other;
+}
+
+// Composes "parent/name" into `child`.
+func __join(parent: Char[], name: Char[], child: &Char): UInt64! {
+    return path::join_into(parent, name, child as UInt64 as Char[], 4096);
+}
+
+// Sums the size of `path`: the entries of a directory recursively,
+// the record's own size for regular files and symbolic links (links
+// are counted as links, not followed), and nothing for anything
+// else. Hard links count once per occurrence.
+func __tree(path: Char[], depth: UInt64): UInt64! {
+    if depth >= 64 {
+        return error 40;
+    }
+    let st = try stat::lstat(path);
+    if not stat::is_dir(st) {
+        return if stat::is_reg(st) or stat::is_lnk(st) { st.size } else { 0 };
+    }
+    let ents: Char[4096];
+    let n = try dir::list(path, &ents[0] as &Void, 4096);
+    let total: UInt64 = 0;
+    let e = dir::entry_first(&ents[0] as &Void, n);
+    while e != 0 {
+        let name = dir::entry_name(e);
+        if not __is_dot(name) {
+            let child: Char[4096];
+            try __join(path, name, &child[0]);
+            total += try __tree(&child[0], depth + 1);
+        }
+        e = dir::entry_next(e, &ents[0] as &Void, n);
+    }
+    return total;
+}
+
+// Visits `p` and, for a directory, each entry before descending
+// into it. Errors from the callback or the traversal abort the walk
+// and propagate.
+func __walk(p: Char[], depth: UInt64, f: func(path: Char[], kind: fs::EntryKind): Void!): Void! {
+    if depth >= 64 {
+        return error 40;
+    }
+    let st = try stat::lstat(p);
+    let kind = __kind_of(st);
+    try f(p, kind);
+    if kind != fs::EntryKind.Directory {
+        return;
+    }
+    let ents: Char[4096];
+    let n = try dir::list(p, &ents[0] as &Void, 4096);
+    let e = dir::entry_first(&ents[0] as &Void, n);
+    while e != 0 {
+        let name = dir::entry_name(e);
+        if not __is_dot(name) {
+            let child: Char[4096];
+            try __join(p, name, &child[0]);
+            try __walk(&child[0], depth + 1, f);
+        }
+        e = dir::entry_next(e, &ents[0] as &Void, n);
+    }
+}
+
+module fs {
+    // The kind of a directory entry, as reported to the walk
+    // callback.
+    static EntryKind = Enum {
+        Regular,
+        Directory,
+        Symlink,
+        Other,
+    };
+
+    // errno value with which rename reports names on different
+    // filesystems; handled internally as the move fallback trigger.
+    static EXDEV = 18;
+
+    // Returns true when `path` can be stat'ed. Any error — a
+    // missing path, a permission failure — yields false; use the
+    // stat module when the distinction matters.
+    func exists(path: Char[]): Bool {
+        stat::stat(path) catch |e| {
+            return false;
+        };
+        return true;
+    }
+
+    // Copies the content of `src` to `dst`, replacing `dst` when it
+    // exists and creating it with mode 0644 when it does not. The
+    // copy runs block by block through a 64 KiB heap buffer; an
+    // error mid-copy leaves a partial `dst`. Both descriptors are
+    // closed and the buffer freed on every exit path.
+    func copy_file(src: Char[], dst: Char[]): Void! {
+        let s = try file::File.open(src, sys::O_RDONLY);
+        let d = file::File.create(dst, 420) catch |e| {
+            file::File.close(s) catch |c| {
+                return error c;
+            };
+            return error e;
+        };
+        let buf = heap::alloc(65536) catch |e| {
+            file::File.close(d) catch |c| {
+            };
+            file::File.close(s) catch |c| {
+            };
+            return error e;
+        };
+        errdefer heap::free(buf);
+        errdefer {
+            file::File.close(d) catch |c| {
+            };
+            file::File.close(s) catch |c| {
+            };
+        }
+        while true {
+            let n = try file::File.read(s, buf, 65536);
+            if n == 0 {
+                break;
+            }
+            try file::File.write_all(d, buf, n);
+        }
+        heap::free(buf);
+        try file::File.close(d);
+        try file::File.close(s);
+    }
+
+    // Renames `src` to `dst`. When the rename fails because the two
+    // paths live on different devices (error 18), the function falls
+    // back to copying the content and removing the source; in that
+    // case an error mid-copy leaves both paths partially updated.
+    func move_file(src: Char[], dst: Char[]): Void! {
+        __rename(src, dst) catch |e| {
+            if e != EXDEV {
+                return error e;
+            }
+            // Cross-device: copy byte for byte, then remove the
+            // source. A copy failure leaves the source untouched.
+            try copy_file(src, dst);
+            try __unlink(src);
+        };
+    }
+
+    // Removes a file or an empty directory.
+    func remove_file(path: Char[]): Void! {
+        __unlink(path) catch |e| {
+            // 21 (EISDIR): the path names a directory, which rmdir
+            // handles when it is empty.
+            if e != 21 {
+                return error e;
+            }
+            __fs_num = 84;
+            __fs_a1 = path as UInt64;
+            try __fs_check(__fs1());
+        };
+    }
+
+    // Writes `len` bytes of `data` to `path` atomically: the content
+    // lands in a temporary file in the same directory and is renamed
+    // over the target. Cleanup of the temporary on failure is
+    // best-effort and never masks the original error.
+    func write_file(path: Char[], data: Char[], len: UInt64): Void! {
+        let plen = string::len(path);
+        if plen + 4 >= 4096 {
+            return error 36;
+        }
+        // Compose the temporary path as "path.tmp".
+        let tmp: Char[4096];
+        mem::copy(&tmp[0] as &Void, path as &Void, plen);
+        @((&tmp[0] as UInt64 + plen) as &Char) = 46 as Char;
+        @((&tmp[0] as UInt64 + plen + 1) as &Char) = 116 as Char;
+        @((&tmp[0] as UInt64 + plen + 2) as &Char) = 109 as Char;
+        @((&tmp[0] as UInt64 + plen + 3) as &Char) = 112 as Char;
+        @((&tmp[0] as UInt64 + plen + 4) as &Char) = 0 as Char;
+        let t = &tmp[0] as UInt64 as Char[];
+        let f = file::File.create(t, 420) catch |e| {
+            return error e;
+        };
+        file::File.write_all(f, data as &Void, len) catch |e| {
+            file::File.close(f) catch |c| {
+            };
+            __unlink(t) catch |c| {
+            };
+            return error e;
+        };
+        file::File.close(f) catch |e| {
+            __unlink(t) catch |c| {
+            };
+            return error e;
+        };
+        __rename(t, path) catch |e| {
+            __unlink(t) catch |c| {
+            };
+            return error e;
+        };
+    }
+
+    // Reads the whole file and returns it as an owning string. The
+    // caller owns the result and releases it with str::destroy.
+    func read_text(path: Char[]): str::Str! {
+        let blob = try file::read_file(path);
+        return str::Str {blob.data, blob.len, blob.len};
+    }
+
+    // Returns the total size in bytes of every regular file in the
+    // directory tree rooted at `path`.
+    func tree_size(path: Char[]): UInt64! {
+        return __tree(path, 0);
+    }
+
+    // Calls `f` once for every entry in the directory tree rooted at
+    // `root`, including `root` itself, before the entries of a
+    // directory and before descending into it. Errors returned by
+    // `f` stop the walk and propagate.
+    func walk(root: Char[], f: func(path: Char[], kind: EntryKind): Void!): Void! {
+        try __walk(root, 0, f);
+    }
+}

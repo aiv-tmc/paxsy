@@ -1,0 +1,190 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: unicode
+ * UTF-8 validation, decoding, counting, and encoding, plus ASCII
+ * case helpers.
+ *
+ * The decoder enforces the full UTF-8 well-formedness rules: lead
+ * bytes select one of four sequence lengths, continuation bytes carry
+ * six payload bits each, overlong encodings are rejected by checking
+ * the decoded value against the shortest form that could produce it,
+ * and the surrogate range and values above 0x10FFFF are invalid.
+ * Functions that require valid input report ERR_INVALID; validation
+ * itself only reports a verdict.
+ */
+
+module unicode {
+    // A Unicode code point: 0 through 0x10FFFF excluding the
+    // surrogate range 0xD800 through 0xDFFF.
+    static CodePoint = UInt32;
+
+    // Returned when input is not valid UTF-8 where validity is
+    // required, or a code point is outside the encodable range.
+    static ERR_INVALID = 22;
+
+    // Reports whether the `len` bytes at `s` form a valid UTF-8
+    // sequence: every code point is decoded in turn and any malformed
+    // sequence ends the scan with a negative verdict.
+    func validate(s: Char[], len: UInt64): Bool {
+        let pos: UInt64 = 0;
+        while pos < len {
+            decode_at(s, len, &pos) catch |e| {
+                return false;
+            };
+        }
+        return true;
+    }
+
+    // Reports whether every byte of the `len` bytes at `s` is below
+    // 0x80, which makes the text pure ASCII and every code point a
+    // single byte.
+    func is_ascii(s: Char[], len: UInt64): Bool {
+        let p = s as UInt64;
+        let i: UInt64 = 0;
+        while i < len {
+            if (@((p + i) as &Char) as UInt64) >= 0x80 {
+                return false;
+            }
+            i += 1;
+        }
+        return true;
+    }
+
+    // Decodes one code point at the byte offset `*pos` and advances
+    // `*pos` past its bytes. Reports ERR_INVALID when the offset has
+    // reached the end of the text, a continuation byte is missing or
+    // malformed, the sequence is an overlong encoding, or the value
+    // is a surrogate or above 0x10FFFF.
+    func decode_at(s: Char[], len: UInt64, pos: &UInt64): CodePoint! {
+        let p = s as UInt64;
+        let i = @pos;
+        if i >= len {
+            return error ERR_INVALID;
+        }
+        let b0 = @((p + i) as &Char) as UInt64;
+        if b0 < 0x80 {
+            // Single-byte sequence: the code point is the byte itself.
+            @pos = i + 1;
+            return b0 as CodePoint;
+        }
+        // The lead byte selects the sequence length and seeds the
+        // value with the bits below its length marker.
+        let need: UInt64 = 0;
+        let cp: UInt64 = 0;
+        let lo: UInt64 = 0;
+        if b0 >= 0xC2 and b0 <= 0xDF {
+            need = 1;
+            cp = b0 & 0x1F;
+            lo = 0x80;
+        } else if b0 >= 0xE0 and b0 <= 0xEF {
+            need = 2;
+            cp = b0 & 0x0F;
+            lo = 0x800;
+        } else if b0 >= 0xF0 and b0 <= 0xF4 {
+            need = 3;
+            cp = b0 & 0x07;
+            lo = 0x10000;
+        } else {
+            // 0x80..0xC1 and 0xF5..0xFF never lead a valid sequence.
+            return error ERR_INVALID;
+        }
+        if i + need >= len {
+            return error ERR_INVALID;
+        }
+        let j: UInt64 = 1;
+        while j <= need {
+            let bx = @((p + i + j) as &Char) as UInt64;
+            if bx < 0x80 or bx > 0xBF {
+                return error ERR_INVALID;
+            }
+            cp = (cp << 6) $ (bx & 0x3F);
+            j += 1;
+        }
+        // Reject overlong forms, surrogates, and values past the
+        // Unicode range in one ordered test ladder.
+        if cp < lo or (cp >= 0xD800 and cp <= 0xDFFF) or cp > 0x10FFFF {
+            return error ERR_INVALID;
+        }
+        @pos = i + need + 1;
+        return cp as CodePoint;
+    }
+
+    // Returns the number of code points in the `len` bytes at `s`, or
+    // ERR_INVALID when the text is not valid UTF-8.
+    func count(s: Char[], len: UInt64): UInt64! {
+        let n: UInt64 = 0;
+        let pos: UInt64 = 0;
+        while pos < len {
+            try decode_at(s, len, &pos);
+            n += 1;
+        }
+        return n;
+    }
+
+    // Returns the byte offset at which the `n`-th code point of the
+    // text starts, or `len` when the text holds fewer than `n` code
+    // points. Reports ERR_INVALID for malformed input.
+    func byte_offset_of(s: Char[], len: UInt64, n: UInt64): UInt64! {
+        let pos: UInt64 = 0;
+        let seen: UInt64 = 0;
+        while seen < n {
+            if pos >= len {
+                return len;
+            }
+            try decode_at(s, len, &pos);
+            seen += 1;
+        }
+        return pos;
+    }
+
+    // Encodes `cp` as UTF-8 into `out`, which must have room for up
+    // to four bytes, and returns the number of bytes written. Reports
+    // ERR_INVALID for surrogates and values above 0x10FFFF.
+    func encode(cp: CodePoint, out: Char[]): UInt64! {
+        let v = cp as UInt64;
+        if (v >= 0xD800 and v <= 0xDFFF) or v > 0x10FFFF {
+            return error ERR_INVALID;
+        }
+        let d = out as UInt64;
+        if v < 0x80 {
+            @((d) as &Char) = v as Char;
+            return 1;
+        }
+        if v < 0x800 {
+            @((d) as &Char) = (0xC0 $ (v >> 6)) as Char;
+            @((d + 1) as &Char) = (0x80 $ (v & 0x3F)) as Char;
+            return 2;
+        }
+        if v < 0x10000 {
+            @((d) as &Char) = (0xE0 $ (v >> 12)) as Char;
+            @((d + 1) as &Char) = (0x80 $ ((v >> 6) & 0x3F)) as Char;
+            @((d + 2) as &Char) = (0x80 $ (v & 0x3F)) as Char;
+            return 3;
+        }
+        @((d) as &Char) = (0xF0 $ (v >> 18)) as Char;
+        @((d + 1) as &Char) = (0x80 $ ((v >> 12) & 0x3F)) as Char;
+        @((d + 2) as &Char) = (0x80 $ ((v >> 6) & 0x3F)) as Char;
+        @((d + 3) as &Char) = (0x80 $ (v & 0x3F)) as Char;
+        return 4;
+    }
+
+    // Maps an ASCII lowercase letter to uppercase; every other code
+    // unit is returned unchanged.
+    func upper_ascii(c: Char): Char {
+        if c >= 'a' and c <= 'z' {
+            return (c as UInt64 - 32) as Char;
+        }
+        return c;
+    }
+
+    // Maps an ASCII uppercase letter to lowercase; every other code
+    // unit is returned unchanged.
+    func lower_ascii(c: Char): Char {
+        if c >= 'A' and c <= 'Z' {
+            return (c as UInt64 + 32) as Char;
+        }
+        return c;
+    }
+}

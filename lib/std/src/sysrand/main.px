@@ -1,0 +1,84 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: sysrand
+ * Kernel randomness.
+ *
+ * getrandom(2) fills a buffer from the kernel's CSPRNG — the same
+ * source that backs /dev/urandom — and is the only randomness in
+ * this library suitable for keys, nonces and session identifiers;
+ * the random module's stream is fast but predictable, which is right
+ * for simulations and wrong for secrets. The syscall may return
+ * fewer bytes than requested, so fill() loops until the buffer is
+ * full; a short read is a pause, not an error, and only a genuine
+ * failure surfaces as one. The GRND_NONBLOCK flag exists for callers
+ * that would rather poll during early boot than block; it is
+ * exported as a constant rather than wired into fill(), whose
+ * contract is blocking.
+ *
+ * Arguments travel through file-private staging cells in .bss and
+ * `syscall` is issued from a volatile assembly sequence.
+ */
+
+// Staging cells shared with the assembly sequence below.
+let __gr_num: UInt64;
+let __gr_a1: UInt64;
+let __gr_a2: UInt64;
+let __gr_a3: UInt64;
+let __gr_ret: UInt64;
+
+// Executes the three-argument getrandom(2) system call.
+func __gr3(): UInt64 {
+    volatile asm "mov rax, [__gr_num]";
+    volatile asm "mov rdi, [__gr_a1]";
+    volatile asm "mov rsi, [__gr_a2]";
+    volatile asm "mov rdx, [__gr_a3]";
+    volatile asm "syscall";
+    volatile asm "mov [__gr_ret], rax";
+    return __gr_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything else
+// passes through.
+func __gr_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module sysrand {
+    // The getrandom(2) flag for non-blocking behaviour, exported for
+    // callers with their own staging needs.
+    static GRND_NONBLOCK = 1;
+
+    // Fills the first `len` bytes at `buf` with kernel random bytes,
+    // looping past short reads until every byte is written.
+    func fill(buf: &Void, len: UInt64): Void! {
+        let p = buf as UInt64;
+        let done: UInt64 = 0;
+        while done < len {
+            __gr_num = 318;
+            __gr_a1 = p + done;
+            __gr_a2 = len - done;
+            __gr_a3 = 0;
+            let n = try __gr_check(__gr3());
+            if n == 0 {
+                // The kernel never makes progress: report a generic
+                // I/O failure rather than spinning.
+                return error 5;
+            }
+            done += n;
+        }
+    }
+
+    // Returns one kernel-random UInt64.
+    func u64(): UInt64! {
+        let buf: Char[8];
+        try fill(&buf[0] as &Void, 8);
+        return @((&buf[0] as UInt64) as &UInt64);
+    }
+}

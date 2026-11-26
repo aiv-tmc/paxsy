@@ -1,0 +1,181 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: array
+ * Array, a growable array storing elements of any type inline.
+ *
+ * Element i occupies the byte range [i * elem_size, (i+1) * elem_size)
+ * of the backing allocation. The element size and alignment are
+ * recorded at creation from sizeof and alignof, and every function
+ * performs the address arithmetic on the caller's behalf. Elements are
+ * bytewise copies of their values; no destructors run, so values that
+ * own resources follow an explicit transfer policy chosen by the
+ * caller. The heap hands out 16-byte-aligned blocks, which covers the
+ * alignment of every built-in element type.
+ *
+ * Ownership: the caller of make owns the array; destroy (usually
+ * scheduled with defer or errdefer) releases it.
+ */
+
+use heap;
+use mem;
+
+module array {
+    // A growable typed array.
+    static Array = Struct {
+        data: &Void,
+        len: UInt64,
+        cap: UInt64,
+        elem_size: UInt64,
+        elem_align: UInt64,
+    };
+
+    // Returned when a growth allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returned when an index is out of bounds or an operation
+    // requires a non-empty array.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // Smallest backing allocation, in elements.
+    static MIN_CAP = 8;
+
+    // Returns an empty array that stores elements of type T; no
+    // memory is allocated until the first operation that needs
+    // capacity.
+    func make(static T): Array = Array {0, 0, 0, sizeof(T), alignof(T)};
+
+    // Returns a new array containing a bytewise copy of the elements
+    // of the view `items`.
+    func from(static T, items: T[..]): Array! {
+        let v = make(T);
+        if items.len == 0 {
+            return v;
+        }
+        try reserve(&v, items.len);
+        let i: UInt64 = 0;
+        while i < items.len {
+            @((v.data as UInt64 + i * v.elem_size) as &T) = items[i];
+            i += 1;
+        }
+        v.len = items.len;
+        return v;
+    }
+
+    // Ensures the array can hold `want` elements, doubling the
+    // backing allocation until it suffices. The length and the
+    // content are unchanged.
+    func reserve(v: &Array, want: UInt64): Void! {
+        if want <= (@v).cap {
+            return;
+        }
+        let newcap = if (@v).cap == 0 { MIN_CAP } else { (@v).cap };
+        while newcap < want {
+            // Saturate at the requested size before doubling can wrap.
+            if newcap > 9223372036854775807 {
+                newcap = want;
+                break;
+            }
+            newcap *= 2;
+        }
+        if (@v).elem_size == 0 or newcap > 18446744073709551615 / (@v).elem_size {
+            return error ERR_OUT_OF_MEMORY;
+        }
+        let bytes = newcap * (@v).elem_size;
+        let fresh = try heap::realloc((@v).data, bytes);
+        (@v).data = fresh;
+        (@v).cap = newcap;
+    }
+
+    // Appends `item` to the end of the array.
+    func push(static T, v: &Array, item: T): Void! {
+        try reserve(v, (@v).len + 1);
+        @(((@v).data as UInt64 + (@v).len * (@v).elem_size) as &T) = item;
+        (@v).len += 1;
+    }
+
+    // Removes and returns the last element; reports ERR_OUT_OF_RANGE
+    // when the array is empty.
+    func pop(static T, v: &Array): T! {
+        if (@v).len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        (@v).len -= 1;
+        return @(((@v).data as UInt64 + (@v).len * (@v).elem_size) as &T);
+    }
+
+    // Returns the element at index `i`.
+    func get(static T, v: &Array, i: UInt64): T! {
+        if i >= (@v).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return @(((@v).data as UInt64 + i * (@v).elem_size) as &T);
+    }
+
+    // Overwrites the element at index `i`.
+    func set(static T, v: &Array, i: UInt64, item: T): Void! {
+        if i >= (@v).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        @(((@v).data as UInt64 + i * (@v).elem_size) as &T) = item;
+    }
+
+    // Inserts `item` before index `i`, which may equal len, shifting
+    // the following elements up by one position.
+    func insert(static T, v: &Array, i: UInt64, item: T): Void! {
+        if i > (@v).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        try reserve(v, (@v).len + 1);
+        let base = (@v).data as UInt64;
+        let esz: UInt64 = (@v).elem_size;
+        // move tolerates overlap and walks downwards here, so the
+        // tail is copied before it is overwritten.
+        mem::move((base + (i + 1) * esz) as &Void,
+            (base + i * esz) as &Void, ((@v).len - i) * esz);
+        @((base + i * esz) as &T) = item;
+        (@v).len += 1;
+    }
+
+    // Removes and returns the element at index `i`, shifting the
+    // following elements down by one position.
+    func remove(static T, v: &Array, i: UInt64): T! {
+        if i >= (@v).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        let base = (@v).data as UInt64;
+        let esz: UInt64 = (@v).elem_size;
+        let item = @((base + i * esz) as &T);
+        mem::move((base + i * esz) as &Void,
+            (base + (i + 1) * esz) as &Void, ((@v).len - i - 1) * esz);
+        (@v).len -= 1;
+        return item;
+    }
+
+    // Returns a view of the live elements selected by `range` without
+    // copying. The view aliases the backing allocation and is
+    // invalidated by any operation that mutates the array.
+    func slice(static T, v: &Array, range): T[..] {
+        let p = ((@v).data as UInt64) as &T;
+        return p[range];
+    }
+
+    // Sets the length to zero while keeping the backing allocation
+    // for reuse. Element bytes are discarded without invoking
+    // destructors.
+    func clear(v: &Array): Void {
+        (@v).len = 0;
+    }
+
+    // Releases the backing allocation and returns the array to the
+    // state produced by make.
+    func destroy(v: &Array): Void {
+        if (@v).data != 0 {
+            heap::free((@v).data);
+        }
+        (@v).data = 0;
+        (@v).len = 0;
+        (@v).cap = 0;
+    }
+}

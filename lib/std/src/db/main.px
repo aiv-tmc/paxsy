@@ -1,0 +1,379 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: db
+ * Driver-based database connectivity.
+ *
+ * This module defines the driver interface for connecting to database
+ * engines and executing statements; a database driver is supplied as a
+ * package that implements the Driver interface, and applications use
+ * the same connection, transaction, query, and typed-parameter API
+ * with each driver. The four handle types are opaque: their values
+ * are created and owned by the driver and refer to resources the
+ * driver manages.
+ *
+ * Dispatch: register_driver() records a driver under a URL scheme
+ * ("postgresql", "sqlite", ...), and connect() selects the driver by
+ * the scheme prefix of the connection string. Because later calls
+ * receive only opaque handles, the module tracks which driver owns
+ * each live handle in a fixed-size ring; disconnect(), commit(),
+ * rollback(), and finalize() remove their handle, and a full ring
+ * evicts the oldest entry, which covers result sets, whose lifetime
+ * the API leaves to the driver.
+ *
+ * The module allocates nothing: the registry and the handle ring are
+ * static tables. Module-defined error codes sit above the Linux errno
+ * range so they never collide with kernel or driver codes.
+ *
+ * Parameter passing: bind() hands the driver the address of the value
+ * and its compile-time size. Scalar types arrive by value; a
+ * NUL-terminated Char[] arrives as an eight-byte pointer slot; a byte
+ * buffer arrives as the caller's pointer-plus-count structure. The
+ * type chosen at the call site is the type metadata — the driver
+ * interprets the bytes per its own published contract and copies what
+ * it needs before bind() returns.
+ */
+
+// errno-style codes for invalid arguments (22) and a full driver
+// registry (12).
+static __EINVAL = 22;
+static __ENOMEM = 12;
+
+// Registry geometry: at most 16 drivers, scheme names up to 31 bytes
+// plus NUL, and 256 live handles tracked in the ring.
+static __MAX_DRIVERS = 16;
+static __SCHEME_SLOT = 32;
+static __MAX_HANDLES = 256;
+
+// Driver registry: scheme copies, their lengths, and the drivers.
+let __rg_scheme: UInt8[512];
+let __rg_scheme_len: UInt64[16];
+let __rg_driver: UInt64[16];
+let __rg_count: UInt64;
+
+// Handle ring: handle address paired with its driver index.
+let __h_addr: UInt64[256];
+let __h_drv: UInt64[256];
+let __h_next: UInt64;
+
+// Counts the bytes of a NUL-terminated string.
+func __slen(s: Char[]): UInt64 {
+    let base = s as UInt64;
+    let n: UInt64 = 0;
+    while @((base + n) as &UInt8) != 0 {
+        n += 1;
+    }
+    return n;
+}
+
+// Reports whether the `n` bytes at `a` equal the `n` bytes at `b`.
+func __eq(a: UInt64, b: UInt64, n: UInt64): Bool {
+    let i: UInt64 = 0;
+    while i < n {
+        if @((a + i) as &UInt8) != @((b + i) as &UInt8) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// Finds the driver index registered for the `n`-byte scheme at `s`,
+// or -1 when no driver claims it.
+func __find_driver(s: UInt64, n: UInt64): Int64 {
+    let i: UInt64 = 0;
+    while i < __rg_count {
+        if __rg_scheme_len[i] == n {
+            if __eq(s, &__rg_scheme[i * __SCHEME_SLOT] as UInt64, n) {
+                return i as Int64;
+            }
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+// Records `addr` as owned by driver `drv`, evicting the oldest entry
+// when the ring is full.
+func __track(addr: UInt64, drv: UInt64): Void {
+    __h_addr[__h_next] = addr;
+    __h_drv[__h_next] = drv;
+    __h_next = (__h_next + 1) % __MAX_HANDLES;
+}
+
+// Returns the driver index owning `addr`, or -1 for an unknown or
+// already released handle.
+func __driver_of(addr: UInt64): Int64 {
+    let i: UInt64 = 0;
+    while i < __MAX_HANDLES {
+        if __h_addr[i] == addr {
+            return __h_drv[i] as Int64;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+// Drops `addr` from the ring; unknown handles are ignored.
+func __untrack(addr: UInt64): Void {
+    let i: UInt64 = 0;
+    while i < __MAX_HANDLES {
+        if __h_addr[i] == addr {
+            __h_addr[i] = 0;
+            return;
+        }
+        i += 1;
+    }
+}
+
+module db {
+    // Module-defined error codes, above the Linux errno range.
+    static ERR_CONNECTION = 1001;
+    static ERR_IO = 1002;
+    static ERR_TRANSACTION = 1003;
+    static ERR_QUERY = 1004;
+    static ERR_BIND = 1005;
+
+    // Opaque handle bodies; applications and this module only ever
+    // hold pointers to them, and the pointees are created and owned by
+    // the driver. The placeholder field pins each type's identity.
+    static ConnHandle = Struct {
+        handle_marker: UInt8,
+    };
+    static TxHandle = Struct {
+        handle_marker: UInt8,
+    };
+    static StmtHandle = Struct {
+        handle_marker: UInt8,
+    };
+    static ResultSetHandle = Struct {
+        handle_marker: UInt8,
+    };
+
+    static Connection = &ConnHandle;
+    static Transaction = &TxHandle;
+    static Statement = &StmtHandle;
+    static ResultSet = &ResultSetHandle;
+
+    // The driver interface a database package implements: one function
+    // per public operation. Handles cross the boundary as the opaque
+    // aliases above; the driver casts them to its own types. bind
+    // receives the value's address and its compile-time size.
+    static Driver = Struct {
+        connect: func(connection_string: Char[]): Connection!,
+        disconnect: func(conn: Connection): Void!,
+        begin_transaction: func(conn: Connection): Transaction!,
+        commit: func(tx: Transaction): Void!,
+        rollback: func(tx: Transaction): Void!,
+        query: func(tx: Transaction, sql: Char[]): ResultSet!,
+        execute: func(tx: Transaction, sql: Char[]): Int32!,
+        prepare: func(tx: Transaction, sql: Char[]): Statement!,
+        bind: func(statement: Statement, index: UInt32, value: &Void, size: UInt64): Void!,
+        execute_prepared: func(statement: Statement): Int32!,
+        finalize: func(statement: Statement): Void!,
+    };
+
+    // Registers `driver` for the URL scheme `scheme` ("postgresql",
+    // "sqlite", ...); a scheme that is already registered is rebound
+    // to the new driver. Reports 22 for an empty or overlong scheme
+    // or a null driver, and 12 when the registry is full.
+    func register_driver(scheme: Char[], driver: &Driver): Void! {
+        let n = __slen(scheme);
+        if n == 0 or n >= __SCHEME_SLOT {
+            return error __EINVAL;
+        }
+        if (driver as UInt64) == 0 {
+            return error __EINVAL;
+        }
+        let base = scheme as UInt64;
+        let slot = __find_driver(base, n);
+        if slot >= 0 {
+            // Rebind the existing scheme entry.
+            __rg_driver[slot as UInt64] = driver as UInt64;
+            return;
+        }
+        if __rg_count >= __MAX_DRIVERS {
+            return error __ENOMEM;
+        }
+        let dst = &__rg_scheme[__rg_count * __SCHEME_SLOT] as UInt64;
+        let i: UInt64 = 0;
+        while i < n {
+            @((dst + i) as &UInt8) = @((base + i) as &UInt8);
+            i += 1;
+        }
+        __rg_scheme_len[__rg_count] = n;
+        __rg_driver[__rg_count] = driver as UInt64;
+        __rg_count += 1;
+    }
+
+    // Establishes a connection through the driver registered for the
+    // connection string's scheme. ERR_CONNECTION is reported when the
+    // string carries no "scheme://" prefix or no driver claims the
+    // scheme; the driver's own error propagates otherwise.
+    func connect(connection_string: Char[]): Connection! {
+        let base = connection_string as UInt64;
+        let i: UInt64 = 0;
+        while true {
+            let c = @((base + i) as &UInt8);
+            if c == 0 {
+                return error ERR_CONNECTION;
+            }
+            if c == 58 {
+                if @((base + i + 1) as &UInt8) == 47 and @((base + i + 2) as &UInt8) == 47 {
+                    break;
+                }
+            }
+            i += 1;
+        }
+        if i == 0 {
+            return error ERR_CONNECTION;
+        }
+        let slot = __find_driver(base, i);
+        if slot < 0 {
+            return error ERR_CONNECTION;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).connect;
+        let conn = try f(connection_string);
+        __track(conn as UInt64, slot as UInt64);
+        return conn;
+    }
+
+    // Closes the connection and releases its registry entry. An
+    // unknown handle reports ERR_IO; when the driver fails to close,
+    // the entry is kept so the call may be retried.
+    func disconnect(conn: Connection): Void! {
+        let slot = __driver_of(conn as UInt64);
+        if slot < 0 {
+            return error ERR_IO;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).disconnect;
+        try f(conn);
+        __untrack(conn as UInt64);
+    }
+
+    // Begins a new transaction on the given connection.
+    func begin_transaction(conn: Connection): Transaction! {
+        let slot = __driver_of(conn as UInt64);
+        if slot < 0 {
+            return error ERR_TRANSACTION;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).begin_transaction;
+        let tx = try f(conn);
+        __track(tx as UInt64, slot as UInt64);
+        return tx;
+    }
+
+    // Commits the transaction, making its changes permanent, and
+    // releases its entry. On failure the entry is kept: the
+    // transaction may still be live and can be rolled back.
+    func commit(tx: Transaction): Void! {
+        let slot = __driver_of(tx as UInt64);
+        if slot < 0 {
+            return error ERR_TRANSACTION;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).commit;
+        try f(tx);
+        __untrack(tx as UInt64);
+    }
+
+    // Rolls back the transaction, discarding its changes, and
+    // releases its entry.
+    func rollback(tx: Transaction): Void! {
+        let slot = __driver_of(tx as UInt64);
+        if slot < 0 {
+            return error ERR_TRANSACTION;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).rollback;
+        try f(tx);
+        __untrack(tx as UInt64);
+    }
+
+    // Executes a query that returns rows and returns the result set.
+    // The result set's lifetime is managed by the driver.
+    func query(tx: Transaction, sql: Char[]): ResultSet! {
+        let slot = __driver_of(tx as UInt64);
+        if slot < 0 {
+            return error ERR_QUERY;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).query;
+        let rs = try f(tx, sql);
+        __track(rs as UInt64, slot as UInt64);
+        return rs;
+    }
+
+    // Executes a statement that modifies the database and returns the
+    // number of rows that were affected.
+    func execute(tx: Transaction, sql: Char[]): Int32! {
+        let slot = __driver_of(tx as UInt64);
+        if slot < 0 {
+            return error ERR_QUERY;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).execute;
+        return try f(tx, sql);
+    }
+
+    // Prepares a statement for repeated execution. Every successful
+    // prepare must be paired with exactly one finalize.
+    func prepare(tx: Transaction, sql: Char[]): Statement! {
+        let slot = __driver_of(tx as UInt64);
+        if slot < 0 {
+            return error ERR_QUERY;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).prepare;
+        let st = try f(tx, sql);
+        __track(st as UInt64, slot as UInt64);
+        return st;
+    }
+
+    // Binds one typed parameter to a prepared statement; `index` is
+    // one-based. The driver receives the value's address and its
+    // compile-time size: fixed-width integers, Real32, Real64, and
+    // Bool arrive by value, a NUL-terminated Char[] as an eight-byte
+    // pointer slot, and a byte buffer as the caller's
+    // pointer-plus-count structure. ERR_BIND is reported for an
+    // unknown statement; the driver's own error propagates when it
+    // does not support the type.
+    func bind(static T, statement: Statement, index: UInt32, value: T): Void! {
+        let slot = __driver_of(statement as UInt64);
+        if slot < 0 {
+            return error ERR_BIND;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).bind;
+        try f(statement, index, &value as &Void, sizeof(T));
+    }
+
+    // Executes a prepared statement after its parameters have been
+    // bound and returns the number of affected rows.
+    func execute_prepared(statement: Statement): Int32! {
+        let slot = __driver_of(statement as UInt64);
+        if slot < 0 {
+            return error ERR_QUERY;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).execute_prepared;
+        return try f(statement);
+    }
+
+    // Releases the resources held by a prepared statement and its
+    // registry entry.
+    func finalize(statement: Statement): Void! {
+        let slot = __driver_of(statement as UInt64);
+        if slot < 0 {
+            return error ERR_QUERY;
+        }
+        let d = __rg_driver[slot as UInt64] as &Driver;
+        let f = (@d).finalize;
+        try f(statement);
+        __untrack(statement as UInt64);
+    }
+}

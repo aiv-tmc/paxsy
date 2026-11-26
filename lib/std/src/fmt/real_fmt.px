@@ -1,0 +1,360 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: fmt_real_fmt
+ * Package-internal real-number formatters backing fmt::real_to_str
+ * and fmt::real_to_str_fixed.
+ *
+ * `shortest` renders a finite value with a widening significant-digit
+ * count and verifies each candidate by parsing it back through
+ * fmt_real_parse::parse until the bit pattern matches, which yields
+ * the shortest string that round-trips; seventeen digits always
+ * suffice for a Real64. Plain decimal notation covers decimal
+ * exponents in [-6, 20]; outside that window scientific notation
+ * keeps the string inside the 32-byte buffer contract. `fixed`
+ * rounds the scaled fraction once, half to even, and zero-pads the
+ * fraction to the requested width.
+ */
+
+use fmt_real_parse;
+
+// Raw bit access to a Real64: the variants share one 8-byte cell.
+static __FBits = Union {
+    f: Real64,
+    u: UInt64,
+};
+
+// Exact powers of ten for scaling; see fmt_real_parse.
+static __POW10: Real64[23] = {
+    1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0,
+    10000000.0, 100000000.0, 1000000000.0, 10000000000.0,
+    100000000000.0, 1000000000000.0, 10000000000000.0,
+    100000000000000.0, 1000000000000000.0, 10000000000000000.0,
+    100000000000000000.0, 1000000000000000000.0,
+    10000000000000000000.0, 100000000000000000000.0,
+    1000000000000000000000.0, 10000000000000000000000.0,
+};
+
+// Integer powers of ten for digit bookkeeping and carry detection.
+static __IPOW10: UInt64[18] = {
+    1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000,
+    1000000000, 10000000000, 100000000000, 1000000000000,
+    10000000000000, 100000000000000, 1000000000000000,
+    10000000000000000, 100000000000000000,
+};
+
+// errno-style code matching the public fmt constant.
+static ERR_BUFFER_TOO_SMALL = 36;
+
+// IEEE-754 field masks on the raw bits of a Real64.
+static SIGN_MASK = 0x8000000000000000;
+static EXP_MASK = 0x7FF0000000000000;
+static FRAC_MASK = 0x000FFFFFFFFFFFFF;
+static MAG_MASK = 0x7FFFFFFFFFFFFFFF;
+
+// Reinterprets the bits of `v` as a UInt64.
+func __bits_of(v: Real64): UInt64 {
+    let b: __FBits;
+    b.f = v;
+    return b.u;
+}
+
+// Reinterprets the bits of `u` as a Real64.
+func __real_of(u: UInt64): Real64 {
+    let b: __FBits;
+    b.u = u;
+    return b.f;
+}
+
+// Writes the decimal digits of `v` at address `out`, most significant
+// first, and returns the number of bytes written (at most 20).
+func __write_dec(v: UInt64, out: UInt64): UInt64 {
+    let tmp: Char[20];
+    let n: UInt64 = 0;
+    let t = v;
+    while true {
+        tmp[n] = ((t % 10) + 48) as Char;
+        n += 1;
+        t = t / 10;
+        if t == 0 {
+            break;
+        }
+    }
+    let i: UInt64 = 0;
+    while i < n {
+        @((out + i) as &Char) = tmp[n - 1 - i];
+        i += 1;
+    }
+    return n;
+}
+
+// Rounds `v` to the nearest integer, breaking ties toward the even
+// neighbour. `v` must be nonnegative and below 2^62 so the
+// truncation and the fraction comparison are exact.
+func __round_half_even(v: Real64): UInt64 {
+    let i = v as UInt64;
+    let f = v - i as Real64;
+    if f > 0.5 {
+        return i + 1;
+    }
+    if f < 0.5 {
+        return i;
+    }
+    // Exact tie: keep the even last digit.
+    if i % 2 == 1 {
+        return i + 1;
+    }
+    return i;
+}
+
+// Writes the three letters naming a non-finite class ("nan" or
+// "inf") at `out + n` and returns the new length.
+func __write_special(mb: UInt64, out: UInt64, n: UInt64): UInt64 {
+    // A nonzero significand marks a NaN.
+    let txt: Char[3] = if (mb & FRAC_MASK) != 0 {
+        {110, 97, 110}
+    } else {
+        {105, 110, 102}
+    };
+    @((out + n) as &Char) = txt[0];
+    @((out + n + 1) as &Char) = txt[1];
+    @((out + n + 2) as &Char) = txt[2];
+    return n + 3;
+}
+
+// Writes `av` (finite and positive) with exactly `n` significant
+// digits at address `out` and returns the byte count.
+func __fmt_sig(av: Real64, n: UInt64, out: UInt64): UInt64 {
+    // Normalize into [1, 10), tracking the decimal exponent.
+    let norm = av;
+    let e10: Int64 = 0;
+    while norm >= 10.0 {
+        norm = norm / 10.0;
+        e10 += 1;
+    }
+    while norm < 1.0 {
+        norm = norm * 10.0;
+        e10 -= 1;
+    }
+    // Scale the significand digits into an integer and round; the
+    // scaling factor is exact for n <= 17.
+    let digs = __round_half_even(norm * __POW10[n - 1]);
+    let nn = n as Int64;
+    // A run of nines can roll over into 10^n, which is one digit too
+    // many; fold it back and lift the exponent.
+    if digs >= __IPOW10[n] {
+        digs = digs / 10;
+        e10 += 1;
+    }
+    // Extract the n digits, most significant first.
+    let d: Char[18];
+    let t = digs;
+    let k = n;
+    while k > 0 {
+        k -= 1;
+        d[k] = ((t % 10) + 48) as Char;
+        t = t / 10;
+    }
+    let pos: UInt64 = 0;
+    if e10 >= -6 and e10 <= 20 {
+        if e10 >= nn - 1 {
+            // Integral value: digits, padding zeros, then ".0".
+            let i: UInt64 = 0;
+            while i < n {
+                @((out + pos) as &Char) = d[i];
+                pos += 1;
+                i += 1;
+            }
+            let z = (e10 - (nn - 1)) as UInt64;
+            while z > 0 {
+                @((out + pos) as &Char) = 48 as Char;
+                pos += 1;
+                z -= 1;
+            }
+            @((out + pos) as &Char) = 46 as Char;
+            pos += 1;
+            @((out + pos) as &Char) = 48 as Char;
+            pos += 1;
+        } else {
+            if e10 >= 0 {
+                // Point inside the digit run.
+                let il = (e10 + 1) as UInt64;
+                let i: UInt64 = 0;
+                while i < il {
+                    @((out + pos) as &Char) = d[i];
+                    pos += 1;
+                    i += 1;
+                }
+                @((out + pos) as &Char) = 46 as Char;
+                pos += 1;
+                while i < n {
+                    @((out + pos) as &Char) = d[i];
+                    pos += 1;
+                    i += 1;
+                }
+            } else {
+                // Leading "0." followed by -e10-1 zeros.
+                @((out + pos) as &Char) = 48 as Char;
+                pos += 1;
+                @((out + pos) as &Char) = 46 as Char;
+                pos += 1;
+                let z = (0 - e10 - 1) as UInt64;
+                while z > 0 {
+                    @((out + pos) as &Char) = 48 as Char;
+                    pos += 1;
+                    z -= 1;
+                }
+                let i: UInt64 = 0;
+                while i < n {
+                    @((out + pos) as &Char) = d[i];
+                    pos += 1;
+                    i += 1;
+                }
+            }
+        }
+    } else {
+        // Scientific form: one digit, optional fraction, exponent.
+        @((out + pos) as &Char) = d[0];
+        pos += 1;
+        if n > 1 {
+            @((out + pos) as &Char) = 46 as Char;
+            pos += 1;
+            let i: UInt64 = 1;
+            while i < n {
+                @((out + pos) as &Char) = d[i];
+                pos += 1;
+                i += 1;
+            }
+        }
+        @((out + pos) as &Char) = 101 as Char;
+        pos += 1;
+        if e10 < 0 {
+            @((out + pos) as &Char) = 45 as Char;
+            pos += 1;
+        } else {
+            @((out + pos) as &Char) = 43 as Char;
+            pos += 1;
+        }
+        let ea = (if e10 < 0 { 0 - e10 } else { e10 }) as UInt64;
+        pos += __write_dec(ea, out + pos);
+    }
+    return pos;
+}
+
+// Reports whether the parse of `buf` reproduces exactly the bit
+// pattern `bits`. `buf` must hold a NUL byte right after the
+// formatted window so the parser stops there.
+func __roundtrips(bits: UInt64, buf: Char[]): Bool {
+    let v = fmt_real_parse::parse(buf) catch |e| {
+        return false;
+    };
+    return __bits_of(v) == bits;
+}
+
+module fmt_real_fmt {
+    // Writes the shortest string that parses back to exactly `value`
+    // and returns the byte count. The buffer must have room for at
+    // least 32 bytes.
+    func shortest(value: Real64, buf: Char[]): UInt64 {
+        let out = buf as UInt64;
+        let bits = __bits_of(value);
+        let n: UInt64 = 0;
+        if (bits & SIGN_MASK) != 0 {
+            @((out + n) as &Char) = 45 as Char;
+            n += 1;
+        }
+        let mb = bits & MAG_MASK;
+        if (mb & EXP_MASK) == EXP_MASK {
+            return __write_special(mb, out, n);
+        }
+        if mb == 0 {
+            @((out + n) as &Char) = 48 as Char;
+            return n + 1;
+        }
+        let av = __real_of(mb);
+        // Widen the significant-digit count until the printed form
+        // parses back to the identical bit pattern.
+        let prec: UInt64 = 1;
+        while prec <= 17 {
+            let len = __fmt_sig(av, prec, out + n);
+            // Park a NUL right after the window so the verifying
+            // parse stops at the window end.
+            @((out + n + len) as &Char) = 0 as Char;
+            if __roundtrips(bits, buf) {
+                return n + len;
+            }
+            prec += 1;
+        }
+        // Seventeen digits always round-trip, so the loop above
+        // returns; this is the formal fallback.
+        return n + __fmt_sig(av, 17, out + n);
+    }
+
+    // Writes `value` with exactly `digits` digits after the decimal
+    // point, rounding half to even, and returns the byte count.
+    // Results that would outgrow the 32-byte buffer contract are
+    // ERR_BUFFER_TOO_SMALL.
+    func fixed(value: Real64, digits: UInt64, buf: Char[]): UInt64! {
+        if digits > 16 {
+            return error ERR_BUFFER_TOO_SMALL;
+        }
+        let out = buf as UInt64;
+        let bits = __bits_of(value);
+        let n: UInt64 = 0;
+        if (bits & SIGN_MASK) != 0 {
+            @((out + n) as &Char) = 45 as Char;
+            n += 1;
+        }
+        let mb = bits & MAG_MASK;
+        if (mb & EXP_MASK) == EXP_MASK {
+            return __write_special(mb, out, n);
+        }
+        let mag = __real_of(mb);
+        // The integer part must truncate through a UInt64.
+        if mag >= 18446744073709551616.0 {
+            return error ERR_BUFFER_TOO_SMALL;
+        }
+        let ip = mag as UInt64;
+        let scale = __IPOW10[digits];
+        // Round the scaled fraction once, half to even; a full carry
+        // rolls into the integer part.
+        let fu = __round_half_even((mag - ip as Real64) * __POW10[digits]);
+        if fu == scale {
+            ip += 1;
+            fu = 0;
+        }
+        // Measure the integer part after the carry and reject
+        // results that would outgrow the buffer contract.
+        let id: UInt64 = 1;
+        let t = ip;
+        while t >= 10 {
+            t = t / 10;
+            id += 1;
+        }
+        let need = n + id + (if digits > 0 { 1 + digits } else { 0 });
+        if need > 31 {
+            return error ERR_BUFFER_TOO_SMALL;
+        }
+        n += __write_dec(ip, out + n);
+        if digits > 0 {
+            @((out + n) as &Char) = 46 as Char;
+            n += 1;
+            // Zero-pad the fraction to exactly `digits` digits.
+            let fd: UInt64 = 1;
+            let f2 = fu;
+            while f2 >= 10 {
+                f2 = f2 / 10;
+                fd += 1;
+            }
+            let z = digits - fd;
+            while z > 0 {
+                @((out + n) as &Char) = 48 as Char;
+                n += 1;
+                z -= 1;
+            }
+            n += __write_dec(fu, out + n);
+        }
+        return n;
+    }
+}

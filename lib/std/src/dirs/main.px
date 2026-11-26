@@ -1,0 +1,136 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: dirs
+ * Directory creation and removal.
+ *
+ * mkdir creates one directory with mode 0755 (the process umask
+ * still applies, as with any creation call); rmdir removes an empty
+ * one. mkdirs creates a directory and every missing parent by
+ * walking the path left to right and creating each prefix,
+ * succeeding without change when the directory already exists —
+ * which makes it safe to call unconditionally before writing into a
+ * nested path. The collision cases surface as ordinary errors: 17
+ * (EEXIST) when mkdir's target already exists and 39 (ENOTEMPTY)
+ * when rmdir's target still holds entries.
+ *
+ * Arguments travel through file-private staging cells in .bss and
+ * `syscall` is issued from volatile assembly sequences; mkdir takes
+ * two arguments and rmdir one.
+ */
+
+// Staging cells shared with the assembly sequences below.
+let __md_num: UInt64;
+let __md_a1: UInt64;
+let __md_a2: UInt64;
+let __md_ret: UInt64;
+
+// Executes the two-argument mkdir(2) system call.
+func __md2(): UInt64 {
+    volatile asm "mov rax, [__md_num]";
+    volatile asm "mov rdi, [__md_a1]";
+    volatile asm "mov rsi, [__md_a2]";
+    volatile asm "syscall";
+    volatile asm "mov [__md_ret], rax";
+    return __md_ret;
+}
+
+// Executes the one-argument rmdir(2) system call.
+func __md1(): UInt64 {
+    volatile asm "mov rax, [__md_num]";
+    volatile asm "mov rdi, [__md_a1]";
+    volatile asm "syscall";
+    volatile asm "mov [__md_ret], rax";
+    return __md_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything else
+// passes through.
+func __md_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+// Issues one mkdir for the NUL-terminated path at `p`, treating an
+// already-existing directory as success.
+func __mkdir_one(p: UInt64): Void! {
+    __md_num = 83;
+    __md_a1 = p;
+    __md_a2 = 493;
+    __md_check(__md2()) catch |e| {
+        // 17 (EEXIST) means this level is already present.
+        if e != 17 {
+            return error e;
+        }
+    };
+}
+
+module dirs {
+    // errno value reported when mkdir's target already exists;
+    // exported so callers can implement ensure-exists logic without
+    // remembering the number.
+    static E_EXIST = 17;
+
+    // errno-style code for paths that do not fit the working buffer
+    // of mkdirs.
+    static DIRS_ERR_LONG = 36;
+
+    // Creates a single directory with mode 0755.
+    func mkdir(path: Char[]): Void! {
+        __md_num = 83;
+        __md_a1 = path as UInt64;
+        __md_a2 = 493;
+        try __md_check(__md2());
+    }
+
+    // Creates a directory and every missing parent. Each interior
+    // prefix is created in turn, and an already-existing level —
+    // including the final directory itself — counts as success.
+    func mkdirs(path: Char[]): Void! {
+        // Work on a private copy: prefix creation needs a temporary
+        // NUL at each separator.
+        let buf: Char[4096];
+        let b = &buf[0] as UInt64;
+        let s = path as UInt64;
+        let len: UInt64 = 0;
+        while @((s + len) as &Char) as UInt64 != 0 {
+            len += 1;
+        }
+        if len + 1 >= 4096 {
+            return error DIRS_ERR_LONG;
+        }
+        let i: UInt64 = 0;
+        while i <= len {
+            let c = @((s + i) as &Char) as UInt64;
+            @((b + i) as &Char) = c as Char;
+            i += 1;
+        }
+        i = 1;
+        while i < len {
+            if @((b + i) as &Char) as UInt64 == 47 {
+                // Create the prefix up to this separator.
+                @((b + i) as &Char) = 0 as Char;
+                try __mkdir_one(b);
+                @((b + i) as &Char) = 47 as Char;
+            }
+            i += 1;
+        }
+        if len == 0 {
+            return error 22;
+        }
+        try __mkdir_one(b);
+    }
+
+    // Removes the empty directory at `path`: error 2 when the path
+    // does not exist, 39 when the directory is not empty.
+    func rmdir(path: Char[]): Void! {
+        __md_num = 84;
+        __md_a1 = path as UInt64;
+        try __md_check(__md1());
+    }
+}

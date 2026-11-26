@@ -1,0 +1,157 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: pqueue
+ * PQueue, a binary-heap priority queue storing elements of any type
+ * inline, ordered by a caller-supplied comparator.
+ *
+ * Elements sit in a growable array as a complete binary tree: the
+ * children of index i are 2i+1 and 2i+2, the parent is (i-1)/2. push
+ * appends and sifts up, pop promotes the last element to the root and
+ * sifts down, so both take logarithmic time and peek takes constant
+ * time. With the comparator less, the root is the smallest element.
+ *
+ * The comparator arrives as func(a: T, b: T): Bool and is stored in
+ * the internal form func(a: &Void, b: &Void): Bool, which the queue
+ * can call on element addresses without knowing T; the stored closure
+ * dereferences both addresses as T and forwards to the original.
+ *
+ * Ownership: the caller of make owns the queue; destroy (usually
+ * scheduled with defer or errdefer) releases it.
+ */
+
+use heap;
+
+module pqueue {
+    // A binary-heap priority queue.
+    static PQueue = Struct {
+        data: &Void,
+        len: UInt64,
+        cap: UInt64,
+        elem_size: UInt64,
+        elem_align: UInt64,
+        less: func(a: &Void, b: &Void): Bool,
+    };
+
+    // Returned when a growth allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returned when an operation requires a non-empty queue.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // Smallest backing allocation, in elements.
+    static MIN_CAP = 8;
+
+    // Returns an empty queue of T elements ordered by `less`; the
+    // comparator is wrapped once into the address-taking internal
+    // form recorded in the queue value.
+    func make(static T, less: func(a: T, b: T): Bool): PQueue {
+        let wrap = |a: &Void, b: &Void| less(@(a as &T), @(b as &T));
+        return PQueue {0, 0, 0, sizeof(T), alignof(T), wrap};
+    }
+
+    // Releases the backing allocation and returns the queue to an
+    // empty state that keeps the comparator.
+    func destroy(q: &PQueue): Void {
+        if (@q).data != 0 {
+            heap::free((@q).data);
+        }
+        (@q).data = 0;
+        (@q).len = 0;
+        (@q).cap = 0;
+    }
+
+    // Ensures the queue can hold `want` elements, doubling the
+    // backing allocation until it suffices.
+    func reserve(q: &PQueue, want: UInt64): Void! {
+        if want <= (@q).cap {
+            return;
+        }
+        let newcap = if (@q).cap == 0 { MIN_CAP } else { (@q).cap };
+        while newcap < want {
+            newcap *= 2;
+        }
+        (@q).data = try heap::realloc((@q).data, newcap * (@q).elem_size);
+        (@q).cap = newcap;
+    }
+
+    // Inserts `v`: the element lands at the first free tree position
+    // and sifts up while it orders before its parent.
+    func push(static T, q: &PQueue, v: T): Void! {
+        try reserve(q, (@q).len + 1);
+        let esz = (@q).elem_size;
+        let base = (@q).data as UInt64;
+        let i = (@q).len;
+        (@q).len += 1;
+        @((base + i * esz) as &T) = v;
+        while i > 0 {
+            let parent = (i - 1) / 2;
+            let pi = (base + i * esz) as &Void;
+            let pp = (base + parent * esz) as &Void;
+            if not (@q).less(pi, pp) {
+                break;
+            }
+            // Swap the element with its parent and continue upward.
+            let tmp = @((base + i * esz) as &T);
+            @((base + i * esz) as &T) = @((base + parent * esz) as &T);
+            @((base + parent * esz) as &T) = tmp;
+            i = parent;
+        }
+    }
+
+    // Returns the extremal element without removing it.
+    func peek(static T, q: &PQueue): T! {
+        if (@q).len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return @(((@q).data as UInt64) as &T);
+    }
+
+    // Removes and returns the extremal element: the last element
+    // moves to the root and sifts down toward the child that orders
+    // first, restoring the heap invariant.
+    func pop(static T, q: &PQueue): T! {
+        if (@q).len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        let esz = (@q).elem_size;
+        let base = (@q).data as UInt64;
+        let top = @((base) as &T);
+        (@q).len -= 1;
+        if (@q).len > 0 {
+            @((base) as &T) = @((base + (@q).len * esz) as &T);
+            let i: UInt64 = 0;
+            while true {
+                let left = i * 2 + 1;
+                let right = left + 1;
+                if left >= (@q).len {
+                    break;
+                }
+                // Select the child that should sit above the other.
+                let best = left;
+                if right < (@q).len
+                    and (@q).less((base + right * esz) as &Void,
+                        (base + left * esz) as &Void) {
+                    best = right;
+                }
+                if not (@q).less((base + best * esz) as &Void,
+                    (base + i * esz) as &Void) {
+                    break;
+                }
+                let tmp = @((base + i * esz) as &T);
+                @((base + i * esz) as &T) = @((base + best * esz) as &T);
+                @((base + best * esz) as &T) = tmp;
+                i = best;
+            }
+        }
+        return top;
+    }
+
+    // Sets the length to zero while keeping the backing allocation
+    // for reuse. Element bytes are discarded without invoking
+    // destructors.
+    func clear(q: &PQueue): Void {
+        (@q).len = 0;
+    }
+}

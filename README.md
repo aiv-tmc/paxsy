@@ -1,158 +1,163 @@
+<div align="center">
+
+<img src="logo.png" alt="Paxsy" width="180" />
+
 # Paxsy
 
-The Paxsy toolchain: a systems programming language with a fully
-self-hosted build pipeline. One program — `paxsy` — is the compiler,
-the build orchestrator and the package manager. It reads Paxsy
-sources, analyses them, and turns them into runnable artifacts with
-its own machine-code emitter: no external compiler, assembler or
-linker is invoked at any step, and programs link no runtime library.
+### A systems language. A compiler you can inspect. A toolchain you can build on.
 
-## Highlights
+[![CI](https://github.com/aiv-tmc/paxsy/actions/workflows/ci.yml/badge.svg)](https://github.com/aiv-tmc/paxsy/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![Language: C99](https://img.shields.io/badge/Compiler-C99-informational.svg)](src/)
 
-* **Self-hosted native backend.** The compiler lowers the typed HIR
-  to x86-64 machine code in-process, emits the start-up sequence,
-  lays out the ELF image and writes a static executable. Object
-  files (`--emit-obj`), archives (`--emit-a`), PE32+ images
-  (`--emit-exe`) and LLVM/MLIR/CUDA listings are produced by the
-  same driver. `paxsy link` joins emitted objects with the
-  toolchain's own static linker.
-* **No builtin functions.** The standard library is written in Paxsy
-  itself. Console output, string handling and process control are
-  implemented with inline assembly and raw syscalls; a compiled
-  program carries no runtime archive and no hidden entry points.
-* **Inline assembly.** An `asm "…"` statement embeds x86-64
-  instructions directly into a function. The built-in assembler
-  supports the portable core set (moves, ALU ops, shifts, division,
-  stack operations, control transfer, `syscall`), resolves labels
-  through the shared fixup machinery and reports unknown mnemonics
-  with the exact source segment.
-* **Explicit module system.** Sources declare plain modules
-  (`module geometry { … }`); package sources (the standard library)
-  are qualified with the package name automatically, so a library
-  file declares `module inout { … }` and programs reach it as
-  `std::inout`. `use std::inout;` is validated against the package
-  manifest; `use inout;` is refused unless the project declares such
-  a module itself.
-* **Package manager built in.** `paxsy install`, `add`, `remove`,
-  `update`, `search`, `fetch` and `list` manage libraries from the
-  repository at paxsy.org with a local-cache fallback.
-* **Deterministic, incremental builds.** Source discovery is
-  deterministic, rebuilds are freshness-checked against every input
-  plus the compiler itself, and `PAXSY_NO_OPT=1` is the A/B switch
-  for the optimisation pipeline.
+[Documentation](docs/ToolchainUserManual.md) · [Language specification](docs/LanguageSpecification.md) · [Contributing](docs/LanguageDeveloperGuide.md) · [LLM guide](docs/LLMIntegrationGuide.md) · [Website](https://paxsy.org)
 
-## Quick start
+</div>
 
-Build the toolchain from the repository:
+---
+
+Paxsy is a statically typed systems programming language with a native compiler and an integrated developer toolchain. It is designed around a practical idea: **make program structure explicit, make compilation observable, and keep the path from source code to machine code understandable.**
+
+The repository contains the compiler, project and package commands, a standard library, native code generation, optimisation passes, debugging and inspection tools, and editor support. The compiler itself is written in C99, so contributors can follow the implementation from lexer to backend without first learning a large compiler framework.
+
+> [!IMPORTANT]
+> Paxsy 1.0.0 is the stable baseline release. The documentation set is frozen for this release: the [language specification](docs/LanguageSpecification.md), [toolchain manual](docs/ToolchainUserManual.md), and contributor references describe the accepted 1.0.0 contract. The implementation status and tests identify backend and feature boundaries; do not assume every specified construct is implemented by every backend.
+
+## Why Paxsy?
+
+- **Systems-level control** — explicit types, pointers, allocation, aggregate layout, and native code generation.
+- **A coherent toolchain** — one `paxsy` executable provides project creation, build, check, package management, formatting, linting, debugging, disassembly, and recovery workflows.
+- **An optimisation pipeline you can inspect** — HIR passes, CFG/SSA analysis, profiling, reproducible stress benchmarks, and regression tests live in the same repository.
+- **A language designed for real projects** — modules, generic specialisation, error-carrying types, `defer`, aggregate types, and concurrency constructs are part of the language design.
+- **Hackable compiler architecture** — a compact C99 implementation with distinct lexer, parser, semantic analysis, HIR, optimisation, and backend layers.
+- **Open collaboration** — Apache License 2.0, developer documentation, and a dedicated guide for AI-assisted language work.
+
+## Get started
+
+### Build Paxsy from source
+
+Requirements: a C99 compiler, GNU Make, and a POSIX-like build environment.
 
 ```sh
 git clone https://github.com/aiv-tmc/paxsy.git
 cd paxsy
-make            # produces ./paxsy
-make test       # stages ./paxsy with lib/std and runs the suite
-sudo make install   # or: sudo cp paxsy /usr/local/bin/paxsy
+make -j"$(nproc)"
+make test
 ```
 
-Create and run a project:
+The compiler is produced as `./paxsy`. Install it with:
+
+```sh
+sudo make install
+```
+
+For sanitizer and stress checks, see the [Toolchain User Manual](docs/ToolchainUserManual.md#installation-and-building-the-compiler).
+
+### Create and run a project
 
 ```sh
 paxsy new hello
 cd hello
+paxsy check
 paxsy build
 paxsy run
 ```
 
-The seeded program prints a greeting through the standard library:
+`paxsy new` creates the project and starter source. There is no `init` command. The generated project uses a TOML manifest and `.px` source files.
 
-```px
+### A small Paxsy example
+
+```paxsy
 use std::inout;
 
-/// Prints a greeting and exits.
-func main(): Void {
-    std::inout::println("Hello, World");
+static GREETING = "Hello from Paxsy";
+
+func twice(value: Int32): Int32 {
+    return value * 2;
+}
+
+func main(): Void! {
+    let answer: Int32 = twice(21);
+    try std::inout::println("{GREETING}: {answer}");
 }
 ```
 
-## The standard library
+The example illustrates the language's surface style; consult the specification and tests for exact feature and backend coverage.
 
-The library is a Paxsy package carried under `lib/std` (and installed
-next to the compiler under `lib/paxsy/std`). Its manifest `std.toml`
-lists the libraries a `use` directive may name; only the libraries a
-program actually references are compiled.
+## Toolchain at a glance
 
-| Module        | Entries                              |
-|---------------|--------------------------------------|
-| `std::inout`  | `println(s: &Int8): Void!`           |
-| `std::string` | `strlen`, `strcpy`, `streq`          |
+| Command | Purpose |
+|---|---|
+| `paxsy new` | Create a project scaffold |
+| `paxsy check` | Parse, resolve, and type-check without producing an executable |
+| `paxsy build` | Compile and link the configured target |
+| `paxsy run` | Run the configured native, QEMU, Docker, or custom runtime profile |
+| `paxsy test` | Discover and validate test sources/functions |
+| `paxsy bench` | Measure source lexer throughput |
+| `paxsy fmt` | Format Paxsy sources |
+| `paxsy clippy` | Run code-quality checks |
+| `paxsy debug` | Start the integrated debugger |
+| `paxsy disasm` | Inspect generated machine code |
+| `paxsy fetch/search/install/add` | Work with packages |
 
-Every entry point is an ordinary Paxsy function implemented with
-inline assembly; the compiler knows none of them by name.
+> [!NOTE]
+> `paxsy test` currently compiles test sources and discovers test functions; it does not yet execute discovered test functions. `paxsy bench` currently measures lexer throughput. The full compiler stress benchmark is run separately with `make bench-full`.
 
-## Inline assembly
+## Optimisation and performance work
 
-```px
-func println(s: &Int8): Void! {
-    asm "mov r8, rdi ; xor ecx, ecx ; pxs_len: xor edx, edx ; …";
-}
-```
-
-Instructions are separated by `;` or by `\n` escapes; labels end
-with `:` and may share a segment with an instruction; mnemonics are
-case-insensitive; register names accept both the 64-bit spelling
-(`rcx`) and the classic 32-bit spelling (`ecx`) because every
-operation is 64-bit. Anything the assembler cannot encode is a hard
-error that names the offending segment.
-
-## Targets and artifacts
-
-`paxsy build` always produces the native executable at
-`build/<name>`. Extra artifacts are opt-in:
+Paxsy exposes four HIR optimisation levels: `0` disables optimisation, `1` enables inexpensive local passes, `2` adds CFG/SSA and global value numbering, and `3` enables the full pipeline including scalar replacement. New projects use level `3` by default. The optimiser includes constant folding, propagation, global value numbering, strength reduction, dead-store elimination, dead-code elimination, CFG simplification, conservative scalar replacement, and SSA-oriented analyses. The project also contains a multi-source full-language benchmark that compares the maximum optimisation pipeline with an internal no-optimisation reference and verifies output equivalence.
 
 ```sh
-paxsy build --emit-obj        # build/bin/<name>.o  (ELF relocatable)
-paxsy build --emit-a          # build/bin/<name>.a  (ar archive)
-paxsy build --emit-exe        # build/bin/<name>.exe (PE32+)
-paxsy build --emit-llvm       # build/bin/<name>.ll
-paxsy build --emit-mlir       # build/bin/<name>.mlir
-paxsy build --emit-cuda       # build/bin/<name>.cu
-paxsy link out.elf -- a.o b.o # static link without external tools
+# Per-stage and per-pass compiler timings
+paxsy build --profile
+
+# Select a configured runtime environment (native, qemu, docker, ...)
+paxsy run --profile qemu
+
+# Full compiler / generated-program stress corpus
+make bench-full
+
+# Regression and undefined-behaviour checks
+make test
+make test-ubsan
 ```
 
-## Configuration
+Performance claims should be backed by a repeatable benchmark run on the target machine. The benchmark harness reports build time, runtime, and executable size; it does not turn one machine's results into universal claims.
 
-Every build-affecting setting lives in `<project>.toml`. Common
-fields:
+## Compile-time features: current boundary
 
-```toml
-[project]
-name = "hello"
-version = "0.1.0"
+Paxsy uses `static` for compile-time declarations and type-level facilities. `comptime` is no longer a keyword and can be used as an ordinary identifier. The current implementation supports static type aliases, compile-time type parameters and monomorphisation, and substitution/folding of eligible scalar constant expressions. Unused scalar constant storage is removed; address-taken constants retain storage. Expansion is bounded and conservative: it avoids runtime effects, diagnoses cycles, and leaves unsupported expressions intact.
 
-[build]
-recursive = false      # descend into subdirectories of src/
-```
+> [!WARNING]
+> `static` functions and `static` blocks are present in parts of the language design/parser but are not a general-purpose compile-time interpreter yet. `comptime` is an ordinary identifier, not a compile-time modifier. See [Compile-time evaluation status](docs/LanguageDeveloperGuide.md#compile-time-evaluation-status) before relying on compile-time execution in a library API.
 
-Package dependencies are recorded in `[dependencies]` and resolved
-against the package cache (`$PAXSY_LIBRARY_DIR`, default
-`~/.paxsy`).
+## Documentation
 
-## Development
+| Document | Audience | What it covers |
+|---|---|---|
+| [Toolchain User Manual](docs/ToolchainUserManual.md) | Paxsy users | Install, projects, commands, configuration, packages, builds, debugging |
+| [Language Specification](docs/LanguageSpecification.md) | Language users | Syntax, types, expressions, control flow, memory, modules, semantics |
+| [Language Developer Guide](docs/LanguageDeveloperGuide.md) | Compiler and language contributors | Architecture, invariants, pass ordering, tests, extension workflow, implementation status |
+| [LLM Integration Guide](docs/LLMIntegrationGuide.md) | LLM users and tool builders | Grounded prompting, context files, feature verification, code-generation workflow |
+| [Standard Library Reference](docs/StandardLibraryReference.md) | Library users | Public modules, APIs, and conventions |
+| [Code Style Guide](docs/CodeStyleGuide.md) | Contributors | Source formatting and conventions |
+| [Benchmark guide](benches/README.md) | Performance contributors | Benchmark corpus and measurement methodology |
 
-```sh
-make              # strict C99 build (-Wall -Wextra)
-make test         # full Python test suite against the staged binary
-make test-asan    # AddressSanitizer rebuild + suite
-```
+## Editor support
 
-Continuous integration (`.github/workflows/ci.yml`) runs the suite
-under gcc and clang, ASan/UBSan/valgrind jobs, a self-hosted
-link smoke test and a release-tarball artifact on every push; tags
-publish a release through `.github/workflows/release.yml`.
+- **Visual Studio Code:** `editors/vscode` contains the language extension source and syntax configuration. Package it with `editors/vscode/package.sh` after installing `@vscode/vsce`.
+- **Vim:** syntax highlighting and file detection are in `editors/vim`.
 
-See `docs/cli.md` for the full command reference and
-`docs/ToolchainUserManual.md` for the complete language and toolchain
-manual.
+## Contributing
+
+Contributions are welcome, especially focused changes accompanied by tests and documentation. Before changing syntax or semantics, read the [Language Developer Guide](docs/LanguageDeveloperGuide.md). For language proposals, include examples, expected diagnostics, edge cases, and a note about backend implications.
+
+A useful contribution is not merely a parser acceptance test: it should demonstrate the feature through semantic analysis, HIR lowering, code generation, and observable runtime behaviour wherever those stages apply.
+
+## Project status
+
+Paxsy 1.0.0 is the frozen language/compiler baseline. The native compiler's primary target is x86-64; output formats and language-feature coverage vary by backend. The compiler's own tests and the frozen manuals are the authoritative record of current behaviour. Post-release work is intentionally limited to `debug` optimisation and the separately tracked future disassembly/source-recovery programme; see [documentation freeze policy](docs/README.md) and [post-release tooling issue](issues/POST_RELEASE_DEBUG_DISASM_RECOVERY.md).
 
 ## License
 
-MIT. See `LICENSE`.
+Paxsy is distributed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution information.

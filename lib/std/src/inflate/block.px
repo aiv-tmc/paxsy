@@ -1,0 +1,314 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: inflate_block (internal)
+ * DEFLATE block decoding internals (RFC 1951).
+ *
+ * inflate_block holds the machinery inflate() drives per block: the
+ * canonical-Huffman table, the LSB-first bit loader, the three block
+ * decoders (stored, fixed, dynamic), and the length/distance tables.
+ * The public entry point lives in the inflate module. Bit order is
+ * DEFLATE's least-significant-bit-first packing; the window for length
+ * references is the output written so far in the caller's own buffer,
+ * so the copy loop reads history from `dst` and handles the
+ * overlapping case (a distance shorter than the copy length) one byte
+ * at a time.
+ */
+
+use mem;
+
+module inflate_block {
+    // errno-style codes for malformed streams and output capacity.
+    static INFLATE_ERR_STREAM = 22;
+    static INFLATE_ERR_SPACE = 27;
+
+    // The canonical Huffman table: symbol counts per code length
+    // (index 0 unused, lengths run to 15) and the symbols sorted by
+    // code.
+    static Huffman = Struct {
+        count: UInt16[16],
+        symbol: UInt16[288],
+    };
+
+    // Decoder state threaded through every helper.
+    static Inflator = Struct {
+        src: &UInt8,
+        src_len: UInt64,
+        in_pos: UInt64,
+        bit_buf: UInt32,
+        bit_cnt: UInt32,
+        dst: &UInt8,
+        dst_cap: UInt64,
+        out_pos: UInt64,
+    };
+
+    // Length and distance base values with their extra-bit counts,
+    // laid out so index sym - 257 (lengths) or the distance symbol
+    // addresses them.
+    static LEN_BASE: UInt16[29] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+    static LEN_EXTRA: UInt8[29] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+    static DIST_BASE: UInt16[30] = {1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577};
+    static DIST_EXTRA: UInt8[30] = {0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+
+    // Serves `need` bits (0..16) from the input, least significant
+    // first. Input exhaustion reports error 22.
+    func bits(s: &Inflator, need: UInt32): UInt32! {
+        let val = (@s).bit_buf;
+        while (@s).bit_cnt < need {
+            if (@s).in_pos >= (@s).src_len {
+                return error INFLATE_ERR_STREAM;
+            }
+            let b = @(((@s).src as UInt64 + (@s).in_pos) as &UInt8) as UInt32;
+            val = val $ (b << (@s).bit_cnt);
+            (@s).in_pos += 1;
+            (@s).bit_cnt += 8;
+        }
+        (@s).bit_buf = val >> need;
+        (@s).bit_cnt -= need;
+        return val & ((1 as UInt32 << need) - 1);
+    }
+
+    // Builds the canonical table for the `n` code lengths at
+    // `lengths`. An over-subscribed set reports error 22; an
+    // incomplete set is reported through the return value, which
+    // callers ignore for distance codes.
+    func construct(h: &Huffman, lengths: &UInt8, n: UInt64): UInt64! {
+        let i: UInt64 = 0;
+        while i <= 15 {
+            (@h).count[i] = 0;
+            i += 1;
+        }
+        let sym: UInt64 = 0;
+        while sym < n {
+            let l = @((lengths as UInt64 + sym) as &UInt8) as UInt64;
+            (@h).count[l] += 1;
+            sym += 1;
+        }
+        if (@h).count[0] == n {
+            // No symbols at all: a complete empty code.
+            return 0;
+        }
+        // Over-subscription check: the Kraft sum must not exceed one.
+        let left: Int64 = 1;
+        let len: UInt64 = 1;
+        while len <= 15 {
+            left <<= 1;
+            left -= (@h).count[len] as Int64;
+            if left < 0 {
+                return error INFLATE_ERR_STREAM;
+            }
+            len += 1;
+        }
+        // Offsets of each length's first symbol in the sorted table.
+        let offs: UInt16[16];
+        offs[1] = 0;
+        len = 1;
+        while len < 15 {
+            offs[len + 1] = offs[len] + (@h).count[len];
+            len += 1;
+        }
+        sym = 0;
+        while sym < n {
+            let l = @((lengths as UInt64 + sym) as &UInt8) as UInt64;
+            if l != 0 {
+                let o = offs[l] as UInt64;
+                (@h).symbol[o] = sym as UInt16;
+                offs[l] += 1;
+            }
+            sym += 1;
+        }
+        return left as UInt64;
+    }
+
+    // Decodes one symbol through `h`, one bit per length step,
+    // narrowing the code range until a count covers it. Invalid codes
+    // report error 22.
+    func decode(s: &Inflator, h: &Huffman): UInt32! {
+        let code: UInt32 = 0;
+        let first: UInt32 = 0;
+        let index: UInt32 = 0;
+        let len: UInt32 = 1;
+        while len <= 15 {
+            code = code $ (try bits(s, 1));
+            let count = (@h).count[len] as UInt32;
+            if code < first + count {
+                return (@h).symbol[(index + code - first) as UInt64] as UInt32;
+            }
+            index += count;
+            first = (first + count) << 1;
+            code <<= 1;
+            len += 1;
+        }
+        return error INFLATE_ERR_STREAM;
+    }
+
+    // Decodes one compressed block body through the two given codes.
+    func codes(s: &Inflator, litcode: &Huffman, distcode: &Huffman): Void! {
+        while true {
+            let sym = try decode(s, litcode);
+            if sym < 256 {
+                // Literal byte: append to the output.
+                if (@s).out_pos >= (@s).dst_cap {
+                    return error INFLATE_ERR_SPACE;
+                }
+                @(((@s).dst as UInt64 + (@s).out_pos) as &UInt8) = sym as UInt8;
+                (@s).out_pos += 1;
+                continue;
+            }
+            if sym == 256 {
+                // End of block.
+                return;
+            }
+            if sym > 285 {
+                return error INFLATE_ERR_STREAM;
+            }
+            // Length: base value plus extra bits.
+            let li = (sym - 257) as UInt64;
+            let len = LEN_BASE[li] as UInt64 + (try bits(s, LEN_EXTRA[li] as UInt32));
+            // Distance: second symbol, then copy from output history.
+            let dsym = try decode(s, distcode);
+            if dsym > 29 {
+                return error INFLATE_ERR_STREAM;
+            }
+            let dist = DIST_BASE[dsym as UInt64] as UInt64 + (try bits(s, DIST_EXTRA[dsym as UInt64] as UInt32));
+            if dist > (@s).out_pos {
+                return error INFLATE_ERR_STREAM;
+            }
+            let from = (@s).out_pos - dist;
+            let i: UInt64 = 0;
+            while i < len {
+                if (@s).out_pos >= (@s).dst_cap {
+                    return error INFLATE_ERR_SPACE;
+                }
+                let b = @(((@s).dst as UInt64 + from + i) as &UInt8);
+                @(((@s).dst as UInt64 + (@s).out_pos) as &UInt8) = b;
+                (@s).out_pos += 1;
+                i += 1;
+            }
+        }
+    }
+
+    // Builds the fixed literal/length and distance codes of RFC 1951
+    // section 3.2.6.
+    func fixed(litcode: &Huffman, distcode: &Huffman): Void! {
+        let lengths: UInt8[288];
+        let i: UInt64 = 0;
+        while i < 288 {
+            let l: UInt64 = 8;
+            if i < 144 {
+                l = 8;
+            } else if i < 256 {
+                l = 9;
+            } else if i < 280 {
+                l = 7;
+            } else {
+                l = 8;
+            }
+            lengths[i] = l as UInt8;
+            i += 1;
+        }
+        try construct(litcode, &lengths, 288);
+        let dlengths: UInt8[30];
+        i = 0;
+        while i < 30 {
+            dlengths[i] = 5;
+            i += 1;
+        }
+        try construct(distcode, &dlengths, 30);
+    }
+
+    // Reads a dynamic block header and builds its two codes.
+    func dynamic(s: &Inflator, litcode: &Huffman, distcode: &Huffman): Void! {
+        let nlen = (try bits(s, 5)) + 257;
+        let ndist = (try bits(s, 5)) + 1;
+        let ncode = (try bits(s, 4)) + 4;
+        if nlen > 286 or ndist > 30 {
+            return error INFLATE_ERR_STREAM;
+        }
+        // The code-length code lengths arrive in this fixed order.
+        let order: UInt8[19] = {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
+        let lens: UInt8[19];
+        let i: UInt64 = 0;
+        while i < 19 {
+            lens[i] = 0;
+            i += 1;
+        }
+        i = 0;
+        while i < ncode {
+            lens[order[i] as UInt64] = (try bits(s, 3)) as UInt8;
+            i += 1;
+        }
+        let codelen: Huffman;
+        try construct(&codelen, &lens, 19);
+        // Literal/length and distance lengths run together as one
+        // sequence.
+        let lengths: UInt8[316];
+        let total = nlen + ndist;
+        let have: UInt64 = 0;
+        while have < total {
+            let sym = try decode(s, &codelen);
+            if sym < 16 {
+                lengths[have] = sym as UInt8;
+                have += 1;
+            } else {
+                // Repeat opcodes: 16 repeats the previous length, 17
+                // and 18 repeat zeros, with extra bits giving the
+                // count minus the base.
+                let rep: UInt64;
+                let value: UInt8;
+                if sym == 16 {
+                    if have == 0 {
+                        return error INFLATE_ERR_STREAM;
+                    }
+                    value = lengths[have - 1];
+                    rep = 3 + (try bits(s, 2));
+                } else if sym == 17 {
+                    value = 0;
+                    rep = 3 + (try bits(s, 2));
+                } else if sym == 18 {
+                    value = 0;
+                    rep = 11 + (try bits(s, 7));
+                } else {
+                    return error INFLATE_ERR_STREAM;
+                }
+                while rep > 0 {
+                    if have >= total {
+                        return error INFLATE_ERR_STREAM;
+                    }
+                    lengths[have] = value;
+                    have += 1;
+                    rep -= 1;
+                }
+            }
+        }
+        try construct(litcode, &lengths, nlen);
+        try construct(distcode, (&lengths as UInt64 + nlen) as &UInt8, ndist);
+    }
+
+    // Copies a stored (uncompressed) block body.
+    func stored(s: &Inflator): Void! {
+        // Discard the bit buffer and align to the next byte boundary.
+        (@s).bit_buf = 0;
+        (@s).bit_cnt = 0;
+        if (@s).in_pos + 4 > (@s).src_len {
+            return error INFLATE_ERR_STREAM;
+        }
+        let p = (@s).src as UInt64 + (@s).in_pos;
+        let len = @(p as &UInt16) as UInt64;
+        let nlen = @((p + 2) as &UInt16) as UInt64;
+        (@s).in_pos += 4;
+        if len != (nlen ^ 0xFFFF) {
+            return error INFLATE_ERR_STREAM;
+        }
+        if (@s).in_pos + len > (@s).src_len {
+            return error INFLATE_ERR_STREAM;
+        }
+        if (@s).out_pos + len > (@s).dst_cap {
+            return error INFLATE_ERR_SPACE;
+        }
+        mem::copy(((@s).dst as UInt64 + (@s).out_pos) as &Void, ((@s).src as UInt64 + (@s).in_pos) as &Void, len);
+        (@s).in_pos += len;
+        (@s).out_pos += len;
+    }
+}

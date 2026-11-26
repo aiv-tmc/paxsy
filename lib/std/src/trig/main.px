@@ -1,0 +1,211 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: trig
+ * Trigonometric and hyperbolic functions over Real64.
+ *
+ * All angles are radians unless a function name says otherwise. sin
+ * and cos share one kernel: the argument is reduced by multiples of
+ * pi/2 with Cody-Waite splitting (a hi/lo pair of constants, so the
+ * subtraction stays accurate for large arguments), the quadrant
+ * selects the polynomial and the sign, and degree-13 Taylor
+ * polynomials evaluate on the reduced range [-pi/4, pi/4]. atan
+ * halves its argument twice through the tangent half-angle identity
+ * before applying its Taylor series, and the inverse functions are
+ * expressed through atan2. The hyperbolic functions build on
+ * math::exp with explicit saturation at the edges of the Real64
+ * range.
+ */
+
+use math;
+
+// pi/2 as a hi/lo pair: the hi part is the nearest Real64, the lo
+// part the residual, so `x - k*HI - k*LO` loses almost nothing for
+// moderate k.
+static PIO2_HI = 1.5707963267948966;
+static PIO2_LO = 6.123233995736766e-17;
+
+// Evaluates the Taylor series of sin(r) on [-pi/4, pi/4], where
+// thirteen terms sit below one ULP of the result.
+func __sin_poly(r: Real64): Real64 {
+    let r2 = r * r;
+    return r * (1.0 + r2 * (-0.16666666666666666 + r2 * (0.008333333333333333 + r2 * (-0.0001984126984126984 + r2 * (0.0000027557319223985893 + r2 * (-0.000000025052108385441718 + r2 * 0.00000000016059043836821615))))));
+}
+
+// Evaluates the Taylor series of cos(r) on [-pi/4, pi/4].
+func __cos_poly(r: Real64): Real64 {
+    let r2 = r * r;
+    return 1.0 + r2 * (-0.5 + r2 * (0.041666666666666664 + r2 * (-0.001388888888888889 + r2 * (0.0000248015873015873 + r2 * (-0.0000002755731922398589 + r2 * (0.00000000208767569878681 + r2 * -0.000000000011470745597729724))))));
+}
+
+// The sine on the reduced argument with the quadrant selecting the
+// polynomial and sign; q is k mod 4 from the reduction.
+func __sin_kernel(r: Real64, q: UInt64): Real64 {
+    if q == 0 {
+        return __sin_poly(r);
+    }
+    if q == 1 {
+        return __cos_poly(r);
+    }
+    if q == 2 {
+        return 0.0 - __sin_poly(r);
+    }
+    return 0.0 - __cos_poly(r);
+}
+
+// The arc tangent on [-1, 1]: two applications of the half-angle
+// identity atan(x) = 2*atan(x/(1+sqrt(1+x^2))) shrink the argument
+// below tan(pi/16), where the alternating series converges quickly;
+// the result is scaled back by four.
+func __atan_small(x: Real64): Real64 {
+    let r = x;
+    let i: UInt64 = 0;
+    while i < 2 {
+        let s = math::sqrt(1.0 + r * r) catch |e| {
+            return 0.0;
+        };
+        r = r / (1.0 + s);
+        i += 1;
+    }
+    let r2 = r * r;
+    let p = r * (1.0 + r2 * (-0.3333333333333333 + r2 * (0.2 + r2 * (-0.14285714285714285 + r2 * (0.1111111111111111 + r2 * (-0.09090909090909091 + r2 * (0.07692307692307693 + r2 * -0.06666666666666667)))))));
+    return 4.0 * p;
+}
+
+module trig {
+    // The sine of x.
+    func sin(x: Real64): Real64 {
+        let k = math::round(x * 0.6366197723675814);
+        let r = x - k * PIO2_HI - k * PIO2_LO;
+        let q = (k as Int64 & 3) as UInt64;
+        return __sin_kernel(r, q);
+    }
+
+    // The cosine of x, as the sine shifted by one quadrant.
+    func cos(x: Real64): Real64 {
+        let k = math::round(x * 0.6366197723675814);
+        let r = x - k * PIO2_HI - k * PIO2_LO;
+        let q = ((k as Int64 + 1) & 3) as UInt64;
+        return __sin_kernel(r, q);
+    }
+
+    // The tangent of x: the quotient of sin and cos.
+    func tan(x: Real64): Real64 = sin(x) / cos(x);
+
+    // The arc tangent of x. Arguments past magnitude one fold
+    // through atan(x) = sign * pi/2 - atan(1/x) so the series kernel
+    // always works on [-1, 1].
+    func atan(x: Real64): Real64 {
+        if x > 1.0 {
+            return PIO2_HI - __atan_small(1.0 / x);
+        }
+        if x < -1.0 {
+            return __atan_small(1.0 / x) - PIO2_HI;
+        }
+        return __atan_small(x);
+    }
+
+    // The arc tangent of y / x, using the signs of both arguments to
+    // determine the quadrant. A zero x yields +/- pi/2 according to
+    // the sign of y, and the origin yields zero.
+    func atan2(y: Real64, x: Real64): Real64 {
+        if x > 0.0 {
+            return atan(y / x);
+        }
+        if x < 0.0 {
+            if y >= 0.0 {
+                return atan(y / x) + math::PI;
+            }
+            return atan(y / x) - math::PI;
+        }
+        if y > 0.0 {
+            return PIO2_HI;
+        }
+        if y < 0.0 {
+            return 0.0 - PIO2_HI;
+        }
+        return 0.0;
+    }
+
+    // The arc sine of x, or MATH_ERR_DOMAIN outside [-1, 1]. The
+    // endpoints answer +/- pi/2 directly, where the square root in
+    // the general formula would reach zero.
+    func asin(x: Real64): Real64! {
+        if x > 1.0 or x < -1.0 {
+            return error math::MATH_ERR_DOMAIN;
+        }
+        if x == 1.0 {
+            return PIO2_HI;
+        }
+        if x == -1.0 {
+            return 0.0 - PIO2_HI;
+        }
+        let s = math::sqrt(1.0 - x * x) catch |e| {
+            return error math::MATH_ERR_DOMAIN;
+        };
+        return atan2(x, s);
+    }
+
+    // The arc cosine of x: the complementary angle of asin.
+    func acos(x: Real64): Real64! {
+        let a = try asin(x);
+        return PIO2_HI - a;
+    }
+
+    // The hyperbolic sine: (e^x - e^-x) / 2. Past the exponential's
+    // range the value saturates to a signed infinity.
+    func sinh(x: Real64): Real64 {
+        if x > 709.0 {
+            return math::real_of(0x7FF0000000000000);
+        }
+        if x < -709.0 {
+            return math::real_of(0xFFF0000000000000);
+        }
+        let ep = math::exp(x) catch |e| {
+            return 0.0;
+        };
+        let en = math::exp(0.0 - x) catch |e| {
+            return 0.0;
+        };
+        return (ep - en) / 2.0;
+    }
+
+    // The hyperbolic cosine: (e^x + e^-x) / 2, saturating to
+    // infinity at the edges of the exponential's range.
+    func cosh(x: Real64): Real64 {
+        if x > 709.0 or x < -709.0 {
+            return math::real_of(0x7FF0000000000000);
+        }
+        let ep = math::exp(x) catch |e| {
+            return 0.0;
+        };
+        let en = math::exp(0.0 - x) catch |e| {
+            return 0.0;
+        };
+        return (ep + en) / 2.0;
+    }
+
+    // The hyperbolic tangent: (e^2x - 1) / (e^2x + 1) on the
+    // magnitude, with the sign restored; past half the
+    // exponential's range the result is exactly +/- 1.
+    func tanh(x: Real64): Real64 {
+        if x > 354.0 {
+            return 1.0;
+        }
+        if x < -354.0 {
+            return 0.0 - 1.0;
+        }
+        let t = math::exp(2.0 * math::fabs(x)) catch |e| {
+            return 1.0;
+        };
+        let v = (t - 1.0) / (t + 1.0);
+        return if x < 0.0 { 0.0 - v } else { v };
+    }
+
+    // Converts degrees to radians.
+    func deg_to_rad(deg: Real64): Real64 = deg * math::PI / 180.0;
+
+    // Converts radians to degrees.
+    func rad_to_deg(rad: Real64): Real64 = rad * 180.0 / math::PI;
+}

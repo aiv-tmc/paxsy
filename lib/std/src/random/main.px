@@ -1,0 +1,120 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: random
+ * Pseudorandom number generation on a 64-bit state word.
+ *
+ * A xorshift64* generator. The 64-bit state is advanced by three
+ * XOR-shift rounds and the output is the state multiplied by a fixed
+ * odd constant (the "star" scrambler), which gives well-mixed output
+ * bits at a cost of a handful of integer operations. The period is
+ * 2^64 - 1 for every non-zero starting state; a zero state would
+ * stay zero forever, so both seed and next_u64 replace it with a
+ * fixed non-zero constant.
+ *
+ * below() maps the output into a range without modulo bias using the
+ * multiply-high trick: the 64-bit output is widened to UInt128,
+ * multiplied by the bound, and the top 64 bits of the product are
+ * the result, which distributes uniformly for any bound.
+ *
+ * The generator is a module-level value: seed and auto_seed
+ * initialise it, and the drawing functions read and advance the
+ * shared state. Programs that need independent sequences seed and
+ * draw in a controlled order.
+ */
+
+use sysrand;
+
+module random {
+    // Star scrambler constant of xorshift64*.
+    static RAND_MUL = 2685821657736338717;
+
+    // State substituted for the forbidden all-zero state.
+    static RAND_ZERO_STATE = 88172645463325252;
+
+    // errno-style code reported by range when the interval is empty.
+    static ERR_INVALID_RANGE = 22;
+
+    // errno-style code reported by choice for an empty view.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // Current state of the single global stream.
+    let __state: UInt64;
+
+    // Initialises the generator with the given seed, substituting a
+    // safe constant when `s` is zero. Two runs seeded with the same
+    // value produce the same sequence of draws.
+    func seed(s: UInt64): Void {
+        if s == 0 {
+            __state = RAND_ZERO_STATE;
+        } else {
+            __state = s;
+        }
+    }
+
+    // Initialises the generator from system entropy, so the sequence
+    // differs on each invocation. May block if the system has not
+    // gathered entropy yet; the system-random module's error (19,
+    // ENODEV) propagates when the kernel has no randomness source.
+    func auto_seed(): Void! {
+        let s = try sysrand::u64();
+        seed(s);
+    }
+
+    // Advances the generator and returns the next 64-bit value.
+    func next_u64(): UInt64 {
+        let x = __state;
+        if x == 0 {
+            x = RAND_ZERO_STATE;
+        }
+        x = x ^ (x >> 12);
+        x = x ^ (x << 25);
+        x = x ^ (x >> 27);
+        __state = x;
+        return x * RAND_MUL;
+    }
+
+    // Returns a random integer in the range [0, n). The argument
+    // must be greater than zero.
+    func below(n: UInt64): UInt64 {
+        if n == 0 {
+            return 0;
+        }
+        let wide = next_u64() as UInt128 * n as UInt128;
+        return (wide >> 64) as UInt64;
+    }
+
+    // Returns a uniformly distributed value in the half-open
+    // interval [lo, hi), or ERR_INVALID_RANGE when hi <= lo.
+    func range(lo: UInt64, hi: UInt64): UInt64! {
+        if hi <= lo {
+            return error ERR_INVALID_RANGE;
+        }
+        return lo + below(hi - lo);
+    }
+
+    // Shuffles the view in place with the Fisher-Yates algorithm:
+    // walking from the last slot down, each element swaps with a
+    // uniformly chosen partner from the unshuffled prefix, which
+    // makes every permutation equally likely.
+    func shuffle(static T, items: T[..]): Void {
+        let i = items.len;
+        while i > 1 {
+            i -= 1;
+            let j = below(i + 1);
+            let tmp = items[i];
+            items[i] = items[j];
+            items[j] = tmp;
+        }
+    }
+
+    // Returns a uniformly distributed element of the view, or
+    // ERR_OUT_OF_RANGE when the view is empty.
+    func choice(static T, items: T[..]): T! {
+        if items.len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        return items[below(items.len)];
+    }
+}

@@ -1,0 +1,215 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: image
+ * Pixel images: creation, BMP loading, and BMP saving.
+ *
+ * The file format is BMP: uncompressed 24- and 32-bit on load, 24-bit
+ * on save — the uncompressed baseline a syscall-only library can
+ * parse exactly. Loaded images are normalized to the module's RGBA8
+ * layout. Pixel data is owned by the Image value: every constructor
+ * allocates it, destroy() releases it.
+ *
+ * BMP reading: the 14-byte file header gives the pixel-data offset;
+ * the 40-byte info header gives width, signed height (negative means
+ * top-down rows), the bit count (24 or 32 only), and the compression
+ * field, which must be zero. Rows are padded to four bytes and stored
+ * blue-green-red; alpha is ignored on 32-bit input and set to 255 for
+ * 24-bit.
+ *
+ * Error policy: 2 (ENOENT) covers files that cannot be opened or
+ * created; 22 (EINVAL) covers every format violation; the allocator's
+ * 12 propagates from the constructors. The file and the raw buffer
+ * are released on every failure path.
+ */
+
+use heap;
+use mem;
+use file;
+use sys;
+
+// Reads one little-endian 32-bit field at offset `off` of `buf`.
+func __le32(buf: UInt64, off: UInt64): UInt32 {
+    let p = buf + off;
+    return (@(p as &UInt8) as UInt32) $ ((@((p + 1) as &UInt8) as UInt32) << 8) $ ((@((p + 2) as &UInt8) as UInt32) << 16) $ ((@((p + 3) as &UInt8) as UInt32) << 24);
+}
+
+module image {
+    // A pixel image owned by the value: dimensions, format, and a
+    // heap buffer of width*height*pixel-size bytes.
+    static Image = Struct {
+        width: UInt64,
+        height: UInt64,
+        format: UInt32,
+        data: Char[],
+    };
+
+    // Pixel formats; RGBA8 is the canonical layout of the module.
+    static RGBA8 = 0;
+    static RGB8 = 1;
+    static GRAYSCALE8 = 2;
+
+    // errno-style codes: file cannot be opened, format violation.
+    static ERR_NOT_FOUND = 2;
+    static ERR_UNSUPPORTED_FORMAT = 22;
+
+    // Bytes per pixel of each format.
+    func __bpp(format: UInt32): UInt64 {
+        if format == RGBA8 {
+            return 4;
+        }
+        if format == GRAYSCALE8 {
+            return 1;
+        }
+        return 3;
+    }
+
+    // Creates a blank image of the given dimensions and format with
+    // every pixel zeroed.
+    func create(width: UInt64, height: UInt64, format: UInt32): Image! {
+        let n = width * height * __bpp(format);
+        let data = try heap::alloc(n);
+        mem::zero(data, n);
+        return Image {width, height, format, data as Char[]};
+    }
+
+    // Creates an image from existing pixel data, copying width *
+    // height * pixel-size bytes.
+    func create_from_data(width: UInt64, height: UInt64, format: UInt32, data: Char[]): Image! {
+        let img = try create(width, height, format);
+        mem::copy((img.data as UInt64) as &Void, (data as UInt64) as &Void, width * height * __bpp(format));
+        return img;
+    }
+
+    // Releases the pixel buffer and resets the value; it must not be
+    // used afterwards.
+    func destroy(img: &Image): Void {
+        heap::free(((@img).data as UInt64) as &Void);
+        (@img).width = 0;
+        (@img).height = 0;
+        (@img).format = 0;
+        (@img).data = (0 as UInt64) as Char[];
+    }
+
+    // Loads a 24- or 32-bit uncompressed BMP from `path` and returns
+    // it as an RGBA8 image.
+    func load(path: Char[]): Image! {
+        let f = file::File.open(path, sys::O_RDONLY) catch {
+            return error ERR_NOT_FOUND;
+        };
+        errdefer { file::File.close(f) catch |e| { }; }
+        let size = try file::File.size(f);
+        let raw = try heap::alloc(size);
+        errdefer heap::free(raw);
+        let got = try file::File.read_all(f, raw, size);
+        try file::File.close(f);
+        if got < size {
+            return error ERR_UNSUPPORTED_FORMAT;
+        }
+        if size < 54 or @((raw as UInt64) as &UInt8) != 66 or @((raw as UInt64 + 1) as &UInt8) != 77 {
+            return error ERR_UNSUPPORTED_FORMAT;
+        }
+        let hdr = raw as UInt64;
+        let data_off = __le32(hdr, 10) as UInt64;
+        let width = __le32(hdr, 18) as UInt64;
+        let height_raw = __le32(hdr, 22);
+        let top_down = false;
+        let height_f: UInt64 = height_raw as UInt64;
+        if (height_raw as Int32) < 0 {
+            top_down = true;
+            height_f = (0 as UInt64) - (height_raw as UInt64);
+        }
+        let bpp = __le32(hdr, 28);
+        let compression = __le32(hdr, 30);
+        if width == 0 or height_f == 0 or (bpp != 24 and bpp != 32) or compression != 0 or data_off >= size {
+            return error ERR_UNSUPPORTED_FORMAT;
+        }
+        let px = try heap::alloc(width * height_f * 4);
+        let row_bytes = (((bpp * (width as UInt32) + 31) / 32) * 4) as UInt64;
+        let y: UInt64 = 0;
+        while y < height_f {
+            // Source row: bottom-up files store the last row first.
+            let src_row = if top_down { y } else { height_f - 1 - y };
+            let src = (raw as UInt64) + data_off + src_row * row_bytes;
+            let dst = (px as UInt64) + y * width * 4;
+            let x: UInt64 = 0;
+            while x < width {
+                let s = src + x * ((bpp as UInt64) / 8);
+                let d = dst + x * 4;
+                let a: UInt8 = 255;
+                if bpp == 32 {
+                    a = @((s + 3) as &UInt8);
+                }
+                @(d as &UInt8) = @(s as &UInt8);
+                @((d + 1) as &UInt8) = @((s + 1) as &UInt8);
+                @((d + 2) as &UInt8) = @((s + 2) as &UInt8);
+                @((d + 3) as &UInt8) = a;
+                x += 1;
+            }
+            y += 1;
+        }
+        heap::free(raw);
+        return Image {width, height_f, RGBA8, px as Char[]};
+    }
+
+    // Saves `img` as a 24-bit BMP at `path`; RGBA8 and RGB8 sources
+    // are converted, alpha dropped. Other formats report
+    // ERR_UNSUPPORTED_FORMAT.
+    func save(img: &Image, path: Char[]): Void! {
+        let ii = @img;
+        if ii.format != RGBA8 and ii.format != RGB8 {
+            return error ERR_UNSUPPORTED_FORMAT;
+        }
+        let row_bytes = (((24 * (ii.width as UInt32) + 31) / 32) * 4) as UInt64;
+        let img_bytes = row_bytes * ii.height;
+        let file_size: UInt64 = 54 + img_bytes;
+        let raw = try heap::alloc(file_size);
+        errdefer heap::free(raw);
+        mem::zero(raw, file_size);
+        let p = raw as UInt64;
+        // File header: signature, file size, pixel offset.
+        @(p as &UInt8) = 66;
+        @((p + 1) as &UInt8) = 77;
+        @((p + 2) as &UInt8) = (file_size & 255) as UInt8;
+        @((p + 3) as &UInt8) = ((file_size >> 8) & 255) as UInt8;
+        @((p + 4) as &UInt8) = ((file_size >> 16) & 255) as UInt8;
+        @((p + 5) as &UInt8) = ((file_size >> 24) & 255) as UInt8;
+        @((p + 10) as &UInt8) = 54;
+        // Info header: 40 bytes, one plane, 24 bits.
+        @((p + 14) as &UInt8) = 40;
+        @((p + 18) as &UInt8) = (ii.width & 255) as UInt8;
+        @((p + 19) as &UInt8) = ((ii.width >> 8) & 255) as UInt8;
+        @((p + 20) as &UInt8) = ((ii.width >> 16) & 255) as UInt8;
+        @((p + 21) as &UInt8) = ((ii.width >> 24) & 255) as UInt8;
+        @((p + 22) as &UInt8) = (ii.height & 255) as UInt8;
+        @((p + 23) as &UInt8) = ((ii.height >> 8) & 255) as UInt8;
+        @((p + 24) as &UInt8) = ((ii.height >> 16) & 255) as UInt8;
+        @((p + 25) as &UInt8) = ((ii.height >> 24) & 255) as UInt8;
+        @((p + 26) as &UInt8) = 1;
+        @((p + 28) as &UInt8) = 24;
+        // Pixels, bottom-up, blue-green-red with row padding.
+        let src_bpp = __bpp(ii.format);
+        let y: UInt64 = 0;
+        while y < ii.height {
+            let src_row = ii.height - 1 - y;
+            let x: UInt64 = 0;
+            while x < ii.width {
+                let s = (ii.data as UInt64) + (src_row * ii.width + x) * src_bpp;
+                let d = p + 54 + y * row_bytes + x * 3;
+                @(d as &UInt8) = @(s as &UInt8);
+                @((d + 1) as &UInt8) = @((s + 1) as &UInt8);
+                @((d + 2) as &UInt8) = @((s + 2) as &UInt8);
+                x += 1;
+            }
+            y += 1;
+        }
+        let f = file::File.create(path, 420) catch {
+            return error ERR_NOT_FOUND;
+        };
+        errdefer { file::File.close(f) catch |e| { }; }
+        try file::File.write_all(f, raw, file_size);
+        try file::File.close(f);
+        heap::free(raw);
+    }
+}

@@ -1,0 +1,156 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: http
+ * Minimal HTTP/1.0 client.
+ *
+ * get() performs one HTTP/1.0 GET over a fresh TCP connection: it
+ * sends the request line and an empty header section, then reads the
+ * response until the server closes the connection, which HTTP/1.0
+ * servers do after the body. The whole response is held in one heap
+ * buffer owned by the returned Response; the caller inspects status
+ * and body and finally releases the buffer with free_response().
+ *
+ * Deliberate simplifications, consistent with the module's role as a
+ * basic building block: no header parsing beyond locating the end of
+ * the header section, no chunked transfer encoding (an HTTP/1.0 server
+ * does not use it), no redirects, no name resolution — the caller
+ * passes a numeric IPv4 address — and a 16 MiB cap on the total
+ * response size. The status line's reason phrase is skipped; only the
+ * numeric code is returned.
+ *
+ * Error policy: 71 (EPROTO) covers responses that do not parse as
+ * HTTP; 27 (EFBIG) reports a response past the size cap; raw socket
+ * and allocator errors propagate otherwise. The connection and the
+ * buffer are released on every failure path.
+ */
+
+use net;
+use heap;
+use string;
+use fmt;
+
+// Finds the end of the header section: the CR LF CR LF pattern.
+// Returns the pattern's offset, or `len` when the buffer holds none.
+func __find_header_end(buf: UInt64, len: UInt64): UInt64 {
+    let i: UInt64 = 0;
+    while i + 3 < len {
+        if @((buf + i) as &UInt8) == 13 and @((buf + i + 1) as &UInt8) == 10 and @((buf + i + 2) as &UInt8) == 13 and @((buf + i + 3) as &UInt8) == 10 {
+            return i;
+        }
+        i += 1;
+    }
+    return len;
+}
+
+// Returns the offset of the first space within buf[0..limit), or
+// `limit` when the buffer holds none.
+func __find_space(buf: UInt64, limit: UInt64): UInt64 {
+    let i: UInt64 = 0;
+    while i < limit {
+        if @((buf + i) as &UInt8) == 32 {
+            return i;
+        }
+        i += 1;
+    }
+    return limit;
+}
+
+module http {
+    // A received HTTP response. `buf`/`buf_len` cover the whole raw
+    // response and are owned by the caller after get() returns;
+    // `body`/`body_len` alias the region past the header section
+    // inside the same allocation and are not separately released.
+    static Response = Struct {
+        status: UInt64,
+        body: Char[],
+        body_len: UInt64,
+        buf: Char[],
+        buf_len: UInt64,
+    };
+
+    // errno-style code for responses that do not parse as HTTP.
+    static ERR_PROTO = 71;
+
+    // errno-style code for responses exceeding the size cap.
+    static ERR_TOO_BIG = 27;
+
+    // Initial heap buffer for the response, doubled as needed.
+    static __INIT_CAP = 4096;
+
+    // Hard cap on the total response size in bytes (16 MiB).
+    static __MAX_CAP = 16777216;
+
+    // Releases the heap buffer owned by `r`. The Response value must
+    // not be used afterwards.
+    func free_response(r: Response): Void {
+        heap::free((r.buf as UInt64) as &Void);
+    }
+
+    // Performs one GET of `path` on the host at the given address and
+    // returns the response. The path is used verbatim in the request
+    // line and should start with '/'; an empty path sends "/".
+    func get(ip: UInt32, port: UInt16, path: Char[]): Response! {
+        let s = try net::TcpStream.connect(ip, port);
+        errdefer { net::TcpStream.close(s) catch |e| { }; }
+
+        // Request line, sent in three pieces: the verb and space, the
+        // path, and the protocol version followed by an empty header
+        // section terminated by a blank line.
+        let part1: UInt8[4] = {71, 69, 84, 32};
+        let part2: UInt8[13] = {32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10};
+        let path_len = string::len(path);
+        try net::TcpStream.write(s, &part1[0] as &Void, 4);
+        if path_len == 0 {
+            // No path given: request the root, which every server
+            // maps.
+            try net::TcpStream.write(s, ("/" as UInt64) as &Void, 1);
+        } else {
+            try net::TcpStream.write(s, (path as UInt64) as &Void, path_len);
+        }
+        try net::TcpStream.write(s, &part2[0] as &Void, 13);
+
+        // Read the response until the server closes the connection or
+        // the size cap is reached, doubling the buffer as it grows.
+        let cap: UInt64 = __INIT_CAP;
+        let buf = try heap::alloc(cap);
+        errdefer heap::free(buf);
+        let total: UInt64 = 0;
+        while true {
+            if total == cap {
+                if cap >= __MAX_CAP {
+                    return error ERR_TOO_BIG;
+                }
+                cap *= 2;
+                // On failure the old block is still live, and the
+                // errdefer above releases it.
+                buf = try heap::realloc(buf, cap);
+            }
+            let n = try net::TcpStream.read(s, ((buf as UInt64) + total) as &Void, cap - total);
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        try net::TcpStream.close(s);
+
+        // Split the response into header section and body at the
+        // blank line; everything before it must at least hold a
+        // status line.
+        let hdr_end = __find_header_end(buf as UInt64, total);
+        if hdr_end == total {
+            return error ERR_PROTO;
+        }
+        let sp = __find_space(buf as UInt64, hdr_end);
+        if sp == hdr_end {
+            return error ERR_PROTO;
+        }
+        let status = fmt::parse_u64_dec(((buf as UInt64) + sp + 1) as Char[]) catch {
+            return error ERR_PROTO;
+        };
+        let body = ((buf as UInt64) + hdr_end + 4) as Char[];
+        let body_len = total - (hdr_end + 4);
+        return Response {status, body, body_len, buf as Char[], total};
+    }
+}

@@ -1,0 +1,96 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: regex_compiler (internal)
+ * Instruction emission and compiler utilities for the regular
+ * expression modules.
+ *
+ * This module owns the Comp cursor helpers and the low-level emit
+ * and patch operations every other regex module builds on:
+ * __emit appends one INST-byte instruction to the program array
+ * (doubling the array on demand), the __set_* family rewrites the
+ * opcode or an operand of an already-emitted instruction, and
+ * __aux_free releases the chain of character-class bitmap nodes.
+ * The __compile entry itself lives in regex_parser, which drives
+ * the grammar and coordinates this module and regex_class.
+ */
+
+use heap;
+use regex_types;
+
+module regex_compiler {
+    // Appends one instruction and returns its index; doubles the
+    // program array when it is full.
+    func __emit(c: &regex_types::Comp, op: UInt64, a: UInt64, b: UInt64): UInt64! {
+        if (@c).len == (@c).cap {
+            let cc = @c;
+            cc.cap *= 2;
+            let grown = heap::realloc(cc.buf as &Void, cc.cap * regex_types::INST) catch {
+                @c = cc;
+                return error regex_types::REGEX_ERR_MATCH;
+            };
+            cc.buf = grown as UInt64;
+            @c = cc;
+        }
+        let idx = (@c).len;
+        let p = (@c).buf + idx * regex_types::INST;
+        @(p as &UInt64) = op;
+        @((p + 8) as &UInt64) = a;
+        @((p + 16) as &UInt64) = b;
+        (@c).len = idx + 1;
+        return idx;
+    }
+
+    // Overwrites the opcode of instruction `i`.
+    func __set_op(c: &regex_types::Comp, i: UInt64, v: UInt64): Void {
+        @(((@c).buf + i * regex_types::INST) as &UInt64) = v;
+    }
+
+    // Overwrites operand a of instruction `i`.
+    func __set_a(c: &regex_types::Comp, i: UInt64, v: UInt64): Void {
+        @(((@c).buf + i * regex_types::INST + 8) as &UInt64) = v;
+    }
+
+    // Overwrites operand b of instruction `i`.
+    func __set_b(c: &regex_types::Comp, i: UInt64, v: UInt64): Void {
+        @(((@c).buf + i * regex_types::INST + 16) as &UInt64) = v;
+    }
+
+    // Reads the pattern byte under the cursor.
+    func __peek(c: &regex_types::Comp): UInt64 {
+        return @(((@c).pat + (@c).pos) as &Char) as UInt64;
+    }
+
+    // Advances the pattern cursor by one byte.
+    func __adv(c: &regex_types::Comp): Void {
+        (@c).pos = (@c).pos + 1;
+    }
+
+    // Reports whether `ch` is an ASCII digit.
+    func __is_digit(ch: UInt64): Bool {
+        return ch >= 48 and ch <= 57;
+    }
+
+    // Reads the run of digits under the cursor as a number. The
+    // caller guarantees at least one digit is present.
+    func __number(c: &regex_types::Comp): UInt64 {
+        let v: UInt64 = 0;
+        while __is_digit(__peek(c)) {
+            v = v * 10 + (__peek(c) - 48);
+            __adv(c);
+        }
+        return v;
+    }
+
+    // Releases every node of the bitmap chain. A node is 40
+    // bytes: next pointer followed by the 32-byte bitmap.
+    func __aux_free(head: UInt64): Void {
+        let h = head;
+        while h != 0 {
+            let next = @(h as &UInt64);
+            heap::free(h as &Void);
+            h = next;
+        }
+    }
+}

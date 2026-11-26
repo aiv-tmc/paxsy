@@ -1,0 +1,174 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: fmt_real_parse
+ * Package-internal real-number parser backing fmt::parse_real.
+ *
+ * The grammar is an optional sign, decimal digits, an optional
+ * fraction after a point, and an optional decimal exponent introduced
+ * by 'e' or 'E'; the literal names "inf" and "nan" are recognized
+ * because fmt::real_to_str produces them. Scanning starts at the
+ * first byte, never skips whitespace, and stops at the first byte
+ * that cannot belong to the number, which is not an error. All digits
+ * accumulate in one Real64 mantissa and the decimal exponent is
+ * applied afterwards in exact 10^22 chunks, which keeps the rounding
+ * error at the level of the final Real64 operations.
+ */
+
+// Raw bit access to a Real64: the variants share one 8-byte cell, so
+// reading `u` after writing `f` yields the IEEE-754 bit pattern and
+// writing `u` before reading `f` yields the corresponding value.
+static __FBits = Union {
+    f: Real64,
+    u: UInt64,
+};
+
+// Exact powers of ten for scaling; 10^22 is the largest power whose
+// Real64 representation is exact (5^22 still fits the 53-bit
+// significand), so larger scalings are applied in 10^22 chunks.
+static __POW10: Real64[23] = {
+    1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0,
+    10000000.0, 100000000.0, 1000000000.0, 10000000000.0,
+    100000000000.0, 1000000000000.0, 10000000000000.0,
+    100000000000000.0, 1000000000000000.0, 10000000000000000.0,
+    100000000000000000.0, 1000000000000000000.0,
+    10000000000000000000.0, 100000000000000000000.0,
+    1000000000000000000000.0, 10000000000000000000000.0,
+};
+
+// errno-style codes matching the public fmt constants.
+static ERR_INVALID_NUMBER = 22;
+static ERR_OUT_OF_RANGE = 34;
+
+// IEEE-754 field masks on the raw bits of a Real64.
+static SIGN_MASK = 0x8000000000000000;
+static EXP_MASK = 0x7FF0000000000000;
+
+// Reinterprets the bits of `u` as a Real64.
+func __real_of(u: UInt64): Real64 {
+    let b: __FBits;
+    b.u = u;
+    return b.f;
+}
+
+module fmt_real_parse {
+    // Parses a real number from the start of `src` and returns its
+    // value. An empty digit run is ERR_INVALID_NUMBER; magnitudes
+    // beyond 1e308 are ERR_OUT_OF_RANGE.
+    func parse(src: Char[]): Real64! {
+        let p = src as UInt64;
+        let i: UInt64 = 0;
+        let negative = false;
+        if @(p as &Char) as UInt64 == 45 {
+            negative = true;
+            i = 1;
+        }
+        // Named non-finite values, matching the formatter output.
+        let c0 = @((p + i) as &Char) as UInt64;
+        let c1 = @((p + i + 1) as &Char) as UInt64;
+        let c2 = @((p + i + 2) as &Char) as UInt64;
+        if c0 == 105 and c1 == 110 and c2 == 102 {
+            let bits = if negative {
+                SIGN_MASK $ EXP_MASK
+            } else {
+                EXP_MASK
+            };
+            return __real_of(bits);
+        }
+        if c0 == 110 and c1 == 97 and c2 == 110 {
+            // Any nonzero significand with the all-ones exponent is a
+            // NaN; the sign of a NaN carries no meaning here.
+            return __real_of(EXP_MASK $ 1);
+        }
+        // All digits, integer and fractional, accumulate in `m`; the
+        // fraction length is subtracted from the exponent afterwards.
+        let m: Real64 = 0.0;
+        let any = false;
+        let frac_count: Int64 = 0;
+        while true {
+            let c = @((p + i) as &Char) as UInt64;
+            if c < 48 or c > 57 {
+                break;
+            }
+            m = m * 10.0 + (c - 48) as Real64;
+            any = true;
+            i += 1;
+        }
+        if @((p + i) as &Char) as UInt64 == 46 {
+            i += 1;
+            while true {
+                let c = @((p + i) as &Char) as UInt64;
+                if c < 48 or c > 57 {
+                    break;
+                }
+                m = m * 10.0 + (c - 48) as Real64;
+                frac_count += 1;
+                any = true;
+                i += 1;
+            }
+        }
+        if not any {
+            return error ERR_INVALID_NUMBER;
+        }
+        // Optional exponent; without at least one digit the 'e' is
+        // treated as a trailing character and left unread.
+        let exp10 = 0 - frac_count;
+        let ce = @((p + i) as &Char) as UInt64;
+        if ce == 101 or ce == 69 {
+            let j = i + 1;
+            let esign: Int64 = 1;
+            let cs = @((p + j) as &Char) as UInt64;
+            if cs == 45 {
+                esign = -1;
+                j += 1;
+            } else {
+                if cs == 43 {
+                    j += 1;
+                }
+            }
+            let ed: UInt64 = 0;
+            let eany = false;
+            while true {
+                let c = @((p + j) as &Char) as UInt64;
+                if c < 48 or c > 57 {
+                    break;
+                }
+                // Cap the accumulator; the scaling loops below turn
+                // anything this large into overflow or zero anyway.
+                if ed < 100000 {
+                    ed = ed * 10 + (c - 48);
+                }
+                eany = true;
+                j += 1;
+            }
+            if eany {
+                exp10 += esign * (ed as Int64);
+            }
+        }
+        if m == 0.0 {
+            // Preserve a negative sign on zero.
+            return __real_of(if negative { SIGN_MASK } else { 0 });
+        }
+        // Apply the decimal exponent in exact 10^22 chunks.
+        let value = m;
+        let e = exp10;
+        while e > 0 {
+            let step = if e >= 22 { 22 } else { e };
+            value = value * __POW10[step as UInt64];
+            e -= step;
+            if value > 1.0e308 {
+                return error ERR_OUT_OF_RANGE;
+            }
+        }
+        while e < 0 {
+            if value == 0.0 {
+                break;
+            }
+            let step = if 0 - e >= 22 { 22 } else { 0 - e };
+            value = value / __POW10[step as UInt64];
+            e += step;
+        }
+        return if negative { 0.0 - value } else { value };
+    }
+}

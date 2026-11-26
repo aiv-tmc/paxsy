@@ -1,0 +1,134 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: test
+ * The assertion vocabulary shared by test functions.
+ *
+ * The toolchain's test runner discovers test_* functions and
+ * judges them by their exit status. Every assertion compares its
+ * arguments and, on mismatch, prints one diagnostic line and
+ * increments a global failure counter. finish() prints the tally
+ * and exits with the failure count as the status, so a green
+ * suite exits zero and a red one exits with the number of failed
+ * assertions.
+ *
+ * Labels are a required argument because the language has no
+ * macros and cannot capture expression text or source positions
+ * at the call site; a short unique phrase per assertion ("map
+ * grows", "utf8 rejects overlong") identifies the failing check
+ * in the output. The assertions return Void rather than error
+ * unions so test bodies stay free of try-clutter and can run any
+ * number of checks.
+ */
+
+use console;
+use string;
+use sys;
+
+// Global failure counter shared by every assertion in the process.
+let __t_failures: UInt64;
+
+// Records one failure and prints "F <label>" without a newline;
+// callers either terminate the line themselves or append a
+// " got <value> want <value>" tail with the helpers below.
+func __t_fail(label: Char[]): Void {
+    __t_failures += 1;
+    let tag: Char[2] = {70 as Char, 32 as Char};
+    console::print(&tag[0]);
+    console::print(label);
+}
+
+// Prints the " got " separator of a value diagnostic.
+func __t_got(): Void {
+    let sep: Char[5] = {32 as Char, 103 as Char, 111 as Char, 116 as Char, 32 as Char};
+    console::print(&sep[0]);
+}
+
+// Prints the " want " separator of a value diagnostic.
+func __t_want(): Void {
+    let sep: Char[6] = {32 as Char, 119 as Char, 97 as Char, 110 as Char, 116 as Char, 32 as Char};
+    console::print(&sep[0]);
+}
+
+module test {
+    // Passes when `cond` is true.
+    func expect(cond: Bool, label: Char[]): Void {
+        if cond {
+            return;
+        }
+        __t_fail(label);
+        console::newline();
+    }
+
+    // Passes when the unsigned values are equal; the diagnostic
+    // shows both in decimal.
+    func expect_u64(got: UInt64, want: UInt64, label: Char[]): Void {
+        if got == want {
+            return;
+        }
+        __t_fail(label);
+        __t_got();
+        console::print_u64(got);
+        __t_want();
+        console::print_u64(want);
+        console::newline();
+    }
+
+    // Passes when the signed values are equal; negatives print
+    // with their minus sign.
+    func expect_i64(got: Int64, want: Int64, label: Char[]): Void {
+        if got == want {
+            return;
+        }
+        __t_fail(label);
+        __t_got();
+        console::print_i64(got);
+        __t_want();
+        console::print_i64(want);
+        console::newline();
+    }
+
+    // Passes when the booleans are equal; the diagnostic prints
+    // both as words.
+    func expect_bool(got: Bool, want: Bool, label: Char[]): Void {
+        if got == want {
+            return;
+        }
+        __t_fail(label);
+        __t_got();
+        console::print_bool(got);
+        __t_want();
+        console::print_bool(want);
+        console::newline();
+    }
+
+    // Passes when the strings are bytewise equal; the diagnostic
+    // prints both in full.
+    func expect_str(got: Char[], want: Char[], label: Char[]): Void {
+        if string::compare(got, want) == 0 {
+            return;
+        }
+        __t_fail(label);
+        __t_got();
+        console::print(got);
+        __t_want();
+        console::print(want);
+        console::newline();
+    }
+
+    // Returns the number of failed assertions so far.
+    func failures(): UInt64 = __t_failures;
+
+    // Prints the failure tally and exits with the failure count as
+    // the process status (modulo 256, the kernel's status width).
+    // A test suite calls this once at the end of each test_*
+    // function's main path; the runner treats zero as success.
+    func finish(): Void {
+        let tag: Char[10] = {102 as Char, 97 as Char, 105 as Char, 108 as Char, 117 as Char, 114 as Char, 101 as Char, 115 as Char, 58 as Char, 32 as Char};
+        console::print(&tag[0]);
+        console::print_u64(__t_failures);
+        console::newline();
+        sys::exit((__t_failures & 255) as Int32);
+    }
+}

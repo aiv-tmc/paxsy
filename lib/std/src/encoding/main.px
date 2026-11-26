@@ -1,0 +1,310 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: encoding
+ * Conversions between raw bytes and hexadecimal, Base64, and
+ * percent-encoded text.
+ *
+ * Each encode function returns an owning str::Str holding text; each
+ * decode function validates its input and returns an owning Str whose
+ * len is the decoded byte count (the content may hold arbitrary
+ * bytes, with the usual zero terminator right after them). Decoders
+ * reject malformed input with ERR_INVALID_DATA: odd-length or
+ * non-digit hexadecimal, non-canonical Base64 padding, and truncated
+ * or malformed percent escapes.
+ */
+
+use heap;
+use str;
+use string;
+
+// The lowercase hexadecimal digits, indexed by nibble value.
+static HEX_DIGITS: Char[16] = {'0', '1', '2', '3', '4', '5', '6', '7',
+    '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+
+// The RFC 4648 Base64 alphabet, indexed by 6-bit value.
+static B64_ALPHABET: Char[64] = {
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+    'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '/'};
+
+// Returns the value of a hex digit in either case, or 255 when the
+// byte is not a hex digit.
+func __hex_val(c: Char): UInt64 {
+    if c >= '0' and c <= '9' {
+        return c as UInt64 - 48;
+    }
+    if c >= 'a' and c <= 'f' {
+        return c as UInt64 - 87;
+    }
+    if c >= 'A' and c <= 'F' {
+        return c as UInt64 - 55;
+    }
+    return 255;
+}
+
+// Returns the 6-bit value of a Base64 alphabet byte, or 255 when the
+// byte is outside the alphabet.
+func __b64_val(c: Char): UInt64 {
+    if c >= 'A' and c <= 'Z' {
+        return c as UInt64 - 65;
+    }
+    if c >= 'a' and c <= 'z' {
+        return c as UInt64 - 71;
+    }
+    if c >= '0' and c <= '9' {
+        return c as UInt64 + 4;
+    }
+    if c == '+' {
+        return 62;
+    }
+    if c == '/' {
+        return 63;
+    }
+    return 255;
+}
+
+// Reports whether `c` belongs to the RFC 3986 unreserved set, which
+// percent-encoding leaves alone.
+func __unreserved(c: Char): Bool {
+    return (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z')
+        or (c >= '0' and c <= '9') or c == '-' or c == '_'
+        or c == '.' or c == '~';
+}
+
+module encoding {
+    // Returned by the decode functions on malformed input.
+    static ERR_INVALID_DATA = 22;
+
+    // Returned when an allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returns the lowercase hexadecimal representation of the `len`
+    // bytes at `data`, two digits per byte.
+    func hex_encode(data: &Void, len: UInt64): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        try str::reserve(&out, len * 2);
+        let p = data as UInt64;
+        let d = out.data as UInt64;
+        let i: UInt64 = 0;
+        while i < len {
+            let b = @((p + i) as &Char) as UInt64;
+            @((d + i * 2) as &Char) = HEX_DIGITS[b >> 4];
+            @((d + i * 2 + 1) as &Char) = HEX_DIGITS[b & 15];
+            i += 1;
+        }
+        @((d + len * 2) as &Char) = 0 as Char;
+        out.len = len * 2;
+        return out;
+    }
+
+    // Decodes hexadecimal text, uppercase or lowercase, and returns
+    // the bytes as a string value whose len is the byte count.
+    // Reports ERR_INVALID_DATA on an odd length or a non-digit byte.
+    func hex_decode(text: Char[]): str::Str! {
+        let n = string::len(text);
+        if n % 2 != 0 {
+            return error ERR_INVALID_DATA;
+        }
+        let out = str::make();
+        errdefer str::destroy(&out);
+        try str::reserve(&out, if n / 2 == 0 { 1 } else { n / 2 });
+        let p = text as UInt64;
+        let d = out.data as UInt64;
+        let i: UInt64 = 0;
+        while i < n / 2 {
+            let hi = __hex_val(@((p + i * 2) as &Char));
+            let lo = __hex_val(@((p + i * 2 + 1) as &Char));
+            if hi == 255 or lo == 255 {
+                return error ERR_INVALID_DATA;
+            }
+            @((d + i) as &Char) = ((hi << 4) $ lo) as Char;
+            i += 1;
+        }
+        @((d + n / 2) as &Char) = 0 as Char;
+        out.len = n / 2;
+        return out;
+    }
+
+    // Encodes the `len` bytes at `data` as standard Base64 with
+    // canonical '=' padding.
+    func base64_encode(data: &Void, len: UInt64): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        // Every 3-byte group becomes 4 characters; a partial final
+        // group is padded to a full quartet.
+        let groups = (len + 2) / 3;
+        try str::reserve(&out, if groups * 4 == 0 { 1 } else { groups * 4 });
+        let p = data as UInt64;
+        let d = out.data as UInt64;
+        let di: UInt64 = 0;
+        let i: UInt64 = 0;
+        while i + 3 <= len {
+            let v = (@((p + i) as &Char) as UInt64) << 16
+                $ (@((p + i + 1) as &Char) as UInt64) << 8
+                $ (@((p + i + 2) as &Char) as UInt64);
+            @((d + di) as &Char) = B64_ALPHABET[(v >> 18) & 63];
+            @((d + di + 1) as &Char) = B64_ALPHABET[(v >> 12) & 63];
+            @((d + di + 2) as &Char) = B64_ALPHABET[(v >> 6) & 63];
+            @((d + di + 3) as &Char) = B64_ALPHABET[v & 63];
+            di += 4;
+            i += 3;
+        }
+        let left = len - i;
+        if left == 1 {
+            let v = (@((p + i) as &Char) as UInt64) << 16;
+            @((d + di) as &Char) = B64_ALPHABET[(v >> 18) & 63];
+            @((d + di + 1) as &Char) = B64_ALPHABET[(v >> 12) & 63];
+            @((d + di + 2) as &Char) = '=';
+            @((d + di + 3) as &Char) = '=';
+            di += 4;
+        } else if left == 2 {
+            let v = (@((p + i) as &Char) as UInt64) << 16
+                $ (@((p + i + 1) as &Char) as UInt64) << 8;
+            @((d + di) as &Char) = B64_ALPHABET[(v >> 18) & 63];
+            @((d + di + 1) as &Char) = B64_ALPHABET[(v >> 12) & 63];
+            @((d + di + 2) as &Char) = B64_ALPHABET[(v >> 6) & 63];
+            @((d + di + 3) as &Char) = '=';
+            di += 4;
+        }
+        @((d + di) as &Char) = 0 as Char;
+        out.len = di;
+        return out;
+    }
+
+    // Decodes standard Base64 text with canonical padding. Reports
+    // ERR_INVALID_DATA when the length is not a multiple of four, a
+    // byte sits outside the alphabet, or padding appears anywhere but
+    // at the end of the final quartet.
+    func base64_decode(text: Char[]): str::Str! {
+        let n = string::len(text);
+        if n % 4 != 0 {
+            return error ERR_INVALID_DATA;
+        }
+        let out = str::make();
+        errdefer str::destroy(&out);
+        try str::reserve(&out, if n == 0 { 1 } else { n / 4 * 3 });
+        let p = text as UInt64;
+        let d = out.data as UInt64;
+        let di: UInt64 = 0;
+        let i: UInt64 = 0;
+        while i < n {
+            // Read one quartet, noting how many pad bytes it ends
+            // with; pads are legal only in the final quartet.
+            let pads: UInt64 = 0;
+            let v: UInt64 = 0;
+            let j: UInt64 = 0;
+            while j < 4 {
+                let c = @((p + i + j) as &Char);
+                if c == '=' {
+                    if i + 4 < n or j < 2 {
+                        return error ERR_INVALID_DATA;
+                    }
+                    pads += 1;
+                    v <<= 6;
+                } else {
+                    let b = __b64_val(c);
+                    if b == 255 or pads > 0 {
+                        return error ERR_INVALID_DATA;
+                    }
+                    v = (v << 6) $ b;
+                }
+                j += 1;
+            }
+            @((d + di) as &Char) = ((v >> 16) & 255) as Char;
+            di += 1;
+            if pads < 2 {
+                @((d + di) as &Char) = ((v >> 8) & 255) as Char;
+                di += 1;
+            }
+            if pads < 1 {
+                @((d + di) as &Char) = (v & 255) as Char;
+                di += 1;
+            }
+            i += 4;
+        }
+        @((d + di) as &Char) = 0 as Char;
+        out.len = di;
+        return out;
+    }
+
+    // Percent-encodes one URL component: bytes outside the
+    // unreserved set become '%' followed by two uppercase hex digits.
+    func url_encode(component: Char[]): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        let n = string::len(component);
+        try str::reserve(&out, if n == 0 { 1 } else { n });
+        let p = component as UInt64;
+        let i: UInt64 = 0;
+        while i < n {
+            let c = @((p + i) as &Char);
+            if __unreserved(c) {
+                // Unreserved bytes pass through unchanged, one at a
+                // time; the reserve runs first because growth moves
+                // the backing allocation.
+                try str::reserve(&out, out.len + 1);
+                @((out.data as UInt64 + out.len) as &Char) = c;
+                out.len += 1;
+            } else {
+                // Build the three-byte escape in place.
+                try str::reserve(&out, out.len + 3);
+                let d = out.data as UInt64;
+                @((d + out.len) as &Char) = '%';
+                @((d + out.len + 1) as &Char) = __hex_upper((c as UInt64) >> 4);
+                @((d + out.len + 2) as &Char) = __hex_upper((c as UInt64) & 15);
+                out.len += 3;
+            }
+            @((out.data as UInt64 + out.len) as &Char) = 0 as Char;
+            i += 1;
+        }
+        return out;
+    }
+
+    // Decodes a percent-encoded component. Every '%' must be
+    // followed by exactly two hex digits; any other byte, including
+    // '+', is copied unchanged.
+    func url_decode(text: Char[]): str::Str! {
+        let n = string::len(text);
+        let out = str::make();
+        errdefer str::destroy(&out);
+        try str::reserve(&out, if n == 0 { 1 } else { n });
+        let p = text as UInt64;
+        let d = out.data as UInt64;
+        let i: UInt64 = 0;
+        while i < n {
+            let c = @((p + i) as &Char);
+            if c == '%' {
+                if i + 2 >= n {
+                    return error ERR_INVALID_DATA;
+                }
+                let hi = __hex_val(@((p + i + 1) as &Char));
+                let lo = __hex_val(@((p + i + 2) as &Char));
+                if hi == 255 or lo == 255 {
+                    return error ERR_INVALID_DATA;
+                }
+                @((d + out.len) as &Char) = ((hi << 4) $ lo) as Char;
+                i += 3;
+            } else {
+                @((d + out.len) as &Char) = c;
+                i += 1;
+            }
+            out.len += 1;
+        }
+        @((d + out.len) as &Char) = 0 as Char;
+        return out;
+    }
+}
+
+// Returns the uppercase hex digit for a nibble value; used by
+// url_encode, which emits uppercase escapes.
+func __hex_upper(v: UInt64): Char {
+    if v < 10 {
+        return (v + 48) as Char;
+    }
+    return (v + 55) as Char;
+}

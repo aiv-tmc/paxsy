@@ -1,0 +1,256 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: datetime
+ * Conversion between seconds since the Unix epoch and civil
+ * calendar fields, in the proleptic Gregorian calendar and UTC.
+ *
+ * A DateTime holds the civil fields directly; the epoch conversions
+ * run through day counts with Howard Hinnant's days_from_civil
+ * algorithm, which is exact across the whole Int64 range and needs
+ * no tables beyond the month lengths. Epoch values follow the POSIX
+ * time scale; applications that need local civil time apply an
+ * explicit time-zone rule before formatting or interpreting a
+ * DateTime.
+ *
+ * Negative (pre-1970) timestamps floor correctly: the seconds
+ * remainder is adjusted into range before the day count is formed.
+ * ISO text uses the fixed shape "YYYY-MM-DDTHH:MM:SS" with the T
+ * separator, exactly two digits per field.
+ */
+
+use time;
+use str;
+
+// Days since 1970-01-01 for the civil date, without range checks
+// (Hinnant's days_from_civil; the year shift puts February last,
+// which makes the leap day the final day of the computed year).
+func __days_unchecked(year: Int32, month: Int32, day: Int32): Int64 {
+    let y = year as Int64;
+    let m = month as Int64;
+    let shifted = if m <= 2 { y - 1 } else { y };
+    let era = (if shifted >= 0 { shifted } else { shifted - 399 }) / 400;
+    let yoe = shifted - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + (day as Int64) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+// Writes two decimal digits of `v` (assumed below 100) at `p`.
+func __pad2(p: UInt64, v: UInt64): Void {
+    @(p as &Char) = ((v / 10) + 48) as Char;
+    @((p + 1) as &Char) = ((v % 10) + 48) as Char;
+}
+
+// Writes four decimal digits of `v` (assumed below 10000) at `p`.
+func __pad4(p: UInt64, v: UInt64): Void {
+    __pad2(p, v / 100);
+    __pad2(p + 2, v % 100);
+}
+
+// Reads one decimal digit at `t + i`; any other byte is error 22.
+func __dig1(t: UInt64, i: UInt64): UInt64! {
+    let c = @((t + i) as &Char) as UInt64;
+    if c < 48 or c > 57 {
+        return error 22;
+    }
+    return c - 48;
+}
+
+// Reads two decimal digits at `t + i`.
+func __dig2(t: UInt64, i: UInt64): UInt64! {
+    let a = try __dig1(t, i);
+    let b = try __dig1(t, i + 1);
+    return a * 10 + b;
+}
+
+module datetime {
+    // errno-style code for out-of-range fields, nonexistent dates,
+    // and unparsable ISO text.
+    static ERR_INVALID_DATE = 22;
+
+    // errno-style code for a failed string allocation.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // A civil date-time in UTC: the proleptic Gregorian year (e.g.
+    // 2026), month 1 through 12, day 1 through 31, hour 0 through
+    // 23, minute and second 0 through 59.
+    static DateTime = Struct {
+        year: Int32,
+        month: Int32,
+        day: Int32,
+        hour: Int32,
+        minute: Int32,
+        second: Int32,
+    };
+
+    // Reports whether `year` is a leap year.
+    func is_leap(year: Int32): Bool {
+        if year % 4 != 0 {
+            return false;
+        }
+        if year % 100 != 0 {
+            return true;
+        }
+        return year % 400 == 0;
+    }
+
+    // Returns the number of days in the given month of the given
+    // year, taking leap years into account; a month outside 1..12
+    // is ERR_INVALID_DATE.
+    func days_in_month(year: Int32, month: Int32): Int32! {
+        if month < 1 or month > 12 {
+            return error ERR_INVALID_DATE;
+        }
+        let table: Int32[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        if month == 2 and is_leap(year) {
+            return 29;
+        }
+        return table[(month - 1) as UInt64];
+    }
+
+    // Returns the number of days since 1970-01-01 for a calendar
+    // date, or ERR_INVALID_DATE for a date that does not exist.
+    func date_to_days(year: Int32, month: Int32, day: Int32): Int64! {
+        let dim = try days_in_month(year, month);
+        if day < 1 or day > dim {
+            return error ERR_INVALID_DATE;
+        }
+        return __days_unchecked(year, month, day);
+    }
+
+    // Returns the calendar date (year, month, day) for a day count
+    // since 1970-01-01; the exact inverse of date_to_days.
+    func date_from_days(days: Int64): (Int32, Int32, Int32) {
+        let zz = days + 719468;
+        let era = (if zz >= 0 { zz } else { zz - 146096 }) / 146097;
+        let doe = zz - era * 146097;
+        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let yr = if m <= 2 { y + 1 } else { y };
+        return {yr as Int32, m as Int32, d as Int32};
+    }
+
+    // Seconds since the Unix epoch for `dt`, or ERR_INVALID_DATE
+    // when a field is out of range or the date does not exist.
+    func to_epoch(dt: DateTime): Int64! {
+        let days = try date_to_days(dt.year, dt.month, dt.day);
+        if dt.hour < 0 or dt.hour > 23 or dt.minute < 0 or dt.minute > 59 or dt.second < 0 or dt.second > 59 {
+            return error ERR_INVALID_DATE;
+        }
+        return days * 86400 + (dt.hour as Int64) * 3600 + (dt.minute as Int64) * 60 + dt.second as Int64;
+    }
+
+    // The date-time of `sec` seconds after the Unix epoch. Negative
+    // values reach before 1970: the remainder is floored into range
+    // before the day count is formed, so no off-by-one haunts
+    // pre-epoch timestamps.
+    func from_epoch(sec: Int64): DateTime {
+        let days = sec / 86400;
+        let rem = sec % 86400;
+        if rem < 0 {
+            days -= 1;
+            rem += 86400;
+        }
+        let date = date_from_days(days);
+        return DateTime {
+            date.0,
+            date.1,
+            date.2,
+            (rem / 3600) as Int32,
+            ((rem % 3600) / 60) as Int32,
+            (rem % 60) as Int32,
+        };
+    }
+
+    // The day of the week of a valid date-time: 0 is Sunday and 6
+    // is Saturday. Epoch day zero was a Thursday, which the
+    // constant four encodes. The fields below the day are ignored.
+    func weekday(dt: DateTime): Int32 {
+        let m = __days_unchecked(dt.year, dt.month, dt.day) % 7;
+        let mm = if m < 0 { m + 7 } else { m };
+        return ((mm + 4) % 7) as Int32;
+    }
+
+    // Reads the wall clock and returns the current date and time
+    // in UTC.
+    func now(): DateTime! {
+        let ts = try time::realtime();
+        return from_epoch(ts.sec);
+    }
+
+    // The date-time `n` seconds after (or before, for negative n)
+    // the given value, normalizing across calendar boundaries.
+    func add_seconds(dt: DateTime, n: Int64): DateTime {
+        let epoch = __days_unchecked(dt.year, dt.month, dt.day) * 86400 + (dt.hour as Int64) * 3600 + (dt.minute as Int64) * 60 + dt.second as Int64;
+        return from_epoch(epoch + n);
+    }
+
+    // The date-time `n` days after (or before) the given value, at
+    // the same time of day.
+    func add_days(dt: DateTime, n: Int32): DateTime {
+        let days = __days_unchecked(dt.year, dt.month, dt.day) + n as Int64;
+        let date = date_from_days(days);
+        return DateTime {date.0, date.1, date.2, dt.hour, dt.minute, dt.second};
+    }
+
+    // Renders `dt` as "YYYY-MM-DDTHH:MM:SS" in UTC in a fresh
+    // owning string. Fields outside their valid range are
+    // ERR_INVALID_DATE; an allocation failure is ERR_OUT_OF_MEMORY.
+    // The caller owns the string and releases it with str::destroy.
+    func format_iso(dt: DateTime): str::Str! {
+        try to_epoch(dt);
+        if dt.year < 0 or dt.year > 9999 {
+            return error ERR_INVALID_DATE;
+        }
+        let out = str::make();
+        try str::reserve(&out, 20);
+        let o = out.data as UInt64;
+        __pad4(o, dt.year as UInt64);
+        @((o + 4) as &Char) = 45 as Char;
+        __pad2(o + 5, dt.month as UInt64);
+        @((o + 7) as &Char) = 45 as Char;
+        __pad2(o + 8, dt.day as UInt64);
+        @((o + 10) as &Char) = 84 as Char;
+        __pad2(o + 11, dt.hour as UInt64);
+        @((o + 13) as &Char) = 58 as Char;
+        __pad2(o + 14, dt.minute as UInt64);
+        @((o + 16) as &Char) = 58 as Char;
+        __pad2(o + 17, dt.second as UInt64);
+        @((o + 19) as &Char) = 0 as Char;
+        out.len = 19;
+        return out;
+    }
+
+    // Parses the strict "YYYY-MM-DDTHH:MM:SS" shape into a
+    // DateTime, requiring exactly two digits per field and the T
+    // separator. Malformed text and nonexistent dates are
+    // ERR_INVALID_DATE.
+    func parse_iso(text: Char[]): DateTime! {
+        let t = text as UInt64;
+        if @((t + 19) as &Char) as UInt64 != 0 {
+            return error ERR_INVALID_DATE;
+        }
+        if @((t + 4) as &Char) as UInt64 != 45 or @((t + 7) as &Char) as UInt64 != 45 or @((t + 10) as &Char) as UInt64 != 84 or @((t + 13) as &Char) as UInt64 != 58 or @((t + 16) as &Char) as UInt64 != 58 {
+            return error ERR_INVALID_DATE;
+        }
+        let a0 = try __dig2(t, 0);
+        let a1 = try __dig2(t, 2);
+        let year = (a0 * 100 + a1) as Int32;
+        let month = (try __dig2(t, 5)) as Int32;
+        let day = (try __dig2(t, 8)) as Int32;
+        let hour = (try __dig2(t, 11)) as Int32;
+        let minute = (try __dig2(t, 14)) as Int32;
+        let second = (try __dig2(t, 17)) as Int32;
+        let dt = DateTime {year, month, day, hour, minute, second};
+        // Validate every field through the epoch conversion.
+        try to_epoch(dt);
+        return dt;
+    }
+}

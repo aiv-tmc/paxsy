@@ -1,0 +1,67 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: regex_types (internal)
+ * Shared definitions for the regular expression modules.
+ *
+ * This module holds every static constant and both state
+ * structs used by the regex compiler, parser, character-class
+ * builder, and matching engine, so all modules agree on one
+ * layout: a program is a flat array of INST-byte instructions
+ * (opcode, operand a, operand b) with absolute jump targets, and
+ * SAVE slots record byte offsets into the subject text for the
+ * whole match (slots 0 and 1) and up to four capture groups
+ * (pairs up to slot 9).
+ */
+
+module regex_types {
+    // Instruction opcodes.
+    static OP_CHAR = 1;   // a = the byte to match
+    static OP_ANY = 2;    // any byte except NUL
+    static OP_CLASS = 3;  // a = bitmap address, b = 1 negates
+    static OP_MATCH = 4;  // accept
+    static OP_JMP = 5;    // a = target instruction index
+    static OP_SPLIT = 6;  // a = preferred branch, b = fallback
+    static OP_SAVE = 7;   // a = slot index
+    static OP_BOL = 8;    // zero-width start-of-text anchor
+    static OP_EOL = 9;    // zero-width end-of-text anchor
+
+    // Bytes per instruction: opcode, operand a, operand b.
+    static INST = 24;
+
+    // Save slots: group 0 is the whole match (slots 0 and 1),
+    // groups 1 through 4 fill pairs up to slot 9.
+    static SAVE_SLOTS = 10;
+    static MAX_GROUPS = 4;
+
+    // Sentinel meaning "save slot not written by this run".
+    static UNSET = 18446744073709551615;
+
+    // errno-style codes: malformed pattern and engine failure.
+    static REGEX_ERR_PATTERN = 22;
+    static REGEX_ERR_MATCH = 12;
+
+    // Backtracking stack frame: pc, sp, then SAVE_SLOTS saved
+    // slots.
+    static FRAME = 16 + SAVE_SLOTS * 8;
+
+    // Compiler state threaded through the recursive descent
+    // parser.
+    static Comp = Struct {
+        buf: UInt64,    // program base address
+        len: UInt64,    // instruction count
+        cap: UInt64,    // instruction capacity
+        pat: UInt64,    // pattern base address
+        pos: UInt64,    // cursor into the pattern
+        ngroups: UInt64,
+        aux: UInt64,    // head of the bitmap node chain
+    };
+
+    // The explicit DFS stack of the virtual machine.
+    static VM = Struct {
+        stk: UInt64,
+        slen: UInt64,
+        scap: UInt64,
+    };
+}

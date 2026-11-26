@@ -1,0 +1,132 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: env
+ * Snapshot access to the program's environment block.
+ *
+ * Like the argument vector, the environment is recovered from the
+ * kernel through a pseudo-file, /proc/self/environ, which holds one
+ * "NAME=VALUE\0" record per variable. init() reads that file into a
+ * static buffer and indexes the start of every record; count(), get()
+ * and find() then answer from the snapshot without further system
+ * calls. The snapshot is never copied: the returned strings point
+ * into module state and stay valid for the program's lifetime.
+ * Calling init() again replaces the snapshot.
+ *
+ * find() matches a variable by its name: for every indexed record it
+ * compares the caller's name against the record up to the '='
+ * separator and, on an exact match, returns the byte right after the
+ * separator, so the result is the value alone.
+ *
+ * Limits: the snapshot occupies a fixed 4 KiB buffer and at most 64
+ * records are indexed; input beyond either limit is not indexed.
+ */
+
+use sys;
+
+// Static snapshot of the environment bytes as read from the kernel.
+let __buf: Char[4096];
+
+// Offset of each record's first byte within __buf.
+let __offsets: UInt64[64];
+
+// Number of indexed records.
+let __count: UInt64;
+
+// ASCII code of the '=' separator between a record's name and value.
+static __SEP = 61;
+
+// Reports whether the "NAME=VALUE" record at `entry` has exactly
+// `name` as its name. Comparison proceeds byte by byte and succeeds
+// only when the name is exhausted exactly at the record's '='
+// separator.
+func __name_matches(entry: UInt64, name: UInt64): Bool {
+    let i: UInt64 = 0;
+    while true {
+        let nc = @((name + i) as &Char) as UInt64;
+        let ec = @((entry + i) as &Char) as UInt64;
+        if nc == 0 {
+            return ec == __SEP;
+        }
+        if ec != nc {
+            return false;
+        }
+        i += 1;
+    }
+}
+
+module env {
+    // Captures the environment block and returns the number of
+    // variables. Called once at program start; later calls replace
+    // the snapshot.
+    func init(): UInt64! {
+        let fd_u = try sys::open("/proc/self/environ", sys::O_RDONLY, 0);
+        let fd = fd_u as UInt32;
+        // Read until the kernel reports end of file or the buffer
+        // fills.
+        let total: UInt64 = 0;
+        while total < 4096 {
+            let dst = (&__buf[0] as UInt64 + total) as &Void;
+            let n = try sys::read(fd, dst, 4096 - total);
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        try sys::close(fd);
+        // A record begins at offset 0 and immediately after every
+        // interior zero byte.
+        __count = 0;
+        let i: UInt64 = 0;
+        let at_start = true;
+        while i < total {
+            let ch = @((&__buf[0] as UInt64 + i) as &Char);
+            if at_start and ch as UInt64 != 0 and __count < 64 {
+                __offsets[__count] = i;
+                __count += 1;
+            }
+            at_start = ch as UInt64 == 0;
+            i += 1;
+        }
+        return __count;
+    }
+
+    // Returns the number of environment variables captured by init,
+    // or zero before init has run.
+    func count(): UInt64 {
+        return __count;
+    }
+
+    // Returns the i-th entry in "NAME=VALUE" form. The index must be
+    // smaller than count; an out-of-range index yields the zero
+    // pointer. The returned string aliases the snapshot.
+    func get(i: UInt64): Char[] {
+        if i >= __count {
+            return 0;
+        }
+        return ((&__buf[0] as UInt64) + __offsets[i]) as Char[];
+    }
+
+    // Returns the value of the environment variable `name`, or an
+    // empty string when the variable is not set. The returned pointer
+    // aliases the environment snapshot.
+    func find(name: Char[]): Char[] {
+        let n = name as UInt64;
+        // Measure the name once; the value starts one byte past the
+        // '=' that terminates it.
+        let nlen: UInt64 = 0;
+        while @((n + nlen) as &Char) as UInt64 != 0 {
+            nlen += 1;
+        }
+        let i: UInt64 = 0;
+        while i < __count {
+            let entry = (&__buf[0] as UInt64) + __offsets[i];
+            if __name_matches(entry, n) {
+                return (entry + nlen + 1) as Char[];
+            }
+            i += 1;
+        }
+        return "";
+    }
+}

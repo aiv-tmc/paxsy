@@ -1,0 +1,307 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: ini
+ * Parsing of the INI configuration format: sections in brackets,
+ * `key = value` lines, and `;` or `#` comments.
+ *
+ * The result is read-only; a program that writes configuration
+ * writes text, so there is no serialiser. The accepted grammar is
+ * deliberately small: whole-line comments starting with ';' or
+ * '#', section headers in [brackets], and key=value lines.
+ * Whitespace (spaces and tabs) around keys, around the equals
+ * sign, and at value ends is ignored; inline comments are not
+ * recognised, so values may freely contain ';' and '#'. Keys
+ * written before any section header live in the empty section "".
+ * A repeated key replaces its earlier value, keeping its original
+ * position in the document order reported by each().
+ *
+ * Storage: every entry owns one heap block holding the section,
+ * key, and value as three consecutive NUL-terminated strings. A
+ * map keyed by "section.key" (or plain "key" in the empty
+ * section) answers lookups, and an address array in document
+ * order drives iteration. get() returns a pointer into the entry
+ * block, which stays valid until destroy().
+ */
+
+use heap;
+use map;
+use mem;
+
+// The parse storage behind Ini.store: a map from "section.key"
+// to entry block addresses, plus the block addresses in document
+// order.
+static __Store = Struct {
+    m: map::Map,
+    order: &UInt64,
+    count: UInt64,
+    cap: UInt64,
+};
+
+// Counts the bytes of the NUL-terminated string at `p`.
+func __zlen(p: UInt64): UInt64 {
+    let n: UInt64 = 0;
+    while @((p + n) as &Char) as UInt64 != 0 {
+        n += 1;
+    }
+    return n;
+}
+
+// Releases the store and every entry block.
+func __store_free(s: &__Store): Void {
+    let i: UInt64 = 0;
+    while i < (@s).count {
+        heap::free(@(((@s).order as UInt64 + i * 8) as &UInt64) as &Void);
+        i += 1;
+    }
+    if (@s).order != 0 {
+        heap::free((@s).order as &Void);
+    }
+    map::destroy(&(@s).m);
+    heap::free(s as &Void);
+}
+
+// Records one entry: copies the three strings into a fresh block,
+// replaces the value when the key already exists (keeping the
+// document position), and otherwise appends the block to the
+// document order.
+func __entry_put(s: &__Store, sec: UInt64, slen: UInt64, key: UInt64, klen: UInt64, val: UInt64, vlen: UInt64): Void! {
+    // The lookup key: "section.key", or plain "key" in the empty
+    // section.
+    let flen = if slen > 0 { slen + 1 + klen } else { klen };
+    let full = try heap::alloc(flen + 1);
+    defer heap::free(full);
+    let f = full as UInt64;
+    if slen > 0 {
+        mem::copy(f as &Void, sec as &Void, slen);
+        @((f + slen) as &Char) = 46 as Char;
+        mem::copy((f + slen + 1) as &Void, key as &Void, klen);
+    } else {
+        mem::copy(f as &Void, key as &Void, klen);
+    }
+    @((f + flen) as &Char) = 0 as Char;
+    // The entry block: section, key, and value back to back.
+    let blen = slen + 1 + klen + 1 + vlen + 1;
+    let block = try heap::alloc(blen);
+    // The block is released if the bookkeeping below fails before
+    // the entry is fully recorded.
+    errdefer heap::free(block);
+    let b = block as UInt64;
+    mem::copy(b as &Void, sec as &Void, slen);
+    @((b + slen) as &Char) = 0 as Char;
+    mem::copy((b + slen + 1) as &Void, key as &Void, klen);
+    @((b + slen + 1 + klen) as &Char) = 0 as Char;
+    mem::copy((b + slen + 1 + klen + 1) as &Void, val as &Void, vlen);
+    @((b + blen - 1) as &Char) = 0 as Char;
+    if map::has(&(@s).m, full as Char[]) {
+        // A repeated key keeps its position: swap the block in
+        // place and release the old one.
+        let old = try map::get(UInt64, &(@s).m, full as Char[]);
+        try map::put(UInt64, &(@s).m, full as Char[], b);
+        let i: UInt64 = 0;
+        while i < (@s).count {
+            if @(((@s).order as UInt64 + i * 8) as &UInt64) == old {
+                @(((@s).order as UInt64 + i * 8) as &UInt64) = b;
+                break;
+            }
+            i += 1;
+        }
+        heap::free(old as &Void);
+        return;
+    }
+    try map::put(UInt64, &(@s).m, full as Char[], b);
+    if (@s).count == (@s).cap {
+        let ncap = if (@s).cap == 0 { 16 } else { (@s).cap * 2 };
+        if (@s).order == 0 {
+            (@s).order = (try heap::alloc(ncap * 8)) as &UInt64;
+        } else {
+            (@s).order = (try heap::realloc((@s).order as &Void, ncap * 8)) as &UInt64;
+        }
+        (@s).cap = ncap;
+    }
+    @(((@s).order as UInt64 + (@s).count * 8) as &UInt64) = b;
+    (@s).count += 1;
+}
+
+// Composes "section.key" (or plain "key") into `out` (capacity
+// `cap`) and reports whether it fitted.
+func __compose(sec: UInt64, key: UInt64, out: UInt64, cap: UInt64): Bool {
+    let slen = __zlen(sec);
+    let klen = __zlen(key);
+    let flen = if slen > 0 { slen + 1 + klen } else { klen };
+    if flen + 1 > cap {
+        return false;
+    }
+    if slen > 0 {
+        mem::copy(out as &Void, sec as &Void, slen);
+        @((out + slen) as &Char) = 46 as Char;
+        mem::copy((out + slen + 1) as &Void, key as &Void, klen);
+    } else {
+        mem::copy(out as &Void, key as &Void, klen);
+    }
+    @((out + flen) as &Char) = 0 as Char;
+    return true;
+}
+
+module ini {
+    // errno-style code returned on malformed text.
+    static ERR_INVALID_DATA = 22;
+
+    // errno-style code returned when an allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // A parsed INI document; the storage is opaque to the caller.
+    static Ini = Struct {
+        store: &Void,
+    };
+
+    // Parses the document at `text`. The result must be released
+    // with destroy, scheduled with defer immediately after a
+    // successful parse. Malformed text is ERR_INVALID_DATA; a
+    // failed allocation is ERR_OUT_OF_MEMORY, with every partial
+    // allocation released.
+    func parse(text: Char[]): Ini! {
+        let s = (try heap::alloc(sizeof(__Store))) as &__Store;
+        (@s).m = map::make(UInt64);
+        (@s).order = 0;
+        (@s).count = 0;
+        (@s).cap = 0;
+        errdefer __store_free(s);
+        // The running section name, as a span of the input text.
+        let sec: UInt64 = 0;
+        let seclen: UInt64 = 0;
+        let t = text as UInt64;
+        let start: UInt64 = 0;
+        while true {
+            // Find the end of the current line.
+            let e = start;
+            while @((t + e) as &Char) as UInt64 != 10 and @((t + e) as &Char) as UInt64 != 0 {
+                e += 1;
+            }
+            let last = e;
+            if last > start and @((t + last - 1) as &Char) as UInt64 == 13 {
+                last -= 1;
+            }
+            // Trim leading whitespace.
+            let i = start;
+            while i < last {
+                let c = @((t + i) as &Char) as UInt64;
+                if c != 32 and c != 9 {
+                    break;
+                }
+                i += 1;
+            }
+            if i < last {
+                let c = @((t + i) as &Char) as UInt64;
+                if c == 59 or c == 35 {
+                    // Whole-line comment: ';' or '#'.
+                } else if c == 91 {
+                    // Section header: the name runs to ']'.
+                    let j = i + 1;
+                    while j < last and @((t + j) as &Char) as UInt64 != 93 {
+                        j += 1;
+                    }
+                    if j >= last or j == i + 1 {
+                        return error ERR_INVALID_DATA;
+                    }
+                    sec = t + i + 1;
+                    seclen = j - i - 1;
+                } else {
+                    // key = value, both trimmed of whitespace.
+                    let kend = i;
+                    while kend < last {
+                        let k = @((t + kend) as &Char) as UInt64;
+                        if k == 61 or k == 32 or k == 9 {
+                            break;
+                        }
+                        kend += 1;
+                    }
+                    if kend == i {
+                        return error ERR_INVALID_DATA;
+                    }
+                    let j = kend;
+                    while j < last {
+                        let k = @((t + j) as &Char) as UInt64;
+                        if k != 32 and k != 9 {
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if j >= last or @((t + j) as &Char) as UInt64 != 61 {
+                        return error ERR_INVALID_DATA;
+                    }
+                    j += 1;
+                    while j < last {
+                        let k = @((t + j) as &Char) as UInt64;
+                        if k != 32 and k != 9 {
+                            break;
+                        }
+                        j += 1;
+                    }
+                    let vend = last;
+                    while vend > j {
+                        let k = @((t + vend - 1) as &Char) as UInt64;
+                        if k != 32 and k != 9 {
+                            break;
+                        }
+                        vend -= 1;
+                    }
+                    try __entry_put(s, sec, seclen, t + i, kend - i, t + j, vend - j);
+                }
+            }
+            if @((t + e) as &Char) as UInt64 == 0 {
+                break;
+            }
+            start = e + 1;
+        }
+        return Ini {s as &Void};
+    }
+
+    // Releases the document and every entry block.
+    func destroy(ini: &Ini): Void {
+        __store_free((@ini).store as &__Store);
+        (@ini).store = 0;
+    }
+
+    // Looks up the value of `key` in `section`. A missing key
+    // yields an empty string; the returned pointer aliases the
+    // parse storage and stays valid until destroy.
+    func get(ini: &Ini, section: Char[], key: Char[]): Char[] {
+        let full: Char[4128];
+        if not __compose(section as UInt64, key as UInt64, &full[0] as UInt64, 4128) {
+            return "";
+        }
+        let s = (@ini).store as &__Store;
+        let b = map::get(UInt64, &(@s).m, &full[0]) catch {
+            return "";
+        };
+        // The value follows the section and key strings.
+        let v = b + __zlen(b) + 1;
+        return (v + __zlen(v) + 1) as Char[];
+    }
+
+    // Reports whether `key` is present in `section`.
+    func has(ini: &Ini, section: Char[], key: Char[]): Bool {
+        let full: Char[4128];
+        if not __compose(section as UInt64, key as UInt64, &full[0] as UInt64, 4128) {
+            return false;
+        }
+        let s = (@ini).store as &__Store;
+        return map::has(&(@s).m, &full[0]);
+    }
+
+    // Calls `f` once for every entry, in document order. Errors
+    // returned by `f` stop the iteration and propagate.
+    func each(ini: &Ini, f: func(section: Char[], key: Char[], value: Char[]): Void!): Void! {
+        let s = (@ini).store as &__Store;
+        let i: UInt64 = 0;
+        while i < (@s).count {
+            let b = @(((@s).order as UInt64 + i * 8) as &UInt64);
+            let k = b + __zlen(b) + 1;
+            let v = k + __zlen(k) + 1;
+            try f(b as Char[], k as Char[], v as Char[]);
+            i += 1;
+        }
+    }
+}

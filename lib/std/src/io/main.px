@@ -1,0 +1,253 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: io
+ * Buffered reading and writing over file descriptors.
+ *
+ * Buffering batches small transfers into large ones: a program that
+ * emits many small writes should write through a Writer rather than
+ * calling std::inout::print in a loop, and a program that consumes
+ * input line by line should read through a Reader.
+ *
+ * A Reader draws on a heap buffer first and refills it from the
+ * descriptor when it drains; read_line hands out one line at a time
+ * without its terminating newline, NUL-terminated in the caller's
+ * buffer. A Writer accumulates bytes and pushes whole batches to the
+ * kernel, flushing when the buffer fills and on flush or close.
+ * After a failed Writer flush the unsent remainder is compacted to
+ * the front of the buffer before the error is reported, so the
+ * writer stays usable after a transient failure and close can retry.
+ *
+ * Ownership: open and create take ownership of the new descriptor,
+ * and close releases it; close must be scheduled with defer
+ * immediately after a successful open or create.
+ */
+
+use sys;
+use heap;
+use mem;
+use string;
+
+module io {
+    // State of a buffered reader: the descriptor, the heap buffer,
+    // the bytes currently buffered, and the next byte to consume.
+    static Reader = Struct {
+        fd: UInt64,
+        buf: &Char,
+        len: UInt64,
+        pos: UInt64,
+    };
+
+    // State of a buffered writer: the descriptor, the heap buffer,
+    // the bytes pending, and the buffer capacity.
+    static Writer = Struct {
+        fd: UInt64,
+        buf: &Char,
+        len: UInt64,
+        cap: UInt64,
+    };
+
+    // errno-style code returned by read_line when the line does not
+    // fit the caller's buffer.
+    static ERR_LINE_TOO_LONG = 36;
+
+    // Internal buffer capacity for both directions.
+    static __CAP = 8192;
+
+    // ASCII code of the newline delimiter.
+    static __NL = 10;
+
+    // Opens the file at `path` for reading and takes ownership of
+    // the descriptor.
+    func Reader.open(path: Char[]): Reader! {
+        let fd = try sys::open(path, sys::O_RDONLY, 0);
+        let buf = heap::alloc(__CAP) catch |e| {
+            sys::close(fd as UInt32) catch |c| {
+                return error c;
+            };
+            return error e;
+        };
+        return Reader {fd, buf as &Char, 0, 0};
+    }
+
+    // Flushes nothing, releases the buffer, and closes the
+    // descriptor. The Reader must not be used afterwards.
+    func Reader.close(r: &Reader): Void! {
+        let rr = @r;
+        heap::free(rr.buf as &Void);
+        @r = Reader {0, 0, 0, 0};
+        try sys::close(rr.fd as UInt32);
+    }
+
+    // Reads up to `count` bytes from the current position into
+    // `dst`, drawing on the buffer first and refilling from the
+    // descriptor as needed, and returns the number stored. A return
+    // of zero reports end of input.
+    func Reader.read(r: &Reader, dst: Char[], count: UInt64): UInt64! {
+        let rr = @r;
+        let out = dst as UInt64;
+        let stored: UInt64 = 0;
+        while stored < count {
+            let avail = rr.len - rr.pos;
+            if avail > 0 {
+                let take = if avail < count - stored { avail } else { count - stored };
+                mem::copy((out + stored) as &Void, (rr.buf as UInt64 + rr.pos) as &Void, take);
+                rr.pos += take;
+                stored += take;
+                continue;
+            }
+            // Buffer drained: refill from the descriptor.
+            let got = try sys::read(rr.fd as UInt32, rr.buf as &Void, __CAP);
+            if got == 0 {
+                break;
+            }
+            rr.pos = 0;
+            rr.len = got;
+        }
+        @r = rr;
+        return stored;
+    }
+
+    // Reads one line: stores the characters of the next line in
+    // `dst` without the terminating newline, terminated by a zero
+    // byte, and returns true. Returns false when the input is
+    // exhausted. ERR_LINE_TOO_LONG reports a line that does not fit
+    // in `cap` bytes including the terminator.
+    func Reader.read_line(r: &Reader, dst: Char[], cap: UInt64): Bool! {
+        let rr = @r;
+        while true {
+            // Scan the unconsumed region for the delimiter.
+            let i = rr.pos;
+            while i < rr.len {
+                if @((rr.buf as UInt64 + i) as &Char) as UInt64 == __NL {
+                    let llen = i - rr.pos;
+                    if llen + 1 > cap {
+                        @r = rr;
+                        return error ERR_LINE_TOO_LONG;
+                    }
+                    mem::copy(dst as &Void, (rr.buf as UInt64 + rr.pos) as &Void, llen);
+                    @((dst as UInt64 + llen) as &Char) = 0 as Char;
+                    rr.pos = i + 1;
+                    @r = rr;
+                    return true;
+                }
+                i += 1;
+            }
+            // No delimiter buffered: compact the remainder to the
+            // front and refill.
+            let remaining = rr.len - rr.pos;
+            if rr.pos > 0 {
+                mem::move(rr.buf as &Void, (rr.buf as UInt64 + rr.pos) as &Void, remaining);
+                rr.pos = 0;
+                rr.len = remaining;
+            }
+            if rr.len >= __CAP {
+                // The buffer is full and still holds no delimiter.
+                @r = rr;
+                return error ERR_LINE_TOO_LONG;
+            }
+            let got = try sys::read(rr.fd as UInt32, (rr.buf as UInt64 + rr.len) as &Void, __CAP - rr.len);
+            if got == 0 {
+                if remaining == 0 {
+                    // The input is exhausted.
+                    @r = rr;
+                    return false;
+                }
+                // Unterminated tail at end of stream: hand it out as
+                // the final line, provided the terminator fits.
+                if remaining + 1 > cap {
+                    @r = rr;
+                    return error ERR_LINE_TOO_LONG;
+                }
+                mem::copy(dst as &Void, rr.buf as &Void, remaining);
+                @((dst as UInt64 + remaining) as &Char) = 0 as Char;
+                rr.pos = rr.len;
+                @r = rr;
+                return true;
+            }
+            rr.len += got;
+        }
+    }
+
+    // Creates the file at `path`, truncating an existing one, with
+    // mode 0644, and takes ownership of the descriptor.
+    func Writer.create(path: Char[]): Writer! {
+        let fd = try sys::open(path, sys::O_CREAT $ sys::O_TRUNC $ sys::O_WRONLY, 420);
+        let buf = heap::alloc(__CAP) catch |e| {
+            sys::close(fd as UInt32) catch |c| {
+                return error c;
+            };
+            return error e;
+        };
+        return Writer {fd, buf as &Char, 0, __CAP};
+    }
+
+    // Pushes every pending byte to the file. After a successful
+    // flush the buffer is empty; after a failed flush the unsent
+    // remainder stays compacted at the front of the buffer.
+    func Writer.flush(w: &Writer): Void! {
+        let ww = @w;
+        let sent: UInt64 = 0;
+        while sent < ww.len {
+            let dst = (ww.buf as UInt64 + sent) as &Void;
+            let n = sys::write(ww.fd as UInt32, dst, ww.len - sent) catch |e| {
+                // Keep the unsent remainder for a later retry.
+                ww.len -= sent;
+                mem::move(ww.buf as &Void, (ww.buf as UInt64 + sent) as &Void, ww.len);
+                @w = ww;
+                return error e;
+            };
+            if n == 0 {
+                break;
+            }
+            sent += n;
+        }
+        ww.len = 0;
+        @w = ww;
+    }
+
+    // Appends `count` bytes from `data` to the pending buffer,
+    // flushing full batches to the file as the buffer fills.
+    func Writer.write(w: &Writer, data: &Void, count: UInt64): Void! {
+        let s = data as UInt64;
+        let i: UInt64 = 0;
+        while i < count {
+            let ww = @w;
+            let room = ww.cap - ww.len;
+            let take = count - i;
+            if take > room {
+                take = room;
+            }
+            mem::copy((ww.buf as UInt64 + ww.len) as &Void, (s + i) as &Void, take);
+            ww.len += take;
+            i += take;
+            @w = ww;
+            if ww.len == ww.cap {
+                try Writer.flush(w);
+            }
+        }
+    }
+
+    // Appends the NUL-terminated string `s`, terminator excluded.
+    func Writer.write_string(w: &Writer, s: Char[]): Void! {
+        try Writer.write(w, s as &Void, string::len(s));
+    }
+
+    // Appends a single byte.
+    func Writer.write_byte(w: &Writer, b: Char): Void! {
+        let byte = b;
+        try Writer.write(w, &byte as &Void, 1);
+    }
+
+    // Flushes pending content, releases the buffer, and closes the
+    // file. A failed final flush is reported. The Writer must not be
+    // used afterwards.
+    func Writer.close(w: &Writer): Void! {
+        try Writer.flush(w);
+        let ww = @w;
+        heap::free(ww.buf as &Void);
+        @w = Writer {0, 0, 0, 0};
+        try sys::close(ww.fd as UInt32);
+    }
+}

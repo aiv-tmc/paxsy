@@ -1,0 +1,183 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: deque
+ * Deque, a growable circular buffer storing elements of any type
+ * inline.
+ *
+ * Element i lives at physical slot (head + i) mod cap, so pushes and
+ * pops at either end move one index and never shift the other
+ * elements. Growth allocates a fresh block and copies the live
+ * elements in logical order, which resets head to zero; reserve is
+ * the only operation that moves memory.
+ *
+ * Ownership: the caller of make owns the deque; destroy (usually
+ * scheduled with defer or errdefer) releases it.
+ */
+
+use heap;
+use mem;
+
+module deque {
+    // A growable double-ended queue.
+    static Deque = Struct {
+        data: &Void,
+        head: UInt64,
+        len: UInt64,
+        cap: UInt64,
+        elem_size: UInt64,
+        elem_align: UInt64,
+    };
+
+    // Returned when a growth allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returned when an index is not less than len or an operation
+    // requires a non-empty deque.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // Smallest backing allocation, in elements.
+    static MIN_CAP = 8;
+
+    // Returns an empty deque storing elements of type T.
+    func make(static T): Deque = Deque {0, 0, 0, 0, sizeof(T), alignof(T)};
+
+    // Ensures the deque can hold `want` elements. Growth copies the
+    // live elements into a fresh block in logical order and resets
+    // head to zero; the logical content is unchanged.
+    func reserve(d: &Deque, want: UInt64): Void! {
+        if want <= (@d).cap {
+            return;
+        }
+        let newcap = if (@d).cap == 0 { MIN_CAP } else { (@d).cap };
+        while newcap < want {
+            newcap *= 2;
+        }
+        let esz = (@d).elem_size;
+        let fresh = try heap::alloc(newcap * esz);
+        // Copy the live region, which may wrap the ring boundary, as
+        // two linear runs.
+        let base = (@d).data as UInt64;
+        let first = (@d).cap - (@d).head;
+        if first > (@d).len {
+            first = (@d).len;
+        }
+        if first > 0 {
+            mem::copy(fresh, (base + (@d).head * esz) as &Void, first * esz);
+        }
+        if (@d).len > first {
+            mem::copy((fresh as UInt64 + first * esz) as &Void,
+                base as &Void, ((@d).len - first) * esz);
+        }
+        if (@d).data != 0 {
+            heap::free((@d).data);
+        }
+        (@d).data = fresh;
+        (@d).cap = newcap;
+        (@d).head = 0;
+    }
+
+    // Appends `v` at the back of the deque.
+    func push_back(static T, d: &Deque, v: T): Void! {
+        try reserve(d, (@d).len + 1);
+        let at = ((@d).head + (@d).len) % (@d).cap;
+        @(((@d).data as UInt64 + at * (@d).elem_size) as &T) = v;
+        (@d).len += 1;
+    }
+
+    // Appends `v` at the front of the deque.
+    func push_front(static T, d: &Deque, v: T): Void! {
+        try reserve(d, (@d).len + 1);
+        (@d).head = ((@d).head + (@d).cap - 1) % (@d).cap;
+        @(((@d).data as UInt64 + (@d).head * (@d).elem_size) as &T) = v;
+        (@d).len += 1;
+    }
+
+    // Removes and returns the first element.
+    func pop_front(static T, d: &Deque): T! {
+        if (@d).len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        let v = @(((@d).data as UInt64 + (@d).head * (@d).elem_size) as &T);
+        (@d).head = ((@d).head + 1) % (@d).cap;
+        (@d).len -= 1;
+        return v;
+    }
+
+    // Removes and returns the last element.
+    func pop_back(static T, d: &Deque): T! {
+        if (@d).len == 0 {
+            return error ERR_OUT_OF_RANGE;
+        }
+        let at = ((@d).head + (@d).len - 1) % (@d).cap;
+        let v = @(((@d).data as UInt64 + at * (@d).elem_size) as &T);
+        (@d).len -= 1;
+        return v;
+    }
+
+    // Returns the element at logical index `i` in constant time.
+    func get(static T, d: &Deque, i: UInt64): T! {
+        if i >= (@d).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        let at = ((@d).head + i) % (@d).cap;
+        return @(((@d).data as UInt64 + at * (@d).elem_size) as &T);
+    }
+
+    // Overwrites the element at logical index `i`.
+    func set(static T, d: &Deque, i: UInt64, v: T): Void! {
+        if i >= (@d).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        let at = ((@d).head + i) % (@d).cap;
+        @(((@d).data as UInt64 + at * (@d).elem_size) as &T) = v;
+    }
+
+    // Returns a view of the live elements selected by `range` without
+    // copying. A view is one contiguous run, so the selected window
+    // must not cross the ring boundary; windows inside a non-wrapped
+    // live region always satisfy that. The view is invalidated by any
+    // operation that mutates the deque.
+    func slice(static T, d: &Deque, range): T[..] {
+        let start: UInt64 = 0;
+        let count: UInt64 = 0;
+        let first = true;
+        for range |v| {
+            if first {
+                start = v as UInt64;
+                first = false;
+            }
+            count += 1;
+        }
+        if (@d).cap == 0 {
+            // An empty deque has no ring to index; the empty view at
+            // the (zero) base is the only possible answer.
+            let p0 = ((@d).data as UInt64) as &T;
+            return p0[0..<0];
+        }
+        let at = ((@d).head + start) % (@d).cap;
+        let p = ((@d).data as UInt64 + at * (@d).elem_size) as &T;
+        return p[0..<(count as Int64)];
+    }
+
+    // Sets the length to zero while keeping the backing allocation
+    // for reuse. Element bytes are discarded without invoking
+    // destructors.
+    func clear(d: &Deque): Void {
+        (@d).head = 0;
+        (@d).len = 0;
+    }
+
+    // Releases the backing allocation and returns the deque to the
+    // state produced by make.
+    func destroy(d: &Deque): Void {
+        if (@d).data != 0 {
+            heap::free((@d).data);
+        }
+        (@d).data = 0;
+        (@d).head = 0;
+        (@d).len = 0;
+        (@d).cap = 0;
+    }
+}

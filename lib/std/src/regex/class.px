@@ -1,0 +1,256 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: regex_class (internal)
+ * Character classes for the regular expression modules.
+ *
+ * This module parses [...] groups into 256-bit bitmaps, answers
+ * bitmap membership tests for the matching engine, and emits
+ * CLASS instructions for the escape sequences \d, \D, \w, \W,
+ * \s, \S. Each bitmap lives in a 40-byte heap node linked onto
+ * the compiler's chain so the owner can release it with the
+ * program; __new_bitmap performs the allocation and the linking.
+ * Dynamic bit selection uses division and a lookup table instead
+ * of a variable shift, matching the rest of the library.
+ *
+ * Supported escapes inside a class: \d, \w, \s, \n, \t, \r, \\,
+ * and any other escaped byte as a literal. Negated escapes
+ * (\D, \W, \S) are rejected inside a class because a negated
+ * union cannot be represented as a bitmap.
+ */
+
+use heap;
+use mem;
+use regex_types;
+use regex_compiler;
+
+module regex_class {
+    // Parses a [...] class starting at the cursor's '[' and emits
+    // a CLASS instruction over a fresh bitmap. A ']' as the first
+    // byte after '[' or '[^' is a literal; a '-' as the last byte
+    // before ']' is a literal.
+    func __parse_class(c: &regex_types::Comp): Void! {
+        regex_compiler::__adv(c);
+        let bmp = try __new_bitmap(c);
+        let negate = false;
+        if regex_compiler::__peek(c) == 94 {
+            negate = true;
+            regex_compiler::__adv(c);
+        }
+        let first = true;
+        let done = false;
+        while not done {
+            let ch = regex_compiler::__peek(c);
+            if ch == 0 {
+                return error regex_types::REGEX_ERR_PATTERN;
+            }
+            if ch == 93 {
+                if first {
+                    __class_set(bmp, 93);
+                    regex_compiler::__adv(c);
+                    first = false;
+                } else {
+                    regex_compiler::__adv(c);
+                    done = true;
+                }
+            } else {
+                try __parse_class_item(c, bmp);
+                first = false;
+            }
+        }
+        let neg: UInt64 = 0;
+        if negate {
+            neg = 1;
+        }
+        regex_compiler::__emit(c, regex_types::OP_CLASS, bmp, neg);
+    }
+
+    // Parses one class item: an escape class or byte, or a
+    // literal with an optional lo-hi range. Range endpoints are
+    // literals only.
+    func __parse_class_item(c: &regex_types::Comp, bmp: UInt64): Void! {
+        let ch = regex_compiler::__peek(c);
+        if ch == 92 {
+            regex_compiler::__adv(c);
+            let e = regex_compiler::__peek(c);
+            if e == 0 {
+                return error regex_types::REGEX_ERR_PATTERN;
+            }
+            regex_compiler::__adv(c);
+            if e == 100 {
+                __class_range(bmp, 48, 57);
+                return;
+            }
+            if e == 119 {
+                __word(bmp);
+                return;
+            }
+            if e == 115 {
+                __whitespace(bmp);
+                return;
+            }
+            if e == 68 or e == 87 or e == 83 {
+                // \D, \W, \S: a negated union cannot be a bitmap.
+                return error regex_types::REGEX_ERR_PATTERN;
+            }
+            if e == 110 {
+                __class_set(bmp, 10);
+                return;
+            }
+            if e == 116 {
+                __class_set(bmp, 9);
+                return;
+            }
+            if e == 114 {
+                __class_set(bmp, 13);
+                return;
+            }
+            __class_set(bmp, e);
+            return;
+        }
+        regex_compiler::__adv(c);
+        // Range: only when '-' is neither the final class byte
+        // nor followed by ']'.
+        if regex_compiler::__peek(c) == 45 {
+            let nxt = @(((@c).pat + (@c).pos + 1) as &Char) as UInt64;
+            if nxt != 93 {
+                if nxt != 0 {
+                    regex_compiler::__adv(c);
+                    let hi = regex_compiler::__peek(c);
+                    if hi < ch {
+                        return error regex_types::REGEX_ERR_PATTERN;
+                    }
+                    regex_compiler::__adv(c);
+                    __class_range(bmp, ch, hi);
+                    return;
+                }
+            }
+        }
+        __class_set(bmp, ch);
+    }
+
+    // Emits the instruction for an escape sequence: the class
+    // escapes d, w, s and their negations become CLASS
+    // instructions over a fresh bitmap; n, t, r become control
+    // bytes; every other byte, metacharacter or not, is a
+    // literal.
+    func __emit_escape(c: &regex_types::Comp, e: UInt64): Void! {
+        if e == 100 {
+            let b = try __new_bitmap(c);
+            __class_range(b, 48, 57);
+            regex_compiler::__emit(c, regex_types::OP_CLASS, b, 0);
+            return;
+        }
+        if e == 68 {
+            let b = try __new_bitmap(c);
+            __class_range(b, 48, 57);
+            regex_compiler::__emit(c, regex_types::OP_CLASS, b, 1);
+            return;
+        }
+        if e == 119 {
+            let b = try __new_bitmap(c);
+            __word(b);
+            regex_compiler::__emit(c, regex_types::OP_CLASS, b, 0);
+            return;
+        }
+        if e == 87 {
+            let b = try __new_bitmap(c);
+            __word(b);
+            regex_compiler::__emit(c, regex_types::OP_CLASS, b, 1);
+            return;
+        }
+        if e == 115 {
+            let b = try __new_bitmap(c);
+            __whitespace(b);
+            regex_compiler::__emit(c, regex_types::OP_CLASS, b, 0);
+            return;
+        }
+        if e == 83 {
+            let b = try __new_bitmap(c);
+            __whitespace(b);
+            regex_compiler::__emit(c, regex_types::OP_CLASS, b, 1);
+            return;
+        }
+        if e == 110 {
+            regex_compiler::__emit(c, regex_types::OP_CHAR, 10, 0);
+            return;
+        }
+        if e == 116 {
+            regex_compiler::__emit(c, regex_types::OP_CHAR, 9, 0);
+            return;
+        }
+        if e == 114 {
+            regex_compiler::__emit(c, regex_types::OP_CHAR, 13, 0);
+            return;
+        }
+        regex_compiler::__emit(c, regex_types::OP_CHAR, e, 0);
+    }
+
+    // Reports whether `ch` is set in the 256-bit bitmap at `bmp`.
+    func __class_test(bmp: UInt64, ch: UInt64): UInt64 {
+        let b = @((bmp + ch / 8) as &Char) as UInt64;
+        if (b & __bit(ch % 8)) != 0 {
+            return 1;
+        }
+        return 0;
+    }
+
+    // Sets the word-character bits: digits, both letter ranges,
+    // and the underscore.
+    func __word(bmp: UInt64): Void {
+        __class_range(bmp, 48, 57);
+        __class_range(bmp, 65, 90);
+        __class_range(bmp, 97, 122);
+        __class_set(bmp, 95);
+    }
+
+    // Sets the whitespace bits: space, tab, newline, return, and
+    // the two remaining ASCII whitespace controls.
+    func __whitespace(bmp: UInt64): Void {
+        __class_set(bmp, 32);
+        __class_set(bmp, 9);
+        __class_set(bmp, 10);
+        __class_set(bmp, 13);
+        __class_set(bmp, 11);
+        __class_set(bmp, 12);
+    }
+
+    // Allocates a 40-byte bitmap node, links it onto the
+    // compiler's chain, and returns the bitmap address (node base
+    // plus eight).
+    func __new_bitmap(c: &regex_types::Comp): UInt64! {
+        let node = try heap::alloc(40);
+        mem::zero(node, 40);
+        @(node as &UInt64) = (@c).aux;
+        (@c).aux = node as UInt64;
+        return node as UInt64 + 8;
+    }
+
+    // Sets bit `v` of the bitmap.
+    func __class_set(bmp: UInt64, v: UInt64): Void {
+        let cur = @((bmp + v / 8) as &Char) as UInt64;
+        @((bmp + v / 8) as &Char) = (cur $ __bit(v % 8)) as Char;
+    }
+
+    // Sets every bit from `lo` through `hi` inclusive.
+    func __class_range(bmp: UInt64, lo: UInt64, hi: UInt64): Void {
+        let v = lo;
+        while v <= hi {
+            __class_set(bmp, v);
+            v += 1;
+        }
+    }
+
+    // Maps a bit index 0..7 to its byte mask.
+    func __bit(v: UInt64): UInt64 {
+        if v == 0 { return 1; }
+        if v == 1 { return 2; }
+        if v == 2 { return 4; }
+        if v == 3 { return 8; }
+        if v == 4 { return 16; }
+        if v == 5 { return 32; }
+        if v == 6 { return 64; }
+        return 128;
+    }
+}

@@ -1,0 +1,194 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: pipe
+ * Descriptor pairs with a kernel buffer between them, and the
+ * captured-run helper built on them.
+ *
+ * A pipe is a pair of file descriptors with a kernel buffer
+ * between: bytes written to the write end come out of the read end
+ * in order. Pipes are the plumbing that connects a parent to a
+ * child's standard streams: fork, point the child's descriptor 1
+ * (stdout) at the pipe's write end with dup2, and the parent reads
+ * the child's output from the read end.
+ *
+ * run_capture() implements exactly that pattern for the common
+ * case — run a program and collect everything it prints — keeping
+ * the descriptor juggling inside the module. The child dup2s the
+ * pipe's write end onto stdout and closes both original pipe ends
+ * before execve, so the executed program starts with exactly the
+ * redirected stdout and no stray descriptors. The parent closes its
+ * own copy of the write end first — which is what produces end of
+ * file on the read end once the child exits — then reads the pipe
+ * to exhaustion and reaps the child. Exit status follows the shell
+ * convention: the child's exit code, or 128 plus the signal number
+ * for a signal death.
+ *
+ * Like the other syscall modules, arguments travel through
+ * file-private staging cells in .bss and `syscall` is issued from
+ * volatile assembly sequences.
+ */
+
+use sys;
+use heap;
+use process;
+
+// Staging cells shared with the assembly sequences below.
+let __pp_num: UInt64;
+let __pp_a1: UInt64;
+let __pp_a2: UInt64;
+let __pp_ret: UInt64;
+
+// Output cell for the pipe(2) descriptor pair.
+let __pp_fds: UInt64[2];
+
+// Executes a one-argument process system call (pipe).
+func __pp1(): UInt64 {
+    volatile asm "mov rax, [__pp_num]";
+    volatile asm "mov rdi, [__pp_a1]";
+    volatile asm "syscall";
+    volatile asm "mov [__pp_ret], rax";
+    return __pp_ret;
+}
+
+// Executes a two-argument process system call (dup2).
+func __pp2(): UInt64 {
+    volatile asm "mov rax, [__pp_num]";
+    volatile asm "mov rdi, [__pp_a1]";
+    volatile asm "mov rsi, [__pp_a2]";
+    volatile asm "syscall";
+    volatile asm "mov [__pp_ret], rax";
+    return __pp_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything
+// else passes through.
+func __pp_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module pipe {
+    // A connected descriptor pair: read from `r`, write to `w`.
+    static Pipe = Struct {
+        r: UInt64,
+        w: UInt64,
+    };
+
+    // The result of run_capture: the child's exit status (128 plus
+    // the signal number for a signal death, the shell convention)
+    // and its stdout in a heap buffer the caller releases with
+    // heap::free.
+    static ChildOutput = Struct {
+        status: UInt64,
+        data: &Char,
+        len: UInt64,
+    };
+
+    // Initial capacity of the captured output buffer.
+    static PIPE_INIT_CAP = 4096;
+
+    // Hard cap for the captured output buffer (64 MiB).
+    static PIPE_MAX_CAP = 67108864;
+
+    // errno-style code for a child whose output exceeds the cap.
+    static PIPE_ERR_BIG = 27;
+
+    // Creates a pipe and returns its descriptor pair.
+    func make(): Pipe! {
+        __pp_num = 22;
+        __pp_a1 = &__pp_fds[0] as UInt64;
+        try __pp_check(__pp1());
+        return Pipe {__pp_fds[0], __pp_fds[1]};
+    }
+
+    // Redirects the descriptor `old` onto the descriptor number
+    // `new`; after a successful call, `new` refers to the same open
+    // file as `old`. Used by run_capture and available for custom
+    // plumbing.
+    func dup2(old: UInt64, new: UInt64): Void! {
+        __pp_num = 33;
+        __pp_a1 = old;
+        __pp_a2 = new;
+        try __pp_check(__pp2());
+    }
+
+    // Runs the program at `path` with one argument and captures its
+    // standard output. Returns the exit status and the captured
+    // bytes; the caller releases the buffer with heap::free.
+    func run_capture(path: Char[], arg0: Char[]): ChildOutput! {
+        let p = try make();
+        // Argument and environment vectors, same shape as
+        // process::spawn1 builds them.
+        let mem = try heap::alloc(3 * 8);
+        let mp = mem as UInt64;
+        @(mp as &UInt64) = path as UInt64;
+        @((mp + 8) as &UInt64) = arg0 as UInt64;
+        @((mp + 16) as &UInt64) = 0;
+        let env = try heap::alloc(8);
+        @(env as UInt64 as &UInt64) = 0;
+        let pid = try process::fork();
+        if pid == 0 {
+            // Child: stdout becomes the pipe's write end, both
+            // original pipe ends are closed, then the new image
+            // takes over.
+            dup2(p.w, 1) catch |e| { sys::exit(e as Int32); };
+            sys::close(p.r as UInt32) catch |e| { sys::exit(e as Int32); };
+            sys::close(p.w as UInt32) catch |e| { sys::exit(e as Int32); };
+            process::execve(path, mem, env) catch |e| { sys::exit(e as Int32); };
+            // Unreachable: a successful execve replaces the image
+            // and a failed one exits inside the catch block above.
+            return error 0;
+        }
+        heap::free(mem);
+        heap::free(env);
+        // The parent's copy of the write end must close before
+        // reading, or end of file would never arrive.
+        try sys::close(p.w as UInt32);
+        let cap: UInt64 = PIPE_INIT_CAP;
+        let buf = heap::alloc(PIPE_INIT_CAP) catch |e| {
+            try sys::close(p.r as UInt32);
+            try process::wait(pid);
+            return error e;
+        };
+        let total: UInt64 = 0;
+        while true {
+            let dst = (buf as UInt64 + total) as &Void;
+            let n = sys::read(p.r as UInt32, dst, cap - total) catch |e| {
+                heap::free(buf);
+                sys::close(p.r as UInt32) catch |c| { return error c; };
+                try process::wait(pid);
+                return error e;
+            };
+            if n == 0 {
+                break;
+            }
+            total += n;
+            if total == cap {
+                if cap >= PIPE_MAX_CAP {
+                    heap::free(buf);
+                    sys::close(p.r as UInt32) catch |c| { return error c; };
+                    try process::wait(pid);
+                    return error PIPE_ERR_BIG;
+                }
+                cap *= 2;
+                buf = try heap::realloc(buf, cap);
+            }
+        }
+        try sys::close(p.r as UInt32);
+        let r = try process::wait(pid);
+        let status: UInt64;
+        if r.exited {
+            status = r.code;
+        } else {
+            // Shell convention: 128 plus the signal number.
+            status = 128 + r.code;
+        }
+        return ChildOutput {status, buf as &Char, total};
+    }
+}

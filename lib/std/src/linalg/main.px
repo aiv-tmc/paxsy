@@ -1,0 +1,356 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: linalg
+ * Vectors, 3x3 and 4x4 matrices, and quaternions over Real64.
+ *
+ * Layout conventions, stated once: vectors are columns in products,
+ * a Mat4 stores four Vec4 rows and a Mat3 three Vec3 rows (m0 is the
+ * first row) in row-major order, so m * v pairs each row of m with v
+ * through the dot product and a * b composes transforms left to
+ * right. Rotation angles are degrees at the API surface. Every
+ * direction is normalized (a zero direction yields the identity),
+ * and the single error of the module is 22 (EINVAL) for a singular
+ * matrix in the inverses; every other function is total. There are
+ * no heap allocations anywhere: every function takes its arguments
+ * by value and returns a fresh value.
+ */
+
+use math;
+use trig;
+
+module linalg {
+    // Two-, three-, and four-component vectors and the error code.
+    static Vec2 = Struct { x: Real64, y: Real64 };
+    static Vec3 = Struct { x: Real64, y: Real64, z: Real64 };
+    static Vec4 = Struct { x: Real64, y: Real64, z: Real64, w: Real64 };
+    static LINALG_ERR_SINGULAR = 22;
+
+    // A 3x3 matrix: m0 is the first row, m2 the last.
+    static Mat3 = Struct { m0: Vec3, m1: Vec3, m2: Vec3 };
+
+    // A 4x4 matrix: m0 is the first row, m3 the last.
+    static Mat4 = Struct { m0: Vec4, m1: Vec4, m2: Vec4, m3: Vec4 };
+
+    // A quaternion, scalar part in w.
+    static Quat = Struct { x: Real64, y: Real64, z: Real64, w: Real64 };
+
+    // The vector constructors.
+    func vec2(x: Real64, y: Real64): Vec2 = Vec2 {x, y};
+    func vec3(x: Real64, y: Real64, z: Real64): Vec3 = Vec3 {x, y, z};
+    func vec4(x: Real64, y: Real64, z: Real64, w: Real64): Vec4 = Vec4 {x, y, z, w};
+
+    // Builds a Mat3 from its nine components in row-major order.
+    func mat3(m00: Real64, m01: Real64, m02: Real64, m10: Real64, m11: Real64, m12: Real64, m20: Real64, m21: Real64, m22: Real64): Mat3 {
+        return Mat3 {Vec3 {m00, m01, m02}, Vec3 {m10, m11, m12}, Vec3 {m20, m21, m22}};
+    }
+
+    // Builds a Mat4 from its sixteen components in row-major order.
+    func mat4(m00: Real64, m01: Real64, m02: Real64, m03: Real64, m10: Real64, m11: Real64, m12: Real64, m13: Real64, m20: Real64, m21: Real64, m22: Real64, m23: Real64, m30: Real64, m31: Real64, m32: Real64, m33: Real64): Mat4 {
+        return Mat4 {Vec4 {m00, m01, m02, m03}, Vec4 {m10, m11, m12, m13}, Vec4 {m20, m21, m22, m23}, Vec4 {m30, m31, m32, m33}};
+    }
+
+    // The identity matrices.
+    func identity_mat3(): Mat3 = mat3(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
+    func identity_mat4(): Mat4 {
+        return mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+    }
+
+    // Dot products.
+    func dot2(a: Vec2, b: Vec2): Real64 = a.x * b.x + a.y * b.y;
+    func dot3(a: Vec3, b: Vec3): Real64 = a.x * b.x + a.y * b.y + a.z * b.z;
+    func dot4(a: Vec4, b: Vec4): Real64 = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+
+    // The cross product of two 3-vectors.
+    func cross3(a: Vec3, b: Vec3): Vec3 {
+        return Vec3 {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+    }
+
+    // Euclidean lengths; the dot products are sums of squares, so the
+    // square root cannot fail and the fallback is never taken.
+    func length2(v: Vec2): Real64 = math::sqrt(dot2(v, v)) catch { 0.0; };
+    func length3(v: Vec3): Real64 = math::sqrt(dot3(v, v)) catch { 0.0; };
+    func length4(v: Vec4): Real64 = math::sqrt(dot4(v, v)) catch { 0.0; };
+
+    // The distance between two points.
+    func distance(a: Vec3, b: Vec3): Real64 {
+        return length3(Vec3 {a.x - b.x, a.y - b.y, a.z - b.z});
+    }
+
+    // Unit-length copies; the zero vector normalizes to itself.
+    func normalize2(v: Vec2): Vec2 {
+        let len = length2(v);
+        if len == 0.0 { return v; }
+        return Vec2 {v.x / len, v.y / len};
+    }
+    func normalize3(v: Vec3): Vec3 {
+        let len = length3(v);
+        if len == 0.0 { return v; }
+        return Vec3 {v.x / len, v.y / len, v.z / len};
+    }
+    func normalize4(v: Vec4): Vec4 {
+        let len = length4(v);
+        if len == 0.0 { return v; }
+        return Vec4 {v.x / len, v.y / len, v.z / len, v.w / len};
+    }
+
+    // Scales v by s and accumulates: the inner step of every matrix
+    // product, written once per width.
+    func __v3ma(s: Real64, v: Vec3, acc: Vec3): Vec3 {
+        return Vec3 {acc.x + s * v.x, acc.y + s * v.y, acc.z + s * v.z};
+    }
+    func __v4ma(s: Real64, v: Vec4, acc: Vec4): Vec4 {
+        return Vec4 {acc.x + s * v.x, acc.y + s * v.y, acc.z + s * v.z, acc.w + s * v.w};
+    }
+
+    // The product a * b, applying a after b to a column vector.
+    func mul3(a: Mat3, b: Mat3): Mat3 {
+        return Mat3 {
+            __v3ma(a.m0.x, b.m0, __v3ma(a.m0.y, b.m1, __v3ma(a.m0.z, b.m2, Vec3 {0.0, 0.0, 0.0}))),
+            __v3ma(a.m1.x, b.m0, __v3ma(a.m1.y, b.m1, __v3ma(a.m1.z, b.m2, Vec3 {0.0, 0.0, 0.0}))),
+            __v3ma(a.m2.x, b.m0, __v3ma(a.m2.y, b.m1, __v3ma(a.m2.z, b.m2, Vec3 {0.0, 0.0, 0.0}))),
+        };
+    }
+    func mul4(a: Mat4, b: Mat4): Mat4 {
+        return Mat4 {
+            __v4ma(a.m0.x, b.m0, __v4ma(a.m0.y, b.m1, __v4ma(a.m0.z, b.m2, __v4ma(a.m0.w, b.m3, Vec4 {0.0, 0.0, 0.0, 0.0})))),
+            __v4ma(a.m1.x, b.m0, __v4ma(a.m1.y, b.m1, __v4ma(a.m1.z, b.m2, __v4ma(a.m1.w, b.m3, Vec4 {0.0, 0.0, 0.0, 0.0})))),
+            __v4ma(a.m2.x, b.m0, __v4ma(a.m2.y, b.m1, __v4ma(a.m2.z, b.m2, __v4ma(a.m2.w, b.m3, Vec4 {0.0, 0.0, 0.0, 0.0})))),
+            __v4ma(a.m3.x, b.m0, __v4ma(a.m3.y, b.m1, __v4ma(a.m3.z, b.m2, __v4ma(a.m3.w, b.m3, Vec4 {0.0, 0.0, 0.0, 0.0})))),
+        };
+    }
+
+    // Matrix-vector products.
+    func mul_vec4(m: Mat4, v: Vec4): Vec4 {
+        return Vec4 {dot4(m.m0, v), dot4(m.m1, v), dot4(m.m2, v), dot4(m.m3, v)};
+    }
+    func mul_vec3(m: Mat4, v: Vec3): Vec3 {
+        let r = mul_vec4(m, Vec4 {v.x, v.y, v.z, 1.0});
+        return Vec3 {r.x, r.y, r.z};
+    }
+    // The Mat3 matrix-vector product.
+    func mul3_vec3(m: Mat3, v: Vec3): Vec3 {
+        return Vec3 {dot3(m.m0, v), dot3(m.m1, v), dot3(m.m2, v)};
+    }
+
+    // The transposes.
+    func transpose3(m: Mat3): Mat3 {
+        return mat3(m.m0.x, m.m1.x, m.m2.x, m.m0.y, m.m1.y, m.m2.y, m.m0.z, m.m1.z, m.m2.z);
+    }
+    func transpose4(m: Mat4): Mat4 {
+        return mat4(
+            m.m0.x, m.m1.x, m.m2.x, m.m3.x,
+            m.m0.y, m.m1.y, m.m2.y, m.m3.y,
+            m.m0.z, m.m1.z, m.m2.z, m.m3.z,
+            m.m0.w, m.m1.w, m.m2.w, m.m3.w);
+    }
+
+    // The inverse by Gauss-Jordan elimination with partial pivoting
+    // on the augmented matrix [m | I]; a pivot below 1e-12 reports
+    // error 22.
+    func inverse3(m: Mat3): Mat3! {
+        let a: Real64[18];
+        a[0] = m.m0.x; a[1] = m.m0.y; a[2] = m.m0.z;
+        a[6] = m.m1.x; a[7] = m.m1.y; a[8] = m.m1.z;
+        a[12] = m.m2.x; a[13] = m.m2.y; a[14] = m.m2.z;
+        let i: UInt64 = 0;
+        while i < 3 {
+            let j: UInt64 = 0;
+            while j < 3 {
+                a[i * 6 + 3 + j] = if i == j { 1.0 } else { 0.0 };
+                j += 1;
+            }
+            i += 1;
+        }
+        let col: UInt64 = 0;
+        while col < 3 {
+            let piv = col;
+            let r = col + 1;
+            while r < 3 {
+                if math::fabs(a[r * 6 + col]) > math::fabs(a[piv * 6 + col]) { piv = r; }
+                r += 1;
+            }
+            if math::fabs(a[piv * 6 + col]) < 0.000000000001 {
+                return error LINALG_ERR_SINGULAR;
+            }
+            if piv != col {
+                let t: UInt64 = 0;
+                while t < 6 {
+                    let tmp = a[piv * 6 + t];
+                    a[piv * 6 + t] = a[col * 6 + t];
+                    a[col * 6 + t] = tmp;
+                    t += 1;
+                }
+            }
+            let d = a[col * 6 + col];
+            let t2: UInt64 = 0;
+            while t2 < 6 {
+                a[col * 6 + t2] = a[col * 6 + t2] / d;
+                t2 += 1;
+            }
+            let r2: UInt64 = 0;
+            while r2 < 3 {
+                if r2 != col {
+                    let fct = a[r2 * 6 + col];
+                    let c2: UInt64 = 0;
+                    while c2 < 6 {
+                        a[r2 * 6 + c2] = a[r2 * 6 + c2] - fct * a[col * 6 + c2];
+                        c2 += 1;
+                    }
+                }
+                r2 += 1;
+            }
+            col += 1;
+        }
+        return mat3(a[3], a[4], a[5], a[9], a[10], a[11], a[15], a[16], a[17]);
+    }
+
+    // The four-by-four inverse by the same elimination scheme.
+    func inverse4(m: Mat4): Mat4! {
+        let a: Real64[32];
+        a[0] = m.m0.x; a[1] = m.m0.y; a[2] = m.m0.z; a[3] = m.m0.w;
+        a[8] = m.m1.x; a[9] = m.m1.y; a[10] = m.m1.z; a[11] = m.m1.w;
+        a[16] = m.m2.x; a[17] = m.m2.y; a[18] = m.m2.z; a[19] = m.m2.w;
+        a[24] = m.m3.x; a[25] = m.m3.y; a[26] = m.m3.z; a[27] = m.m3.w;
+        let i: UInt64 = 0;
+        while i < 4 {
+            let j: UInt64 = 0;
+            while j < 4 {
+                a[i * 8 + 4 + j] = if i == j { 1.0 } else { 0.0 };
+                j += 1;
+            }
+            i += 1;
+        }
+        let col: UInt64 = 0;
+        while col < 4 {
+            let piv = col;
+            let r = col + 1;
+            while r < 4 {
+                if math::fabs(a[r * 8 + col]) > math::fabs(a[piv * 8 + col]) { piv = r; }
+                r += 1;
+            }
+            if math::fabs(a[piv * 8 + col]) < 0.000000000001 {
+                return error LINALG_ERR_SINGULAR;
+            }
+            if piv != col {
+                let t: UInt64 = 0;
+                while t < 8 {
+                    let tmp = a[piv * 8 + t];
+                    a[piv * 8 + t] = a[col * 8 + t];
+                    a[col * 8 + t] = tmp;
+                    t += 1;
+                }
+            }
+            let d = a[col * 8 + col];
+            let t2: UInt64 = 0;
+            while t2 < 8 {
+                a[col * 8 + t2] = a[col * 8 + t2] / d;
+                t2 += 1;
+            }
+            let r2: UInt64 = 0;
+            while r2 < 4 {
+                if r2 != col {
+                    let fct = a[r2 * 8 + col];
+                    let c2: UInt64 = 0;
+                    while c2 < 8 {
+                        a[r2 * 8 + c2] = a[r2 * 8 + c2] - fct * a[col * 8 + c2];
+                        c2 += 1;
+                    }
+                }
+                r2 += 1;
+            }
+            col += 1;
+        }
+        return mat4(
+            a[4], a[5], a[6], a[7],
+            a[12], a[13], a[14], a[15],
+            a[20], a[21], a[22], a[23],
+            a[28], a[29], a[30], a[31]);
+    }
+
+    // The translation matrix.
+    func translate4(x: Real64, y: Real64, z: Real64): Mat4 {
+        return mat4(1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, y, 0.0, 0.0, 1.0, z, 0.0, 0.0, 0.0, 1.0);
+    }
+
+    // The scale matrix.
+    func scale4(x: Real64, y: Real64, z: Real64): Mat4 {
+        return mat4(x, 0.0, 0.0, 0.0, 0.0, y, 0.0, 0.0, 0.0, 0.0, z, 0.0, 0.0, 0.0, 0.0, 1.0);
+    }
+
+    // The rotation matrix of `angle` degrees around `axis`
+    // (Rodrigues' formula), normalized internally; a zero axis
+    // yields the identity.
+    func rotate4(angle: Real64, axis: Vec3): Mat4 {
+        let n = normalize3(axis);
+        if length3(n) == 0.0 {
+            return identity_mat4();
+        }
+        let rad = trig::deg_to_rad(angle);
+        let c = trig::cos(rad);
+        let s = trig::sin(rad);
+        let t = 1.0 - c;
+        let x = n.x;
+        let y = n.y;
+        let z = n.z;
+        return mat4(
+            t * x * x + c, t * x * y - s * z, t * x * z + s * y, 0.0,
+            t * x * y + s * z, t * y * y + c, t * y * z - s * x, 0.0,
+            t * x * z - s * y, t * y * z + s * x, t * z * z + c, 0.0,
+            0.0, 0.0, 0.0, 1.0);
+    }
+
+    // Builds a quaternion from its components, scalar part last.
+    func quat(x: Real64, y: Real64, z: Real64, w: Real64): Quat = Quat {x, y, z, w};
+
+    // The identity quaternion (0, 0, 0, 1).
+    func quat_identity(): Quat = Quat {0.0, 0.0, 0.0, 1.0};
+
+    // The quaternion of `angle` degrees around `axis`; a zero axis
+    // yields the identity quaternion.
+    func quat_from_axis_angle(angle: Real64, axis: Vec3): Quat {
+        let n = normalize3(axis);
+        if length3(n) == 0.0 {
+            return quat_identity();
+        }
+        let half = trig::deg_to_rad(angle) / 2.0;
+        let s = trig::sin(half);
+        return Quat {n.x * s, n.y * s, n.z * s, trig::cos(half)};
+    }
+
+    // The unit quaternion; the zero quaternion normalizes to the
+    // identity.
+    func quat_normalize(q: Quat): Quat {
+        let len = math::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w) catch { 0.0; };
+        if len == 0.0 {
+            return quat_identity();
+        }
+        return Quat {q.x / len, q.y / len, q.z / len, q.w / len};
+    }
+
+    // The Hamilton product a * b, applying a after b.
+    func quat_mul(a: Quat, b: Quat): Quat {
+        return Quat {
+            a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+            a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+            a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+            a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+        };
+    }
+
+    // The rotation matrix of a quaternion, normalized first so any
+    // finite quaternion converts correctly.
+    func quat_to_mat4(q: Quat): Mat4 {
+        let n = quat_normalize(q);
+        let x = n.x;
+        let y = n.y;
+        let z = n.z;
+        let w = n.w;
+        return mat4(
+            1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y), 0.0,
+            2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x), 0.0,
+            2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y), 0.0,
+            0.0, 0.0, 0.0, 1.0);
+    }
+}

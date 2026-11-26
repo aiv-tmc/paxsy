@@ -1,0 +1,394 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: net
+ * TCP sockets, UDP datagrams, name resolution, and socket timeouts.
+ *
+ * The module speaks to the kernel through the socket family of system
+ * calls. Arguments travel through file-private staging cells in .bss
+ * and `syscall` is issued from volatile assembly sequences; the
+ * arities in use are two, three, and six (the six-argument form also
+ * serves the five-argument setsockopt with a zeroed last register).
+ *
+ * Addresses are IPv4 in the packed UInt32 form produced by
+ * addr_ipv4(): the value whose little-endian memory image is exactly
+ * the four dotted bytes, which is what the kernel stores in the
+ * sockaddr. Ports travel in host byte order and are swapped at the
+ * sockaddr boundary. The sockaddr cell itself is the 16-byte IPv4
+ * layout: family, port, address, then eight zero bytes.
+ *
+ * Errors are raw kernel errno values: 111 (ECONNREFUSED) when the
+ * remote refuses a connection, 113 (EHOSTUNREACH) when no route
+ * exists, and 110 (ETIMEDOUT) on timeout. The kernel reports an
+ * expired socket deadline as 11 (EAGAIN); the data-transfer functions
+ * translate it to 110 so callers see one code for every timeout. Read
+ * returning zero means the peer closed the connection; that is a
+ * normal result, not an error.
+ *
+ * Name resolution lives in the internal module net_dns; resolve()
+ * here is the thin public entry point.
+ */
+
+use sys;
+use net_dns;
+
+// Staging cells shared with the assembly sequences below.
+let __net_num: UInt64;
+let __net_a1: UInt64;
+let __net_a2: UInt64;
+let __net_a3: UInt64;
+let __net_a4: UInt64;
+let __net_a5: UInt64;
+let __net_a6: UInt64;
+let __net_ret: UInt64;
+
+// Socket domains, types, and option names used by the calls below.
+static __AF_INET = 2;
+static __SOCK_STREAM = 1;
+static __SOCK_DGRAM = 2;
+static __SOL_SOCKET = 1;
+static __SO_RCVTIMEO = 20;
+static __SO_SNDTIMEO = 21;
+
+// errno values the functions below special-case.
+static __EAGAIN = 11;
+static __EPIPE = 32;
+static __ETIMEDOUT = 110;
+
+// The 16-byte IPv4 socket address in kernel layout. The numeric fields
+// are stored pre-swapped, so the little-endian memory image of the
+// struct is exactly the byte order the kernel expects on the wire.
+static __Addr = Struct {
+    family: UInt16,
+    port_be: UInt16,
+    addr_be: UInt32,
+    zero: UInt8[8],
+};
+
+// The kernel's two-word time value for setsockopt: seconds plus
+// microseconds.
+static __TimeVal = Struct {
+    sec: UInt64,
+    usec: UInt64,
+};
+
+// Executes a two-argument socket-family system call.
+func __net2(): UInt64 {
+    volatile asm "mov rax, [__net_num]";
+    volatile asm "mov rdi, [__net_a1]";
+    volatile asm "mov rsi, [__net_a2]";
+    volatile asm "syscall";
+    volatile asm "mov [__net_ret], rax";
+    return __net_ret;
+}
+
+// Executes a three-argument socket-family system call.
+func __net3(): UInt64 {
+    volatile asm "mov rax, [__net_num]";
+    volatile asm "mov rdi, [__net_a1]";
+    volatile asm "mov rsi, [__net_a2]";
+    volatile asm "mov rdx, [__net_a3]";
+    volatile asm "syscall";
+    volatile asm "mov [__net_ret], rax";
+    return __net_ret;
+}
+
+// Executes a six-argument socket-family system call; also serves
+// five-argument calls with a zeroed last register.
+func __net6(): UInt64 {
+    volatile asm "mov rax, [__net_num]";
+    volatile asm "mov rdi, [__net_a1]";
+    volatile asm "mov rsi, [__net_a2]";
+    volatile asm "mov rdx, [__net_a3]";
+    volatile asm "mov r10, [__net_a4]";
+    volatile asm "mov r8, [__net_a5]";
+    volatile asm "mov r9, [__net_a6]";
+    volatile asm "syscall";
+    volatile asm "mov [__net_ret], rax";
+    return __net_ret;
+}
+
+// Converts a raw kernel return value into the error contract: negative
+// values in -4095..-1 become `error <errno>`, anything else passes
+// through.
+func __net_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+// Swaps the bytes of a 16-bit value (host to network order).
+func __bs16(v: UInt16): UInt16 = ((v & 255) << 8) $ (v >> 8);
+
+// Builds the socket address for a packed `ip` and a host-order `port`.
+func __mkaddr(ip: UInt32, port: UInt16): __Addr {
+    return __Addr {__AF_INET as UInt16, __bs16(port), ip, {0, 0, 0, 0, 0, 0, 0, 0}};
+}
+
+// Creates an IPv4 socket of the given type and returns its descriptor.
+func __socket(stype: UInt64): UInt64! {
+    __net_num = 41;
+    __net_a1 = __AF_INET;
+    __net_a2 = stype;
+    __net_a3 = 0;
+    return __net_check(__net3());
+}
+
+// Closes a freshly created socket after a failed bind or connect,
+// preserving the original error.
+func __close_fd(fd: UInt64): Void {
+    sys::close(fd as UInt32) catch |c| { };
+}
+
+// Installs a per-call deadline of `ns` nanoseconds for option
+// `optname` on `fd`; a zero value clears the limit. The kernel
+// normalises microsecond fields past one million, so the split below
+// needs no carry handling.
+func __set_timeout(fd: UInt64, optname: UInt64, ns: UInt64): Void! {
+    let tv = __TimeVal {ns / 1000000000, (ns % 1000000000) / 1000};
+    __net_num = 54;
+    __net_a1 = fd;
+    __net_a2 = __SOL_SOCKET;
+    __net_a3 = optname;
+    __net_a4 = &tv as UInt64;
+    __net_a5 = 16;
+    __net_a6 = 0;
+    try __net_check(__net6());
+}
+
+module net {
+    // errno-style code reported when a host name cannot be resolved.
+    static ERR_RESOLUTION_FAILED = 22;
+
+    // A connected TCP endpoint, usable for reading and writing.
+    static TcpStream = Struct {
+        fd: UInt64,
+    };
+
+    // A listening TCP endpoint that produces TcpStreams via accept.
+    static TcpListener = Struct {
+        fd: UInt64,
+    };
+
+    // A UDP endpoint bound to a local address.
+    static UdpSocket = Struct {
+        fd: UInt64,
+    };
+
+    // Packs four dotted components into the kernel's IPv4 address
+    // form: the UInt32 whose little-endian memory image holds the
+    // bytes a.b.c.d in that order.
+    func addr_ipv4(a: UInt8, b: UInt8, c: UInt8, d: UInt8): UInt32 {
+        return (a as UInt32) $ ((b as UInt32) << 8) $ ((c as UInt32) << 16) $ ((d as UInt32) << 24);
+    }
+
+    // Opens a TCP connection to the given address and port and returns
+    // the stream. A refused connection reports 111, an unreachable
+    // host 113.
+    func TcpStream.connect(ip: UInt32, port: UInt16): TcpStream! {
+        let fd = try __socket(__SOCK_STREAM);
+        let addr = __mkaddr(ip, port);
+        __net_num = 42;
+        __net_a1 = fd;
+        __net_a2 = &addr as UInt64;
+        __net_a3 = 16;
+        __net_check(__net3()) catch |e| {
+            __close_fd(fd);
+            return error e;
+        };
+        return TcpStream {fd};
+    }
+
+    // Receives up to `cap` bytes into `buf` and returns the number
+    // read. A return of zero means the peer has closed the connection.
+    // An expired receive deadline reports 110 (ETIMEDOUT).
+    func TcpStream.read(this: TcpStream, buf: &Void, cap: UInt64): UInt64! {
+        __net_num = 45;
+        __net_a1 = this.fd;
+        __net_a2 = buf as UInt64;
+        __net_a3 = cap;
+        __net_a4 = 0;
+        __net_a5 = 0;
+        __net_a6 = 0;
+        let n = __net_check(__net6()) catch |e| {
+            if (e as UInt64) == __EAGAIN {
+                return error __ETIMEDOUT;
+            }
+            return error e;
+        };
+        return n;
+    }
+
+    // Sends every byte of `data[0..len]` through the connection,
+    // looping past short sends. A send that makes no progress reports
+    // 32 (EPIPE); an expired send deadline reports 110 (ETIMEDOUT).
+    func TcpStream.write(this: TcpStream, data: &Void, len: UInt64): Void! {
+        let p = data as UInt64;
+        let total: UInt64 = 0;
+        while total < len {
+            __net_num = 44;
+            __net_a1 = this.fd;
+            __net_a2 = p + total;
+            __net_a3 = len - total;
+            __net_a4 = 0;
+            __net_a5 = 0;
+            __net_a6 = 0;
+            let n = __net_check(__net6()) catch |e| {
+                if (e as UInt64) == __EAGAIN {
+                    return error __ETIMEDOUT;
+                }
+                return error e;
+            };
+            if n == 0 {
+                return error __EPIPE;
+            }
+            total += n;
+        }
+    }
+
+    // Closes the socket. The stream must not be used afterwards.
+    func TcpStream.close(this: TcpStream): Void! {
+        try sys::close(this.fd as UInt32);
+    }
+
+    // Bounds how long a subsequent read may block to `ns` nanoseconds;
+    // an expired limit reports 110 (ETIMEDOUT) from the read, and a
+    // zero value clears the limit.
+    func TcpStream.set_recv_timeout(s: TcpStream, ns: UInt64): Void! {
+        try __set_timeout(s.fd, __SO_RCVTIMEO, ns);
+    }
+
+    // Bounds how long a subsequent write may block to `ns`
+    // nanoseconds; a zero value clears the limit.
+    func TcpStream.set_send_timeout(s: TcpStream, ns: UInt64): Void! {
+        try __set_timeout(s.fd, __SO_SNDTIMEO, ns);
+    }
+
+    // Creates a listener bound to the given local address and port;
+    // 98 (EADDRINUSE) is reported when the port is taken.
+    func TcpListener.bind(ip: UInt32, port: UInt16): TcpListener! {
+        let fd = try __socket(__SOCK_STREAM);
+        let addr = __mkaddr(ip, port);
+        __net_num = 49;
+        __net_a1 = fd;
+        __net_a2 = &addr as UInt64;
+        __net_a3 = 16;
+        __net_check(__net3()) catch |e| {
+            __close_fd(fd);
+            return error e;
+        };
+        return TcpListener {fd};
+    }
+
+    // Marks the listener as ready to accept, queuing up to `backlog`
+    // pending connections.
+    func TcpListener.listen(this: TcpListener, backlog: UInt32): Void! {
+        __net_num = 50;
+        __net_a1 = this.fd;
+        __net_a2 = backlog as UInt64;
+        try __net_check(__net2());
+    }
+
+    // Accepts the next incoming connection and returns its socket. The
+    // peer address is discarded.
+    func TcpListener.accept(this: TcpListener): TcpStream! {
+        __net_num = 43;
+        __net_a1 = this.fd;
+        __net_a2 = 0;
+        __net_a3 = 0;
+        let fd = try __net_check(__net3());
+        return TcpStream {fd};
+    }
+
+    // Creates a datagram socket bound to the given local address, so
+    // subsequent recv_from calls accept datagrams addressed there; 98
+    // (EADDRINUSE) is reported when the port is taken.
+    func UdpSocket.bind(ip: UInt32, port: UInt16): UdpSocket! {
+        let fd = try __socket(__SOCK_DGRAM);
+        let addr = __mkaddr(ip, port);
+        __net_num = 49;
+        __net_a1 = fd;
+        __net_a2 = &addr as UInt64;
+        __net_a3 = 16;
+        __net_check(__net3()) catch |e| {
+            __close_fd(fd);
+            return error e;
+        };
+        return UdpSocket {fd};
+    }
+
+    // Sends one datagram of `len` bytes from `data` to the remote
+    // address, up to 65507 bytes. Datagrams are atomic: the call
+    // either sends the whole datagram or reports an error; an expired
+    // send deadline reports 110 (ETIMEDOUT).
+    func UdpSocket.send_to(s: UdpSocket, data: &Void, len: UInt64, ip: UInt32, port: UInt16): Void! {
+        let addr = __mkaddr(ip, port);
+        __net_num = 44;
+        __net_a1 = s.fd;
+        __net_a2 = data as UInt64;
+        __net_a3 = len;
+        __net_a4 = 0;
+        __net_a5 = &addr as UInt64;
+        __net_a6 = 16;
+        __net_check(__net6()) catch |e| {
+            if (e as UInt64) == __EAGAIN {
+                return error __ETIMEDOUT;
+            }
+            return error e;
+        };
+    }
+
+    // Receives one datagram into `buf` and returns the byte count
+    // together with the sender address (in the packed form of
+    // addr_ipv4) and port. A datagram larger than `cap` is truncated
+    // to `cap` bytes. An expired receive deadline reports 110
+    // (ETIMEDOUT).
+    func UdpSocket.recv_from(s: UdpSocket, buf: &Void, cap: UInt64): (UInt64, UInt32, UInt16)! {
+        let from: __Addr;
+        let alen: UInt64 = 16;
+        __net_num = 45;
+        __net_a1 = s.fd;
+        __net_a2 = buf as UInt64;
+        __net_a3 = cap;
+        __net_a4 = 0;
+        __net_a5 = &from as UInt64;
+        __net_a6 = &alen as UInt64;
+        let n = __net_check(__net6()) catch |e| {
+            if (e as UInt64) == __EAGAIN {
+                return error __ETIMEDOUT;
+            }
+            return error e;
+        };
+        return {n, from.addr_be, __bs16(from.port_be)};
+    }
+
+    // Closes the endpoint. In-flight datagrams queued by the kernel
+    // are discarded.
+    func UdpSocket.close(s: UdpSocket): Void! {
+        try sys::close(s.fd as UInt32);
+    }
+
+    // Bounds how long a subsequent recv_from may block to `ns`
+    // nanoseconds; a zero value clears the limit.
+    func UdpSocket.set_recv_timeout(s: UdpSocket, ns: UInt64): Void! {
+        try __set_timeout(s.fd, __SO_RCVTIMEO, ns);
+    }
+
+    // Bounds how long a subsequent send_to may block to `ns`
+    // nanoseconds; a zero value clears the limit.
+    func UdpSocket.set_send_timeout(s: UdpSocket, ns: UInt64): Void! {
+        try __set_timeout(s.fd, __SO_SNDTIMEO, ns);
+    }
+
+    // Resolves a host name to its first IPv4 address in the packed
+    // form of addr_ipv4. Resolution is synchronous and blocking; any
+    // failure of the lookup reports ERR_RESOLUTION_FAILED.
+    func resolve(name: Char[]): UInt32! {
+        return net_dns::resolve(name) catch |e| {
+            return error ERR_RESOLUTION_FAILED;
+        };
+    }
+}

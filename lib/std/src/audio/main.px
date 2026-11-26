@@ -1,0 +1,169 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: audio
+ * Audio playback through the OSS-compatible /dev/dsp interface.
+ *
+ * The device accepts a stream of interleaved samples and plays
+ * whatever is written to it. Stream parameters are negotiated with
+ * three ioctls — sample format, sample rate, channel count — and each
+ * negotiation is verified, reporting ERR_UNSUPPORTED_FORMAT when the
+ * hardware refused the requested value. Playback itself is the plain
+ * write path of the sys module: samples queue in the kernel and play
+ * out in order.
+ *
+ * The ioctls travel through file-private staging cells with volatile
+ * assembly, the established pattern for syscalls the generic sys
+ * surface does not cover. A stream is bound to its device's
+ * descriptor, so close_stream validates the handle and close_device
+ * releases the underlying file; the OSS model has no separate
+ * per-stream resource.
+ */
+
+use sys;
+
+// Staging cells for the ioctl sequences below.
+let __au_num: UInt64;
+let __au_a1: UInt64;
+let __au_a2: UInt64;
+let __au_a3: UInt64;
+let __au_ret: UInt64;
+
+// OSS negotiation ioctls: sample format, sample rate, channel count.
+static __SNDCTL_DSP_SETFMT = 0xC0045005;
+static __SNDCTL_DSP_SPEED = 0xC0045002;
+static __SNDCTL_DSP_CHANNELS = 0xC0045006;
+
+// Executes the three-argument ioctl system call.
+func __au3(): UInt64 {
+    volatile asm "mov rax, [__au_num]";
+    volatile asm "mov rdi, [__au_a1]";
+    volatile asm "mov rsi, [__au_a2]";
+    volatile asm "mov rdx, [__au_a3]";
+    volatile asm "syscall";
+    volatile asm "mov [__au_ret], rax";
+    return __au_ret;
+}
+
+// Converts a raw kernel return value into the error contract.
+func __au_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module audio {
+    // An opened output device.
+    static AudioDevice = Struct {
+        fd: UInt64,
+    };
+
+    // A negotiated playback stream over a device.
+    static AudioStream = Struct {
+        fd: UInt64,
+        rate: UInt32,
+        channels: UInt32,
+        format: UInt32,
+    };
+
+    // errno-style codes: no audio device, a zero handle, and a
+    // refused negotiation.
+    static ERR_NO_DEVICE = 19;
+    static ERR_INVALID_DEVICE = 22;
+    static ERR_UNSUPPORTED_FORMAT = 22;
+
+    // Sample formats: signed 16-bit PCM and 32-bit floating point,
+    // as the OSS format words the device negotiates.
+    static FORMAT_S16 = 16;
+    static FORMAT_F32 = 64;
+
+    // Opens the default output device /dev/dsp.
+    func open_device(): AudioDevice! {
+        let fd = sys::open("/dev/dsp", sys::O_WRONLY, 0) catch {
+            return error ERR_NO_DEVICE;
+        };
+        return AudioDevice {fd};
+    }
+
+    // Closes the device and every stream bound to it.
+    func close_device(dev: AudioDevice): Void! {
+        if dev.fd == 0 {
+            return error ERR_INVALID_DEVICE;
+        }
+        try sys::close(dev.fd as UInt32);
+    }
+
+    // Creates a playback stream with the given sample rate, channel
+    // count, and sample format (FORMAT_S16 or FORMAT_F32). All three
+    // parameters are negotiated with the device and the returned
+    // values must equal the requests; any refusal reports
+    // ERR_UNSUPPORTED_FORMAT.
+    func create_stream(dev: AudioDevice, rate: UInt32, channels: UInt32, format: UInt32): AudioStream! {
+        if dev.fd == 0 {
+            return error ERR_INVALID_DEVICE;
+        }
+        let fmt_cell: UInt64 = format as UInt64;
+        __au_num = 16;
+        __au_a1 = dev.fd;
+        __au_a2 = __SNDCTL_DSP_SETFMT;
+        __au_a3 = &fmt_cell as UInt64;
+        __au_check(__au3()) catch {
+            return error ERR_UNSUPPORTED_FORMAT;
+        };
+        if fmt_cell != format as UInt64 {
+            return error ERR_UNSUPPORTED_FORMAT;
+        }
+        let rate_cell: UInt64 = rate as UInt64;
+        __au_a2 = __SNDCTL_DSP_SPEED;
+        __au_a3 = &rate_cell as UInt64;
+        __au_check(__au3()) catch {
+            return error ERR_UNSUPPORTED_FORMAT;
+        };
+        if rate_cell != rate as UInt64 {
+            return error ERR_UNSUPPORTED_FORMAT;
+        }
+        let chan_cell: UInt64 = channels as UInt64;
+        __au_a2 = __SNDCTL_DSP_CHANNELS;
+        __au_a3 = &chan_cell as UInt64;
+        __au_check(__au3()) catch {
+            return error ERR_UNSUPPORTED_FORMAT;
+        };
+        if chan_cell != channels as UInt64 {
+            return error ERR_UNSUPPORTED_FORMAT;
+        }
+        return AudioStream {dev.fd, rate, channels, format};
+    }
+
+    // Queues `bytes` of sample data for playback: interleaved samples
+    // of the stream's format, two bytes per sample for FORMAT_S16 and
+    // four for FORMAT_F32, times the channel count. Short writes are
+    // retried until every byte is queued.
+    func write(stream: AudioStream, data: &Void, bytes: UInt64): Void! {
+        if stream.fd == 0 {
+            return error ERR_INVALID_DEVICE;
+        }
+        let base = data as UInt64;
+        let sent: UInt64 = 0;
+        while sent < bytes {
+            let n = sys::write(stream.fd as UInt32, (base + sent) as &Void, bytes - sent) catch |e| {
+                return error e;
+            };
+            if n == 0 {
+                return error ERR_INVALID_DEVICE;
+            }
+            sent += n;
+        }
+    }
+
+    // Ends the stream's use; the device descriptor stays open for
+    // further streams and is released by close_device. The OSS model
+    // has no separate per-stream resource.
+    func close_stream(stream: AudioStream): Void! {
+        if stream.fd == 0 {
+            return error ERR_INVALID_DEVICE;
+        }
+    }
+}

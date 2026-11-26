@@ -1,0 +1,136 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: json_write
+ * Serialisation of a std::json::Value tree back to text.
+ *
+ * stringify() renders a Value into the caller's byte buffer as
+ * compact JSON: no insignificant whitespace, the required escapes
+ * inside strings — quotes, backslashes, and control bytes below
+ * 0x20 as \u00XX — and numbers through the shortest round-trip
+ * formatter of std::fmt. JSON has no literal for infinities or
+ * not-a-number, so a non-finite number renders as null, the JSON
+ * value for "not a representable number".
+ *
+ * The buffer receives exactly the document bytes; the caller
+ * passes its content to a file or socket as is.
+ */
+
+use json;
+use bytes;
+use string;
+use fmt;
+
+// Appends one hex digit of `v` (assumed below 16) to `out`.
+func __jw_hex(out: &bytes::ByteBuffer, v: UInt64): Void! {
+    if v < 10 {
+        try bytes::push(out, (v + 48) as Char);
+        return;
+    }
+    try bytes::push(out, (v - 10 + 97) as Char);
+}
+
+// Appends the NUL-terminated string `s` as a quoted JSON string
+// with the required escapes.
+func __jw_string(out: &bytes::ByteBuffer, s: Char[]): Void! {
+    try bytes::push(out, 34 as Char);
+    let p = s as UInt64;
+    let i: UInt64 = 0;
+    while true {
+        let c = @((p + i) as &Char) as UInt64;
+        if c == 0 {
+            break;
+        }
+        if c == 34 or c == 92 {
+            try bytes::push(out, 92 as Char);
+            try bytes::push(out, c as Char);
+        } else if c < 32 {
+            try bytes::push(out, 92 as Char);
+            try bytes::push(out, 117 as Char);
+            try bytes::push(out, 48 as Char);
+            try bytes::push(out, 48 as Char);
+            try __jw_hex(out, c >> 4);
+            try __jw_hex(out, c & 15);
+        } else {
+            try bytes::push(out, c as Char);
+        }
+        i += 1;
+    }
+    try bytes::push(out, 34 as Char);
+}
+
+// Appends `word` (a literal such as "null") to `out`.
+func __jw_word(out: &bytes::ByteBuffer, word: Char[]): Void! {
+    try bytes::append(out, word, string::len(word));
+}
+
+module json_write {
+    // Serialises `v` to compact JSON text, appending the bytes to
+    // the caller's byte buffer.
+    func stringify(v: json::Value, out: &bytes::ByteBuffer): Void! {
+        if json::is_null(&v) {
+            try __jw_word(out, "null");
+            return;
+        }
+        if json::is_bool(&v) {
+            let b = try json::as_bool(&v);
+            if b {
+                try __jw_word(out, "true");
+            } else {
+                try __jw_word(out, "false");
+            }
+            return;
+        }
+        if json::is_num(&v) {
+            let f = try json::as_num(&v);
+            let buf: Char[40];
+            let n = fmt::real_to_str(f, &buf[0]);
+            let first = buf[0] as UInt64;
+            let second = buf[1] as UInt64;
+            if first == 105 or first == 110 or (first == 45 and second == 105) {
+                // "inf", "-inf", or "nan": no JSON literal exists,
+                // so the value renders as null.
+                try __jw_word(out, "null");
+                return;
+            }
+            try bytes::append(out, &buf[0], n);
+            return;
+        }
+        if json::is_str(&v) {
+            let s = try json::as_str(&v);
+            try __jw_string(out, s);
+            return;
+        }
+        if json::is_arr(&v) {
+            try bytes::push(out, 91 as Char);
+            let n = json::arr_len(&v);
+            let i: UInt64 = 0;
+            while i < n {
+                if i > 0 {
+                    try bytes::push(out, 44 as Char);
+                }
+                let e = try json::arr_get(&v, i);
+                try stringify(e, out);
+                i += 1;
+            }
+            try bytes::push(out, 93 as Char);
+            return;
+        }
+        // Object.
+        try bytes::push(out, 123 as Char);
+        let n = json::obj_len(&v);
+        let i: UInt64 = 0;
+        while i < n {
+            if i > 0 {
+                try bytes::push(out, 44 as Char);
+            }
+            let pair = try json::obj_get(&v, i);
+            try __jw_string(out, pair.0);
+            try bytes::push(out, 58 as Char);
+            try stringify(pair.1, out);
+            i += 1;
+        }
+        try bytes::push(out, 125 as Char);
+    }
+}

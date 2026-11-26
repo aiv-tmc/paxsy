@@ -1,0 +1,113 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: input
+ * User input from the Linux event device interface.
+ *
+ * Every keyboard, mouse, and gamepad reports its activity through
+ * /dev/input/eventN as a stream of fixed-size event records, so one
+ * module serves them all. The record is 24 bytes: a 16-byte timestamp
+ * this module skips, then a 16-bit event type, a 16-bit code
+ * identifying the key or axis, and a 32-bit signed value (pressed
+ * versus released, movement delta, wheel steps).
+ *
+ * poll_event() never blocks: the descriptor is opened non-blocking,
+ * and an empty queue yields a simple false. wait_event() waits by
+ * polling with a one-millisecond cadence until an event arrives or
+ * the timeout expires; the deadline is measured on the monotonic
+ * clock. The numeric type and code values are the kernel's EV_* and
+ * KEY_* constants; the most common ones are mirrored as module
+ * constants so callers rarely need the kernel headers.
+ */
+
+use sys;
+use time;
+
+// O_NONBLOCK, which sys does not export because nothing else needs
+// it; the numeric value is the kernel's flag.
+static __O_NONBLOCK = 2048;
+
+// Poll cadence for wait_event in nanoseconds (one millisecond).
+static __POLL_NS = 1000000;
+
+module input {
+    // One decoded event record.
+    static Event = Struct {
+        type: UInt16,
+        code: UInt16,
+        value: Int32,
+    };
+
+    // errno-style code for missing or unreadable devices.
+    static ERR_NO_DEVICE = 19;
+
+    // The most common kernel event codes; the full set lives in the
+    // kernel's input-event-code header.
+    static EV_KEY = 1;
+    static EV_REL = 2;
+    static KEY_ESC = 1;
+    static KEY_ENTER = 28;
+    static KEY_SPACE = 57;
+    static KEY_LEFT = 105;
+    static KEY_RIGHT = 106;
+    static KEY_UP = 103;
+    static KEY_DOWN = 108;
+
+    // Opens the event device at `path` for reading, non-blocking, and
+    // returns its descriptor.
+    func open_device(path: Char[]): UInt64! {
+        let fd = sys::open(path, sys::O_RDONLY $ __O_NONBLOCK, 0) catch {
+            return error ERR_NO_DEVICE;
+        };
+        return fd;
+    }
+
+    // Closes a descriptor returned by open_device.
+    func close_device(fd: UInt64): Void! {
+        try sys::close(fd as UInt32);
+    }
+
+    // Reads one event without blocking. Returns true and fills `ev`
+    // when an event was pending; returns false when the queue is
+    // empty. Read errors other than an empty queue propagate.
+    func poll_event(fd: UInt64, ev: &Event): Bool! {
+        let raw: UInt8[24];
+        let n = sys::read(fd as UInt32, &raw[0] as &Void, 24) catch |e| {
+            if (e as UInt64) == 11 {
+                // EAGAIN: the non-blocking read found nothing.
+                return false;
+            }
+            return error e;
+        };
+        if n < 24 {
+            // A short read cannot happen on evdev; treat it as empty.
+            return false;
+        }
+        let b = &raw[0] as UInt64;
+        @ev = Event {
+            @((b + 16) as &UInt16),
+            @((b + 18) as &UInt16),
+            @((b + 20) as &Int32),
+        };
+        return true;
+    }
+
+    // Waits up to `timeout_ns` for one event, filling `ev` and
+    // returning true when one arrives; returns false on timeout. The
+    // deadline is measured on the monotonic clock, checking with a
+    // one-millisecond cadence.
+    func wait_event(fd: UInt64, ev: &Event, timeout_ns: UInt64): Bool! {
+        let deadline = (try time::monotonic_ns()) + timeout_ns;
+        while true {
+            let got = try poll_event(fd, ev);
+            if got {
+                return true;
+            }
+            if (try time::monotonic_ns()) >= deadline {
+                return false;
+            }
+            try time::sleep_ns(__POLL_NS);
+        }
+    }
+}

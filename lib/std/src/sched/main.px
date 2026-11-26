@@ -1,0 +1,89 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: sched
+ * CPU affinity and time-slice yielding.
+ *
+ * sched_setaffinity(2) pins the calling process to a set of CPUs and
+ * sched_getaffinity(2) reads the set back; the set is one 64-bit
+ * mask where bit n names CPU n, which covers the first 64
+ * processors. sched_yield(2) returns the remainder of the calling
+ * thread's time slice to the scheduler, letting other runnable
+ * threads or processes run immediately instead of at the end of the
+ * quantum; spin loops between a failed lock acquisition and its
+ * futex wait stay responsive under contention by yielding between
+ * rounds.
+ *
+ * Arguments travel through file-private staging cells in .bss and
+ * `syscall` is issued from volatile assembly sequences.
+ */
+
+// Staging cells shared with the assembly sequences below.
+let __sc_num: UInt64;
+let __sc_a1: UInt64;
+let __sc_a2: UInt64;
+let __sc_a3: UInt64;
+let __sc_ret: UInt64;
+
+// Executes the zero-argument sched_yield(2) system call.
+func __sc0(): UInt64 {
+    volatile asm "mov rax, [__sc_num]";
+    volatile asm "syscall";
+    volatile asm "mov [__sc_ret], rax";
+    return __sc_ret;
+}
+
+// Executes a three-argument system call (sched_setaffinity,
+// sched_getaffinity).
+func __sc3(): UInt64 {
+    volatile asm "mov rax, [__sc_num]";
+    volatile asm "mov rdi, [__sc_a1]";
+    volatile asm "mov rsi, [__sc_a2]";
+    volatile asm "mov rdx, [__sc_a3]";
+    volatile asm "syscall";
+    volatile asm "mov [__sc_ret], rax";
+    return __sc_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything else
+// passes through.
+func __sc_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module sched {
+    // Pins the calling process to the CPUs named by `mask`, where
+    // bit n selects CPU n.
+    func set_cpus(mask: UInt64): Void! {
+        let m = mask;
+        __sc_num = 203;
+        __sc_a1 = 0;
+        __sc_a2 = 8;
+        __sc_a3 = &m as UInt64;
+        try __sc_check(__sc3());
+    }
+
+    // Returns the CPU mask of the calling process: bit n is set when
+    // the process may run on CPU n.
+    func get_cpus(): UInt64! {
+        let m: UInt64 = 0;
+        __sc_num = 204;
+        __sc_a1 = 0;
+        __sc_a2 = 8;
+        __sc_a3 = &m as UInt64;
+        try __sc_check(__sc3());
+        return m;
+    }
+
+    // Relinquishes the rest of the current time slice.
+    func yield(): Void! {
+        __sc_num = 24;
+        try __sc_check(__sc0());
+    }
+}

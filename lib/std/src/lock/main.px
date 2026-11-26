@@ -1,0 +1,79 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: lock
+ * Advisory file locking through flock(2).
+ *
+ * A LOCK_EX call blocks until every other holder (shared or
+ * exclusive) releases, and a LOCK_SH call blocks until every
+ * exclusive holder releases. Advisory means uncooperative programs
+ * may still read and write the file; every participant must take the
+ * lock for it to be effective, which is the normal arrangement
+ * between processes of one program.
+ *
+ * Locks are released by an explicit LOCK_UN, by closing the
+ * descriptor, or by process termination, so a crashed lock holder
+ * cannot deadlock the survivors. Locking with an arbitrary operation
+ * code is available through flock_fd with the LOCK_* constants.
+ *
+ * Arguments travel through file-private staging cells in .bss and
+ * `syscall` is issued from a volatile assembly sequence.
+ */
+
+// Staging cells shared with the assembly sequence below.
+let __fl_num: UInt64;
+let __fl_a1: UInt64;
+let __fl_a2: UInt64;
+let __fl_ret: UInt64;
+
+// Executes the two-argument flock(2) system call.
+func __fl2(): UInt64 {
+    volatile asm "mov rax, [__fl_num]";
+    volatile asm "mov rdi, [__fl_a1]";
+    volatile asm "mov rsi, [__fl_a2]";
+    volatile asm "syscall";
+    volatile asm "mov [__fl_ret], rax";
+    return __fl_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything else
+// passes through.
+func __fl_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module lock {
+    // flock(2) operation codes.
+    static LOCK_SH = 1;
+    static LOCK_EX = 2;
+    static LOCK_UN = 8;
+
+    // Applies an arbitrary flock operation to the descriptor `fd`.
+    func flock_fd(fd: UInt64, op: UInt64): Void! {
+        __fl_num = 73;
+        __fl_a1 = fd;
+        __fl_a2 = op;
+        try __fl_check(__fl2());
+    }
+
+    // Blocks until an exclusive lock on the file is acquired.
+    func lock_exclusive(fd: UInt64): Void! {
+        try flock_fd(fd, LOCK_EX);
+    }
+
+    // Blocks until a shared lock on the file is acquired.
+    func lock_shared(fd: UInt64): Void! {
+        try flock_fd(fd, LOCK_SH);
+    }
+
+    // Releases the file's lock.
+    func unlock(fd: UInt64): Void! {
+        try flock_fd(fd, LOCK_UN);
+    }
+}

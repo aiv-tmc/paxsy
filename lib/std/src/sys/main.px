@@ -1,0 +1,307 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: sys
+ * Raw Linux x86-64 system call interface used by every other module.
+ *
+ * Paxsy has no runtime library and no foreign function interface, so
+ * every kernel interaction lives here as inline assembly around the
+ * `syscall` instruction. Arguments travel through the file-private
+ * staging cells below (zero-initialised .bss, addressable by symbol
+ * from the assembly text): a wrapper stores its arguments into the
+ * cells, a volatile assembly sequence loads them into the kernel
+ * argument registers (rdi, rsi, rdx, r10, r8, r9), issues `syscall`,
+ * and stores rax into the result cell. `volatile` keeps the stores
+ * and the assembly in source order.
+ *
+ * Error contract: the kernel returns the negated errno in rax; __check
+ * converts a value in -4095..-1 into `error <errno>`, so every public
+ * error payload of the standard library is a non-negative integer code.
+ */
+
+// Staging cells shared with the assembly sequences below.
+let __sc_num: UInt64;
+let __sc_a1: UInt64;
+let __sc_a2: UInt64;
+let __sc_a3: UInt64;
+let __sc_a4: UInt64;
+let __sc_a5: UInt64;
+let __sc_a6: UInt64;
+let __sc_ret: UInt64;
+
+// Executes a system call with zero argument registers.
+func __syscall0(): UInt64 {
+    volatile asm "mov rax, [__sc_num]";
+    volatile asm "syscall";
+    volatile asm "mov [__sc_ret], rax";
+    return __sc_ret;
+}
+
+// Executes a system call with one argument register.
+func __syscall1(): UInt64 {
+    volatile asm "mov rax, [__sc_num]";
+    volatile asm "mov rdi, [__sc_a1]";
+    volatile asm "syscall";
+    volatile asm "mov [__sc_ret], rax";
+    return __sc_ret;
+}
+
+// Executes a system call with two argument registers.
+func __syscall2(): UInt64 {
+    volatile asm "mov rax, [__sc_num]";
+    volatile asm "mov rdi, [__sc_a1]";
+    volatile asm "mov rsi, [__sc_a2]";
+    volatile asm "syscall";
+    volatile asm "mov [__sc_ret], rax";
+    return __sc_ret;
+}
+
+// Executes a system call with three argument registers.
+func __syscall3(): UInt64 {
+    volatile asm "mov rax, [__sc_num]";
+    volatile asm "mov rdi, [__sc_a1]";
+    volatile asm "mov rsi, [__sc_a2]";
+    volatile asm "mov rdx, [__sc_a3]";
+    volatile asm "syscall";
+    volatile asm "mov [__sc_ret], rax";
+    return __sc_ret;
+}
+
+// Executes a system call with four argument registers.
+// The fourth kernel argument travels in r10, not rcx.
+func __syscall4(): UInt64 {
+    volatile asm "mov rax, [__sc_num]";
+    volatile asm "mov rdi, [__sc_a1]";
+    volatile asm "mov rsi, [__sc_a2]";
+    volatile asm "mov rdx, [__sc_a3]";
+    volatile asm "mov r10, [__sc_a4]";
+    volatile asm "syscall";
+    volatile asm "mov [__sc_ret], rax";
+    return __sc_ret;
+}
+
+// Executes a system call with five argument registers.
+func __syscall5(): UInt64 {
+    volatile asm "mov rax, [__sc_num]";
+    volatile asm "mov rdi, [__sc_a1]";
+    volatile asm "mov rsi, [__sc_a2]";
+    volatile asm "mov rdx, [__sc_a3]";
+    volatile asm "mov r10, [__sc_a4]";
+    volatile asm "mov r8, [__sc_a5]";
+    volatile asm "syscall";
+    volatile asm "mov [__sc_ret], rax";
+    return __sc_ret;
+}
+
+// Executes a system call with six argument registers, the maximum the
+// x86-64 syscall convention supports (rdi, rsi, rdx, r10, r8, r9).
+func __syscall6(): UInt64 {
+    volatile asm "mov rax, [__sc_num]";
+    volatile asm "mov rdi, [__sc_a1]";
+    volatile asm "mov rsi, [__sc_a2]";
+    volatile asm "mov rdx, [__sc_a3]";
+    volatile asm "mov r10, [__sc_a4]";
+    volatile asm "mov r8, [__sc_a5]";
+    volatile asm "mov r9, [__sc_a6]";
+    volatile asm "syscall";
+    volatile asm "mov [__sc_ret], rax";
+    return __sc_ret;
+}
+
+// Converts a raw kernel return value into the wrapper error contract.
+// Values in the range -4095..-1 encode a negated errno; anything else is
+// a successful result and is returned unchanged.
+func __check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module sys {
+    // Generic errno shared by callers that need a single well-known code.
+    static EINVAL = 22;
+
+    // open(2) flag values.
+    static O_RDONLY = 0;
+    static O_WRONLY = 1;
+    static O_RDWR = 2;
+    static O_CREAT = 64;
+    static O_TRUNC = 512;
+    static O_APPEND = 1024;
+    static O_DIRECTORY = 65536;
+
+    // mmap(2) protection and flag values.
+    static PROT_READ = 1;
+    static PROT_WRITE = 2;
+    static MAP_PRIVATE = 2;
+    static MAP_ANONYMOUS = 32;
+    static MAP_SHARED = 1;
+
+    // lseek(2) whence values.
+    static SEEK_SET = 0;
+    static SEEK_CUR = 1;
+    static SEEK_END = 2;
+
+    // clock_gettime(2) clock identifiers.
+    static CLOCK_REALTIME = 0;
+    static CLOCK_MONOTONIC = 1;
+
+    // Terminates the calling process and all of its threads immediately.
+    // The kernel never returns from this system call.
+    func exit_group(code: Int32): Void {
+        __sc_num = 231;
+        __sc_a1 = code as UInt32 as UInt64;
+        __syscall1();
+    }
+
+    // Terminates only the calling thread. Single-threaded programs use
+    // this as the plain process exit path.
+    func exit(code: Int32): Void {
+        __sc_num = 60;
+        __sc_a1 = code as UInt32 as UInt64;
+        __syscall1();
+    }
+
+    // Reads up to `count` bytes from `fd` into `buf` and returns the
+    // number of bytes actually read, which may be smaller than requested.
+    func read(fd: UInt32, buf: &Void, count: UInt64): UInt64! {
+        __sc_num = 0;
+        __sc_a1 = fd as UInt64;
+        __sc_a2 = buf as UInt64;
+        __sc_a3 = count;
+        return __check(__syscall3());
+    }
+
+    // Writes up to `count` bytes from `buf` to `fd` and returns the
+    // number of bytes actually written.
+    func write(fd: UInt32, buf: &Void, count: UInt64): UInt64! {
+        __sc_num = 1;
+        __sc_a1 = fd as UInt64;
+        __sc_a2 = buf as UInt64;
+        __sc_a3 = count;
+        return __check(__syscall3());
+    }
+
+    // Opens the NUL-terminated path `path` and returns the new file
+    // descriptor. `flags` is a bitwise combination of the O_* constants;
+    // `mode` supplies the permission bits used when O_CREAT creates the
+    // file.
+    func open(path: Char[], flags: UInt32, mode: UInt32): UInt64! {
+        __sc_num = 2;
+        __sc_a1 = path as UInt64;
+        __sc_a2 = flags as UInt64;
+        __sc_a3 = mode as UInt64;
+        return __check(__syscall3());
+    }
+
+    // Closes a file descriptor previously returned by open.
+    func close(fd: UInt32): UInt64! {
+        __sc_num = 3;
+        __sc_a1 = fd as UInt64;
+        return __check(__syscall1());
+    }
+
+    // Repositions the file offset of `fd` according to `whence` and
+    // returns the resulting absolute offset.
+    func lseek(fd: UInt32, offset: Int64, whence: UInt32): UInt64! {
+        __sc_num = 8;
+        __sc_a1 = fd as UInt64;
+        __sc_a2 = offset as UInt64;
+        __sc_a3 = whence as UInt64;
+        return __check(__syscall3());
+    }
+
+    // Maps `length` bytes of anonymous private read-write memory and
+    // returns the base address of the new mapping.
+    func mmap(length: UInt64): &Void! {
+        __sc_num = 9;
+        __sc_a1 = 0;
+        __sc_a2 = length;
+        __sc_a3 = PROT_READ $ PROT_WRITE;
+        __sc_a4 = MAP_PRIVATE $ MAP_ANONYMOUS;
+        __sc_a5 = 0xFFFFFFFFFFFFFFFF;
+        __sc_a6 = 0;
+        return __check(__syscall6()) as &Void;
+    }
+
+    // Unmaps a region previously returned by mmap.
+    func munmap(addr: &Void, length: UInt64): UInt64! {
+        __sc_num = 11;
+        __sc_a1 = addr as UInt64;
+        __sc_a2 = length;
+        return __check(__syscall2());
+    }
+
+    // Moves the program break to `addr` and returns the new break on
+    // success. On failure the kernel returns the current break instead of
+    // a negative value, so callers compare the result with the request.
+    func brk(addr: UInt64): UInt64! {
+        __sc_num = 12;
+        __sc_a1 = addr;
+        return __check(__syscall1());
+    }
+
+    // Reads directory entries from `fd` into `buf` in the kernel's
+    // dirent64 record layout and returns the number of bytes written.
+    // A return of zero means the end of the directory has been reached.
+    func getdents64(fd: UInt32, buf: &Void, cap: UInt64): UInt64! {
+        __sc_num = 217;
+        __sc_a1 = fd as UInt64;
+        __sc_a2 = buf as UInt64;
+        __sc_a3 = cap;
+        return __check(__syscall3());
+    }
+
+    // Returns the process identifier of the calling process.
+    func getpid(): UInt64! {
+        __sc_num = 39;
+        return __check(__syscall0());
+    }
+
+    // Returns the kernel thread identifier of the calling thread.
+    func gettid(): UInt64! {
+        __sc_num = 218;
+        return __check(__syscall0());
+    }
+
+    // Yields the remainder of the calling thread's time slice to the
+    // scheduler; the kernel never reports an error for this call.
+    func sched_yield(): UInt64! {
+        __sc_num = 24;
+        return __check(__syscall0());
+    }
+
+    // Waits for the child or thread `pid`, storing its status word at
+    // `wstatus`; `rusage` is accepted for symmetry and may be zero.
+    func wait4(pid: UInt64, wstatus: &Void, options: UInt32, rusage: &Void): UInt64! {
+        __sc_num = 61;
+        __sc_a1 = pid;
+        __sc_a2 = wstatus as UInt64;
+        __sc_a3 = options as UInt64;
+        __sc_a4 = rusage as UInt64;
+        return __check(__syscall4());
+    }
+
+    // Sleeps until the relative interval described by the timespec at
+    // `req` has elapsed, storing the unslept remainder at `rem` when the
+    // call is interrupted. Both pointers may address the same structure.
+    func nanosleep(req: &Void, rem: &Void): UInt64! {
+        __sc_num = 35;
+        __sc_a1 = req as UInt64;
+        __sc_a2 = rem as UInt64;
+        return __check(__syscall2());
+    }
+
+    // Reads the clock identified by `clock_id` into the timespec
+    // structure at `ts` (a signed seconds word followed by a nanoseconds
+    // word).
+    func clock_gettime(clock_id: UInt32, ts: &Void): UInt64! {
+        __sc_num = 228;
+        __sc_a1 = clock_id as UInt64;
+        __sc_a2 = ts as UInt64;
+        return __check(__syscall2());
+    }
+}

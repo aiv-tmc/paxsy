@@ -1,0 +1,352 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: regex
+ * Compiling regular expressions and applying them to strings.
+ *
+ * A regular expression is compiled into a Regex value, which may
+ * then be used in matching, searching, and replacement
+ * operations. A Regex owns two heap resources — the compiled
+ * instruction program and the character-class bitmap chain — and
+ * destroy() releases both.
+ *
+ * Conventions: find() returns the leftmost index or -1;
+ * find_all() returns a heap array of Match records terminated by
+ * {-1, -1}; split() returns a heap array of string pointers
+ * terminated by a null pointer; returned arrays and strings are
+ * owned by the caller and released with free. In replace(), $0
+ * expands to the whole match, $1 through $4 to capture groups,
+ * and any other expansion produces nothing.
+ *
+ * The pipeline: regex_parser compiles the pattern text into the
+ * instruction program, regex_engine runs it with a backtracking
+ * virtual machine, and this module layers the searching and
+ * string-editing operations on top.
+ */
+
+use heap;
+use string;
+use mem;
+use regex_types;
+use regex_parser;
+use regex_engine;
+
+// "No match anywhere" index returned by the search helper.
+static __SENTINEL = 18446744073709551615;
+
+// Growable output buffer for replace().
+static __Out = Struct {
+    buf: UInt64,
+    len: UInt64,
+    cap: UInt64,
+};
+
+// Returns the leftmost match start at or after `from`, or
+// __SENTINEL; `sv` receives the match's SAVE slots on success.
+func __rx_search(prog: &Void, text: Char[], tlen: UInt64, from: UInt64, sv: &UInt64): UInt64! {
+    let p = from;
+    while p <= tlen {
+        let r = try regex_engine::__run(prog, text, p, tlen, sv);
+        if r == 1 {
+            return p;
+        }
+        p += 1;
+    }
+    return __SENTINEL;
+}
+
+// Copies text[begin..end) into a freshly allocated,
+// NUL-terminated string and returns it.
+func __rx_dup(text: Char[], begin: UInt64, end: UInt64): Char[]! {
+    let n = end - begin;
+    let buf = try heap::alloc(n + 1);
+    if n > 0 {
+        mem::copy(buf, ((text as UInt64) + begin) as &Void, n);
+    }
+    @(((buf as UInt64) + n) as &Char) = 0 as Char;
+    return buf as Char[];
+}
+
+// Ensures `extra` more bytes fit in `o`, growing by doubling.
+func __rx_need(o: &__Out, extra: UInt64): Void! {
+    if (@o).len + extra <= (@o).cap {
+        return;
+    }
+    let oo = @o;
+    while oo.len + extra > oo.cap {
+        oo.cap *= 2;
+    }
+    let grown = heap::realloc(oo.buf as &Void, oo.cap) catch {
+        @o = oo;
+        return error regex::ERR_MATCH;
+    };
+    oo.buf = grown as UInt64;
+    @o = oo;
+}
+
+// Appends one byte to `o`.
+func __rx_byte(o: &__Out, b: UInt64): Void! {
+    try __rx_need(o, 1);
+    @(((@o).buf + (@o).len) as &Char) = b as Char;
+    (@o).len = (@o).len + 1;
+}
+
+// Appends `n` bytes read from the raw address `src` to `o`.
+func __rx_bytes(o: &__Out, src: UInt64, n: UInt64): Void! {
+    if n == 0 {
+        return;
+    }
+    try __rx_need(o, n);
+    mem::copy(((@o).buf + (@o).len) as &Void, src as &Void, n);
+    (@o).len = (@o).len + n;
+}
+
+// Appends the expansion of `repl` for one match to `o`: $0..$4
+// copy the group span from the subject, every other byte of
+// `repl` is copied as is, and a '$' before a non-digit is a
+// literal '$'.
+func __rx_expand(o: &__Out, text: Char[], repl: Char[], sv: &UInt64): Void! {
+    let rb = repl as UInt64;
+    let tb = text as UInt64;
+    let svb = sv as UInt64;
+    let i: UInt64 = 0;
+    while i < string::len(repl) {
+        let c = @((rb + i) as &Char) as UInt64;
+        if c == 36 {
+            let d = @((rb + i + 1) as &Char) as UInt64;
+            if d >= 48 and d <= 57 {
+                let g = d - 48;
+                let gs = @((svb + (2 * g) * 8) as &UInt64);
+                let ge = @((svb + (2 * g + 1) * 8) as &UInt64);
+                if gs != regex_types::UNSET {
+                    try __rx_bytes(o, tb + gs, ge - gs);
+                }
+                i += 2;
+            } else {
+                try __rx_byte(o, c);
+                i += 1;
+            }
+        } else {
+            try __rx_byte(o, c);
+            i += 1;
+        }
+    }
+}
+
+module regex {
+    // errno-style code reported when the pattern is not a valid
+    // regular expression.
+    static ERR_INVALID_PATTERN = 22;
+
+    // errno-style code reported when a match operation encounters
+    // an error.
+    static ERR_MATCH = 12;
+
+    // A compiled regular expression. The fields are an
+    // implementation detail; the value is created by compile()
+    // and both pointer fields alias heap blocks it owns.
+    static Regex = Struct {
+        prog: &Void,
+        plen: UInt64,
+        ngroups: UInt64,
+        aux: &Void,
+    };
+
+    // One match span: byte offsets into the searched string.
+    static Match = Struct {
+        start: Int32,
+        end: Int32,
+    };
+
+    // Compiles the regular expression `pattern` into a Regex
+    // value. ERR_INVALID_PATTERN is reported when the pattern is
+    // malformed, with every partial allocation released.
+    func compile(pattern: Char[]): Regex! {
+        let prog: UInt64 = 0;
+        let plen: UInt64 = 0;
+        let ng: UInt64 = 0;
+        let aux: UInt64 = 0;
+        try regex_parser::__compile(pattern, &prog, &plen, &ng, &aux);
+        return Regex {prog as &Void, plen, ng, aux as &Void};
+    }
+
+    // Releases the instruction program and the bitmap chain owned
+    // by `re`, then resets the value to an empty state. The value
+    // must not be used afterwards except by reassigning the
+    // result of compile.
+    func destroy(re: &Regex): Void {
+        if (@re).prog != 0 {
+            heap::free((@re).prog);
+        }
+        let head = (@re).aux as UInt64;
+        while head != 0 {
+            let next = @(head as &UInt64);
+            heap::free(head as &Void);
+            head = next;
+        }
+        @re = Regex {0, 0, 0, 0};
+    }
+
+    // Returns true if the entire string `text` matches the
+    // regular expression. The match is anchored: the pattern must
+    // describe the whole string, not merely a substring. An
+    // allocation failure inside the engine is indistinguishable
+    // from a non-match at this level and reports false.
+    func match(re: &Regex, text: Char[]): Bool {
+        let tlen = string::len(text);
+        let sv: UInt64[regex_types::SAVE_SLOTS];
+        let r = regex_engine::__run((@re).prog, text, 0, tlen, &sv[0]) catch {
+            return false;
+        };
+        if r == 0 {
+            return false;
+        }
+        // Anchored: the whole string must be consumed.
+        return sv[1] == tlen;
+    }
+
+    // Returns the index of the first substring of `text` that
+    // matches the regular expression, or -1 when no match is
+    // found. ERR_MATCH is reported when the matching engine
+    // fails.
+    func find(re: &Regex, text: Char[]): Int32! {
+        let tlen = string::len(text);
+        let sv: UInt64[regex_types::SAVE_SLOTS];
+        let p = try __rx_search((@re).prog, text, tlen, 0, &sv[0]);
+        if p == __SENTINEL {
+            return -1;
+        }
+        return p as Int32;
+    }
+
+    // Returns every non-overlapping match of the regular
+    // expression in `text` as a heap array of Match records,
+    // terminated by a record with start and end both equal to -1.
+    // The caller owns the array and releases it with free.
+    // ERR_MATCH is reported when the engine fails; the partial
+    // array is released before the error is reported.
+    func find_all(re: &Regex, text: Char[]): &Match! {
+        let tlen = string::len(text);
+        let sv: UInt64[regex_types::SAVE_SLOTS];
+        let cap: UInt64 = 8;
+        let buf = try heap::alloc(cap * 8);
+        errdefer heap::free(buf);
+        let cnt: UInt64 = 0;
+        let pos: UInt64 = 0;
+        let working = true;
+        while working {
+            let p = try __rx_search((@re).prog, text, tlen, pos, &sv[0]);
+            if p == __SENTINEL {
+                working = false;
+            } else {
+                if cnt == cap {
+                    cap *= 2;
+                    buf = try heap::realloc(buf, cap * 8);
+                }
+                let e = sv[1];
+                @(((buf as UInt64) + cnt * 8) as &Int32) = p as Int32;
+                @(((buf as UInt64) + cnt * 8 + 4) as &Int32) = e as Int32;
+                cnt += 1;
+                // Non-overlapping: continue after this match; a
+                // match that consumed nothing still advances by
+                // one byte.
+                pos = e;
+                if e == p {
+                    pos = p + 1;
+                }
+            }
+        }
+        @(((buf as UInt64) + cnt * 8) as &Int32) = -1;
+        @(((buf as UInt64) + cnt * 8 + 4) as &Int32) = -1;
+        return buf as &Match;
+    }
+
+    // Returns a new string in which every match of the regular
+    // expression has been replaced by `replacement`. In
+    // `replacement`, $0 expands to the whole match and $1 through
+    // $4 to captured groups; any other expansion, including
+    // groups the match did not set, produces nothing. The caller
+    // owns the result and releases it with free.
+    func replace(re: &Regex, text: Char[], replacement: Char[]): Char[]! {
+        let tlen = string::len(text);
+        let sv: UInt64[regex_types::SAVE_SLOTS];
+        let cap = tlen + string::len(replacement) + 16;
+        let o = __Out {(try heap::alloc(cap)) as UInt64, 0, cap};
+        errdefer heap::free(o.buf as &Void);
+        let pos: UInt64 = 0;
+        let last: UInt64 = 0;
+        let working = true;
+        while working {
+            let p = try __rx_search((@re).prog, text, tlen, pos, &sv[0]);
+            if p == __SENTINEL {
+                working = false;
+            } else {
+                try __rx_bytes(&o, (text as UInt64) + last, p - last);
+                try __rx_expand(&o, text, replacement, &sv[0]);
+                last = sv[1];
+                pos = sv[1];
+                if sv[1] == p {
+                    pos = p + 1;
+                }
+            }
+        }
+        try __rx_bytes(&o, (text as UInt64) + last, tlen - last);
+        @((o.buf + o.len) as &Char) = 0 as Char;
+        return o.buf as Char[];
+    }
+
+    // Splits `text` at every match of the regular expression and
+    // returns a heap array of the substrings between the matches,
+    // terminated by a null pointer. The caller owns the array and
+    // every element and releases them with free. ERR_MATCH is
+    // reported when the engine fails; everything allocated so far
+    // is released first.
+    func split(re: &Regex, text: Char[]): &&Char! {
+        let tlen = string::len(text);
+        let ms = try find_all(re, text);
+        let cnt: UInt64 = 0;
+        while @(((ms as UInt64) + cnt * 8) as &Int32) != -1 {
+            cnt += 1;
+        }
+        let arr = try heap::alloc((cnt + 1) * 8);
+        // On failure: release the segments written so far, the
+        // array, and the match list.
+        errdefer {
+            let k: UInt64 = 0;
+            while k < cnt {
+                let seg = @(((arr as UInt64) + k * 8) as &UInt64);
+                if seg != 0 {
+                    heap::free(seg as &Void);
+                }
+                k += 1;
+            }
+            heap::free(arr);
+            heap::free(ms as &Void);
+        }
+        let done: UInt64 = 0;
+        let prev_end: UInt64 = 0;
+        let i: UInt64 = 0;
+        while i < cnt {
+            let s = @(((ms as UInt64) + i * 8) as &Int32) as UInt64;
+            let e = @(((ms as UInt64) + i * 8 + 4) as &Int32) as UInt64;
+            let seg = __rx_dup(text, prev_end, s) catch |er| {
+                // Record the count actually written for the
+                // errdefer sweep, then rethrow.
+                cnt = done;
+                return error er;
+            };
+            @(((arr as UInt64) + i * 8) as &UInt64) = seg as UInt64;
+            done += 1;
+            prev_end = e;
+            i += 1;
+        }
+        let tail = __rx_dup(text, prev_end, tlen) catch |er| {
+            cnt = done;
+            return error er;
+        };
+        @(((arr as UInt64) + cnt * 8) as &UInt64) = tail as UInt64;
+        heap::free(ms as &Void);
+        return arr as &&Char;
+    }
+}

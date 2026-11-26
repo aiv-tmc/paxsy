@@ -1,0 +1,6 @@
+# Paxsy standard library package metadata.
+# Module names are discovered from `module` declarations in src/**/*.px.
+# This file intentionally does not contain a [modules] export registry.
+[package]
+name = "std"
+version = "1.0.0"

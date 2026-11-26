@@ -1,0 +1,288 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: regex_parser (internal)
+ * Pattern compiler driver and grammar for the regular expression
+ * modules.
+ *
+ * This module owns the __compile entry and the recursive descent
+ * grammar: alternation, concatenation, quantified atoms, and
+ * atoms themselves. The layout invariant of the whole compiler
+ * is that concatenation emits instructions back to back, so an
+ * empty concatenation contributes no instructions and its start
+ * is simply the current program end; every JMP and SPLIT target
+ * is an absolute instruction index.
+ *
+ * Quantifier scheme: __parse_repeat reserves a jump slot in
+ * front of the atom and the quantifier rewrites it afterwards —
+ * a plain jump (no quantifier), a loop split for '*' and '+', a
+ * skip split for '?', or the {m,n} expansion. For {m,n} the
+ * original atom code serves as instance number one and the
+ * remaining instances re-parse the atom text, so every copy
+ * carries naturally correct absolute jump targets without
+ * relocating code.
+ */
+
+use heap;
+use regex_types;
+use regex_compiler;
+use regex_class;
+
+// Parses one atom: a group, a class, an anchor, a dot, an
+// escape, or a literal byte. Stray '}' and ']' bytes read as
+// literals.
+func __parse_atom(c: &regex_types::Comp): Void! {
+    let ch = regex_compiler::__peek(c);
+    if ch == 40 {
+        regex_compiler::__adv(c);
+        if (@c).ngroups >= regex_types::MAX_GROUPS {
+            return error regex_types::REGEX_ERR_PATTERN;
+        }
+        let g = (@c).ngroups + 1;
+        (@c).ngroups = g;
+        regex_compiler::__emit(c, regex_types::OP_SAVE, 2 * g, 0);
+        try __parse_alt(c);
+        if regex_compiler::__peek(c) != 41 {
+            return error regex_types::REGEX_ERR_PATTERN;
+        }
+        regex_compiler::__adv(c);
+        regex_compiler::__emit(c, regex_types::OP_SAVE, 2 * g + 1, 0);
+        return;
+    }
+    if ch == 91 {
+        try regex_class::__parse_class(c);
+        return;
+    }
+    if ch == 46 {
+        regex_compiler::__adv(c);
+        regex_compiler::__emit(c, regex_types::OP_ANY, 0, 0);
+        return;
+    }
+    if ch == 94 {
+        regex_compiler::__adv(c);
+        regex_compiler::__emit(c, regex_types::OP_BOL, 0, 0);
+        return;
+    }
+    if ch == 36 {
+        regex_compiler::__adv(c);
+        regex_compiler::__emit(c, regex_types::OP_EOL, 0, 0);
+        return;
+    }
+    if ch == 92 {
+        regex_compiler::__adv(c);
+        let e = regex_compiler::__peek(c);
+        if e == 0 {
+            return error regex_types::REGEX_ERR_PATTERN;
+        }
+        regex_compiler::__adv(c);
+        try regex_class::__emit_escape(c, e);
+        return;
+    }
+    if ch == 0 {
+        return error regex_types::REGEX_ERR_PATTERN;
+    }
+    regex_compiler::__adv(c);
+    regex_compiler::__emit(c, regex_types::OP_CHAR, ch, 0);
+}
+
+// Parses alternation: concat ('|' concat)*, emitted as a SPLIT
+// whose branches point back at the already-emitted
+// concatenations. (Byte 124 is the alternation operator.)
+func __parse_alt(c: &regex_types::Comp): UInt64! {
+    let a_start = try __parse_concat(c);
+    if regex_compiler::__peek(c) != 124 {
+        return a_start;
+    }
+    regex_compiler::__adv(c);
+    let b_start = try __parse_alt(c);
+    return regex_compiler::__emit(c, regex_types::OP_SPLIT, a_start, b_start);
+}
+
+// Reports whether the concat loop may continue at the cursor:
+// the end of the pattern, an alternation bar, and a closing
+// parenthesis all end a concatenation.
+func __concat_more(c: &regex_types::Comp): Bool {
+    let ch = regex_compiler::__peek(c);
+    return ch != 0 and ch != 124 and ch != 41;
+}
+
+// Parses a run of repeated atoms. An empty run emits nothing and
+// reports the current program end as its start.
+func __parse_concat(c: &regex_types::Comp): UInt64! {
+    let start = (@c).len;
+    while __concat_more(c) {
+        try __parse_repeat(c);
+    }
+    return start;
+}
+
+// Parses one atom with its quantifier: a jump slot is reserved
+// in front of the atom and the quantifier rewrites it afterwards.
+func __parse_repeat(c: &regex_types::Comp): Void! {
+    let slot = try regex_compiler::__emit(c, regex_types::OP_JMP, 0, 0);
+    let atom = slot + 1;
+    try __parse_atom(c);
+    let ch = regex_compiler::__peek(c);
+    if ch == 42 {
+        // '*': enter at the split; the split prefers another
+        // round.
+        regex_compiler::__adv(c);
+        let s = try regex_compiler::__emit(c, regex_types::OP_SPLIT, atom, 0);
+        regex_compiler::__set_b(c, s, s + 1);
+        regex_compiler::__set_a(c, slot, s);
+        return;
+    }
+    if ch == 43 {
+        // '+': enter the atom directly; the split loops back.
+        regex_compiler::__adv(c);
+        regex_compiler::__set_a(c, slot, atom);
+        let s = try regex_compiler::__emit(c, regex_types::OP_SPLIT, atom, 0);
+        regex_compiler::__set_b(c, s, s + 1);
+        return;
+    }
+    if ch == 63 {
+        // '?': try the atom once, else skip past it; no loop
+        // back.
+        regex_compiler::__adv(c);
+        regex_compiler::__set_op(c, slot, regex_types::OP_SPLIT);
+        regex_compiler::__set_a(c, slot, atom);
+        regex_compiler::__set_b(c, slot, (@c).len);
+        return;
+    }
+    if ch == 123 {
+        try __parse_brace(c, slot, atom);
+        return;
+    }
+    regex_compiler::__set_a(c, slot, atom);
+}
+
+// Re-parses the atom that occupies pattern text [atom, pat_end),
+// emitting a fresh copy of its code at the current program end.
+func __reparse_atom(c: &regex_types::Comp, atom: UInt64, pat_end: UInt64): Void! {
+    let saved = (@c).pos;
+    (@c).pos = atom;
+    try __parse_atom(c);
+    if (@c).pos > pat_end {
+        return error regex_types::REGEX_ERR_PATTERN;
+    }
+    (@c).pos = saved;
+}
+
+// Body of __parse_brace, split out so the option-index buffer is
+// released on every failure path.
+func __brace_body(c: &regex_types::Comp, slot: UInt64, atom: UInt64, opts: &Void): Void! {
+    regex_compiler::__adv(c);
+    if not regex_compiler::__is_digit(regex_compiler::__peek(c)) {
+        return error regex_types::REGEX_ERR_PATTERN;
+    }
+    let m = regex_compiler::__number(c);
+    let n = m;
+    if regex_compiler::__peek(c) == 44 {
+        regex_compiler::__adv(c);
+        if regex_compiler::__is_digit(regex_compiler::__peek(c)) {
+            n = regex_compiler::__number(c);
+        } else {
+            // {m,}: open-ended, capped by the expansion limit.
+            n = 255;
+        }
+    }
+    if regex_compiler::__peek(c) != 125 {
+        return error regex_types::REGEX_ERR_PATTERN;
+    }
+    regex_compiler::__adv(c);
+    if m > 255 or n > 255 or n < m {
+        return error regex_types::REGEX_ERR_PATTERN;
+    }
+    if m == 0 and n == 0 {
+        // Degenerate: matches the empty string, atom unused.
+        regex_compiler::__set_a(c, slot, (@c).len);
+        return;
+    }
+    let pat_end = (@c).pos;
+    let ocnt: UInt64 = 0;
+    let i: UInt64 = 1;
+    if m >= 1 {
+        // Mandatory instance 1 is the original atom code.
+        regex_compiler::__set_a(c, slot, atom);
+    } else {
+        // Instance 1 is the first optional.
+        regex_compiler::__set_op(c, slot, regex_types::OP_SPLIT);
+        regex_compiler::__set_a(c, slot, atom);
+        @(((opts as UInt64) + ocnt * 8) as &UInt64) = slot;
+        ocnt += 1;
+    }
+    // Mandatory copies 2 through m.
+    while i < m {
+        try __reparse_atom(c, atom, pat_end);
+        i += 1;
+    }
+    // Optional copies m through n - 1, each a split whose
+    // fallback lands on the shared exit jump emitted below.
+    while i < n {
+        let os = try regex_compiler::__emit(c, regex_types::OP_JMP, 0, 0);
+        try __reparse_atom(c, atom, pat_end);
+        regex_compiler::__set_op(c, os, regex_types::OP_SPLIT);
+        regex_compiler::__set_a(c, os, os + 1);
+        @(((opts as UInt64) + ocnt * 8) as &UInt64) = os;
+        ocnt += 1;
+        i += 1;
+    }
+    // Shared exit: every optional fallback lands here, then flow
+    // continues with the next concatenation instruction.
+    let ex = try regex_compiler::__emit(c, regex_types::OP_JMP, 0, 0);
+    regex_compiler::__set_a(c, ex, (@c).len);
+    let k: UInt64 = 0;
+    while k < ocnt {
+        let s = @(((opts as UInt64) + k * 8) as &UInt64);
+        regex_compiler::__set_b(c, s, ex);
+        k += 1;
+    }
+}
+
+// Expands {m}, {m,}, and {m,n}: instance 1 is the original atom
+// code, instances 2..m are re-parses, and instances m..n-1 are
+// optional splits whose fallback lands on the shared exit jump.
+// `opts` records those splits; it holds up to 255 entries.
+func __parse_brace(c: &regex_types::Comp, slot: UInt64, atom: UInt64): Void! {
+    let opts = try heap::alloc(255 * 8);
+    __brace_body(c, slot, atom, opts) catch |e| {
+        heap::free(opts);
+        return error e;
+    };
+    heap::free(opts);
+}
+
+// Emits SAVE 0, the pattern, SAVE 1, and MATCH, and requires the
+// pattern text to be consumed exactly.
+func __do_compile(c: &regex_types::Comp): Void! {
+    regex_compiler::__emit(c, regex_types::OP_SAVE, 0, 0);
+    try __parse_alt(c);
+    if regex_compiler::__peek(c) != 0 {
+        // A trailing ')' or other byte the grammar cannot end
+        // with.
+        return error regex_types::REGEX_ERR_PATTERN;
+    }
+    regex_compiler::__emit(c, regex_types::OP_SAVE, 1, 0);
+    regex_compiler::__emit(c, regex_types::OP_MATCH, 0, 0);
+}
+
+module regex_parser {
+    // Compiles `pat` into a program. On success the outputs
+    // receive the program base, instruction count, group count,
+    // and bitmap chain head; on failure everything allocated so
+    // far is released.
+    func __compile(pat: Char[], prog_out: &UInt64, plen_out: &UInt64, ng_out: &UInt64, aux_out: &UInt64): Void! {
+        let raw = try heap::alloc(16 * regex_types::INST);
+        let c = regex_types::Comp {raw as UInt64, 0, 16, pat as UInt64, 0, 0, 0};
+        __do_compile(&c) catch |e| {
+            heap::free(c.buf as &Void);
+            regex_compiler::__aux_free(c.aux);
+            return error e;
+        };
+        @prog_out = c.buf;
+        @plen_out = c.len;
+        @ng_out = c.ngroups;
+        @aux_out = c.aux;
+    }
+}

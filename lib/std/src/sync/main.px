@@ -1,0 +1,135 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: sync
+ * The blocking mutex, built directly on the futex system call.
+ *
+ * A Mutex serialises access to a shared resource across OS threads
+ * or across processes — the state word works in any shared memory,
+ * including a MAP_SHARED mapping. Two ingredients cooperate: an
+ * atomic compare-exchange on the state word from std::atomic, and
+ * the futex wait/wake pair, which parks the calling thread while
+ * the mutex is held and wakes one waiter on release.
+ *
+ * State encoding of the `locked` word: 0 free, 1 held with no
+ * known waiters, 2 held with waiters. lock() swaps 0 to 1
+ * atomically and returns immediately when uncontended; on
+ * contention it stores 2 and futex-waits while the word remains 2,
+ * re-checking on every wake so a release racing with the wait
+ * cannot be missed — the wait reports error 11 (EAGAIN) when the
+ * word has already changed, and the loop turns that into a fresh
+ * exchange attempt. unlock() swaps 1 to 0 when no waiters are
+ * advertised and otherwise stores 0 and wakes one waiter;
+ * remaining waiters re-sleep after failing the next exchange.
+ *
+ * The futex operates on the low 32 bits of the state word; the
+ * state values fit in two bits, so the word's width is irrelevant
+ * to the kernel side.
+ *
+ * Usage limits: under the language's cooperative routines a
+ * blocking mutex parks the whole process; use it only where
+ * preemption is real (OS threads, separate processes) and keep
+ * critical sections small.
+ */
+
+use atomic;
+
+// Staging cells for the futex(2) sequence.
+let __fu_num: UInt64;
+let __fu_a1: UInt64;
+let __fu_a2: UInt64;
+let __fu_a3: UInt64;
+let __fu_a4: UInt64;
+let __fu_ret: UInt64;
+
+// Executes the four-argument futex(2) system call.
+func __futex4(): UInt64 {
+    volatile asm "mov rax, [__fu_num]";
+    volatile asm "mov rdi, [__fu_a1]";
+    volatile asm "mov rsi, [__fu_a2]";
+    volatile asm "mov rdx, [__fu_a3]";
+    volatile asm "mov r10, [__fu_a4]";
+    volatile asm "syscall";
+    volatile asm "mov [__fu_ret], rax";
+    return __fu_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything
+// else passes through.
+func __fu_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module sync {
+    // futex(2) operation codes.
+    static FUTEX_WAIT = 0;
+    static FUTEX_WAKE = 1;
+
+    // errno value with which futex reports a state change racing
+    // with the wait; handled internally by lock, never surfaced.
+    static EAGAIN = 11;
+
+    // A mutex. The zero value produced by default initialisation is
+    // a free mutex, so a Mutex field needs no constructor; make()
+    // documents the intent where a named value is wanted.
+    static Mutex = Struct {
+        locked: UInt64,
+    };
+
+    // Returns a free mutex.
+    func make(): Mutex = Mutex {0};
+
+    // Acquires the mutex, blocking until it is free. A futex error
+    // propagates with its errno.
+    func lock(m: &Mutex): Void! {
+        while true {
+            let expected: UInt64 = 0;
+            if atomic::cas(UInt64, &(@m).locked, &expected, 1, atomic::Order.Acquire, atomic::Order.Relaxed) {
+                return;
+            }
+            if atomic::load(UInt64, &(@m).locked, atomic::Order.Relaxed) == 2 {
+                // Contended with waiters already advertised: sleep
+                // while the word stays 2. EAGAIN means the owner
+                // released between the check and the wait, which
+                // the loop turns into a fresh exchange attempt.
+                __fu_num = 202;
+                __fu_a1 = m as UInt64;
+                __fu_a2 = FUTEX_WAIT;
+                __fu_a3 = 2;
+                __fu_a4 = 0;
+                __fu_check(__futex4()) catch |e| {
+                    if e != EAGAIN {
+                        return error e;
+                    }
+                };
+            } else {
+                // First contender: advertise that waiters exist,
+                // then retry the exchange before deciding to sleep.
+                atomic::store(UInt64, &(@m).locked, 2, atomic::Order.Relaxed);
+            }
+        }
+    }
+
+    // Releases the mutex and wakes one waiter when waiters exist.
+    func unlock(m: &Mutex): Void! {
+        let expected: UInt64 = 1;
+        if atomic::cas(UInt64, &(@m).locked, &expected, 0, atomic::Order.Release, atomic::Order.Relaxed) {
+            // No waiters were advertised; the mutex is now free.
+            return;
+        }
+        // Waiters exist: store the free state and wake one of them.
+        atomic::store(UInt64, &(@m).locked, 0, atomic::Order.Release);
+        __fu_num = 202;
+        __fu_a1 = m as UInt64;
+        __fu_a2 = FUTEX_WAKE;
+        __fu_a3 = 1;
+        __fu_a4 = 0;
+        try __fu_check(__futex4());
+    }
+}

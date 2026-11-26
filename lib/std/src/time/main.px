@@ -1,0 +1,145 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: time
+ * Wall-clock and monotonic time, sleeping, and measurement.
+ *
+ * Every time value originates from the clock_gettime(2) system
+ * call, which fills a two-word timespec structure: whole seconds
+ * followed by nanoseconds within the second. The wall-clock counts
+ * real time and may move backward when the system time is adjusted;
+ * the monotonic clock always advances and is the appropriate source
+ * of timing information for measuring the duration of an operation.
+ *
+ * Single-word nanosecond counts are the arithmetic currency of the
+ * module: they cannot overflow for any realistic interval (a UInt64
+ * of nanoseconds spans more than 580 years) and never lose
+ * precision across additions and subtractions. to_ns nevertheless
+ * checks its conversion, because a negative or enormous timespec is
+ * a representable input.
+ *
+ * Sleeping uses nanosleep(2). When a signal interrupts the sleep,
+ * the kernel stores the unslept remainder through the second
+ * pointer and sleep_ns transparently resumes for the remaining
+ * time.
+ */
+
+use sys;
+
+module time {
+    // errno-style code reported when the monotonic clock cannot be
+    // read.
+    static ERR_NO_CLOCK = 19;
+
+    // errno-style code reported when a timestamp cannot be
+    // represented as an unsigned nanosecond count.
+    static ERR_OVERFLOW = 75;
+
+    // errno value with which nanosleep reports interruption by a
+    // signal. Handled internally by sleep_ns, never surfaced.
+    static __EINTR = 4;
+
+    // Nanoseconds in one second; the packing factor between the
+    // kernel's two-word representation and single-word counts.
+    static NS_PER_SEC = 1000000000;
+
+    // One clock reading: whole seconds and the nanosecond
+    // remainder.
+    static TimeSpec = Struct {
+        sec: Int64,
+        nsec: UInt64,
+    };
+
+    // Reads the wall-clock clock, which counts real time and may
+    // move backward if the system time is adjusted: whole seconds
+    // since the Unix epoch plus the nanosecond remainder.
+    func realtime(): TimeSpec! {
+        let ts: TimeSpec;
+        try sys::clock_gettime(sys::CLOCK_REALTIME, &ts as &Void);
+        return ts;
+    }
+
+    // Reads the monotonic clock, which never moves backward. Its
+    // zero point is unspecified; only differences between readings
+    // are meaningful.
+    func monotonic(): TimeSpec! {
+        let ts: TimeSpec;
+        try sys::clock_gettime(sys::CLOCK_MONOTONIC, &ts as &Void);
+        return ts;
+    }
+
+    // Folds a timespec into a single nanosecond count:
+    // sec * 1_000_000_000 + nsec. A negative `sec`, or a product
+    // that does not fit a UInt64, reports ERR_OVERFLOW.
+    func to_ns(ts: TimeSpec): UInt64! {
+        if ts.sec < 0 {
+            return error ERR_OVERFLOW;
+        }
+        let s = ts.sec as UInt64;
+        if s > 18446744073 {
+            return error ERR_OVERFLOW;
+        }
+        let total = s * NS_PER_SEC + ts.nsec;
+        if total < ts.nsec {
+            return error ERR_OVERFLOW;
+        }
+        return total;
+    }
+
+    // Reads the monotonic clock folded into a single nanosecond
+    // count: the convenient form for interval measurement (take two
+    // readings and subtract). The conversion is checked.
+    func monotonic_ns(): UInt64! {
+        return to_ns(try monotonic());
+    }
+
+    // Suspends the current thread for `ns` nanoseconds. Other
+    // threads in the same program continue to run. When a signal
+    // interrupts the sleep, the remainder recorded by the kernel is
+    // slept out before the function returns.
+    func sleep_ns(ns: UInt64): Void! {
+        let sec = ns / NS_PER_SEC;
+        let ts = TimeSpec {.sec = sec as Int64, .nsec = ns - sec * NS_PER_SEC};
+        while true {
+            sys::nanosleep(&ts as &Void, &ts as &Void) catch |e| {
+                if e == __EINTR {
+                    // The kernel overwrote ts with the unslept
+                    // remainder; loop to sleep out the rest.
+                    continue;
+                }
+                return error e;
+            };
+            return;
+        }
+    }
+
+    // Returns the resolution of the monotonic clock in nanoseconds,
+    // estimated by sampling successive readings and keeping the
+    // smallest nonzero gap between them. The true resolution may be
+    // finer than any gap observed in a short run, so the result is
+    // an upper bound; a run without any observable gap reports one
+    // second, the coarsest bound consistent with a working clock.
+    func clock_resolution(): UInt64! {
+        let best: UInt64 = 0;
+        let prev = monotonic_ns() catch |e| {
+            return error ERR_NO_CLOCK;
+        };
+        let i: UInt64 = 0;
+        while i < 65536 {
+            let now = monotonic_ns() catch |e| {
+                return error ERR_NO_CLOCK;
+            };
+            let gap = now - prev;
+            if gap > 0 and (best == 0 or gap < best) {
+                best = gap;
+            }
+            prev = now;
+            i += 1;
+        }
+        if best == 0 {
+            return NS_PER_SEC;
+        }
+        return best;
+    }
+}

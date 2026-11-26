@@ -1,0 +1,326 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: heap
+ * Heap allocator built on the program break, plus arena and pool
+ * allocators for bulk work.
+ *
+ * The heap manages a contiguous region between the program break captured
+ * at initialisation and the break as extended on demand. Memory inside
+ * the region is organised as a sequence of chunks, each preceded by an
+ * eight-byte header. The header holds the chunk size including itself in
+ * the high 60 bits; bit 0 is set while the chunk is allocated. Every
+ * size is a multiple of 16 bytes, so chunks are always 16-byte aligned.
+ *
+ * Free chunks form an implicit list: starting from the first chunk
+ * header, each next chunk is found by adding the current chunk size to
+ * its header address. Allocation uses first fit with splitting; freeing
+ * clears the allocated bit and merges with the physically following
+ * chunk when that chunk is also free. There is no per-chunk footer, so
+ * freeing cannot merge backwards in constant time; forward merging keeps
+ * the common allocate-then-free-then-allocate-again pattern
+ * unfragmented. Growth is requested from the kernel through sys::brk in
+ * multiples of one page.
+ *
+ * An arena is a bump allocator over one backing block: allocations move
+ * an offset forward and are released all at once. A pool is a free-list
+ * allocator of fixed-size blocks with constant-time allocation and
+ * release; a free block stores the list link in its own first word.
+ */
+
+use mem;
+use sys;
+
+// Smallest remainder worth carving into a separate free chunk:
+// eight header bytes plus a 16-byte minimum payload.
+static HEAP_MIN_SPLIT = 32;
+
+// Chunk header size in bytes. The header is a single UInt64.
+static HEAP_HEADER = 8;
+
+// Bit 0 of the header marks the chunk as allocated.
+static HEAP_ALLOCATED = 1;
+
+// Chunk sizes are multiples of 16; the low four header bits are flags.
+static HEAP_SIZE_MASK = 0xFFFFFFFFFFFFFFF0;
+
+// Minimum growth step requested from the kernel, one page.
+static HEAP_GROW = 4096;
+
+// Address of the first chunk header, set by the first allocation.
+let __heap_base: UInt64;
+
+// Current program break, one byte past the last byte of the heap.
+let __heap_top: UInt64;
+
+// Lazily flipped by __ensure_heap so initialisation happens once.
+let __heap_ready: Bool;
+
+// Live-allocation counters reported by stats().
+let __heap_bytes: UInt64;
+let __heap_blocks: UInt64;
+
+// Performs one-time initialisation by querying the current program
+// break, and returns the address of the first chunk header.
+func __ensure_heap(): UInt64! {
+    if __heap_ready {
+        return __heap_base;
+    }
+    let base = try sys::brk(0);
+    __heap_base = base;
+    __heap_top = base;
+    __heap_ready = true;
+    return base;
+}
+
+// Scans the implicit free list for the first chunk that can hold `need`
+// bytes and returns the address of its header, or zero when no existing
+// chunk fits.
+func __find_fit(need: UInt64): UInt64 {
+    let addr = __heap_base;
+    while addr + HEAP_HEADER <= __heap_top {
+        let header = @(addr as &UInt64);
+        let csize = header & HEAP_SIZE_MASK;
+        // A zero size would loop forever, so treat it as list end.
+        if csize == 0 {
+            break;
+        }
+        if (header & HEAP_ALLOCATED) == 0 and csize >= need {
+            return addr;
+        }
+        addr += csize;
+    }
+    return 0;
+}
+
+// Grows the heap by at least `need` bytes, rounding the request up to a
+// whole page, and converts a kernel refusal into ERR_OUT_OF_MEMORY.
+func __grow(need: UInt64): UInt64! {
+    let want = need;
+    if want < HEAP_GROW {
+        want = HEAP_GROW;
+    }
+    let fresh = __heap_top;
+    let new_top = try sys::brk(__heap_top + want);
+    if new_top < __heap_top + want {
+        return error heap::ERR_OUT_OF_MEMORY;
+    }
+    // The freshly mapped range becomes one large free chunk.
+    @(fresh as &UInt64) = (new_top - fresh) & HEAP_SIZE_MASK;
+    __heap_top = new_top;
+    return fresh;
+}
+
+// Rounds `size` up to a multiple of 16, the heap's alignment quantum.
+func __align16(size: UInt64): UInt64 = (size + 15) & HEAP_SIZE_MASK;
+
+module heap {
+    // Allocation counters returned by stats().
+    static HeapStats = Struct {
+        allocated: UInt64,
+        blocks: UInt64,
+    };
+
+    // A bump allocator over one backing block.
+    static Arena = Struct {
+        base: &Void,
+        offset: UInt64,
+        cap: UInt64,
+    };
+
+    // A free-list allocator of fixed-size blocks.
+    static Pool = Struct {
+        block_size: UInt64,
+        capacity: UInt64,
+        free_list: &Void,
+        storage: &Void,
+    };
+
+    // Returned when an allocation cannot be satisfied.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returned when a requested size is zero or cannot be represented.
+    static ERR_INVALID_SIZE = 22;
+
+    // Allocates `size` bytes of uninitialised memory and returns a
+    // 16-byte-aligned pointer to the block.
+    func alloc(size: UInt64): &Void! {
+        if size == 0 {
+            return error ERR_INVALID_SIZE;
+        }
+        try __ensure_heap();
+        // Total bytes needed: payload plus header, rounded up to 16.
+        let need = __align16(size + HEAP_HEADER);
+        let addr = __find_fit(need);
+        if addr == 0 {
+            try __grow(need);
+            addr = __find_fit(need);
+            if addr == 0 {
+                return error ERR_OUT_OF_MEMORY;
+            }
+        }
+        let csize = @(addr as &UInt64) & HEAP_SIZE_MASK;
+        if csize - need >= HEAP_MIN_SPLIT {
+            // Split: mark the front part allocated and turn the
+            // remainder into a new free chunk with its own header.
+            @(addr as &UInt64) = need $ HEAP_ALLOCATED;
+            @((addr + need) as &UInt64) = (csize - need) & HEAP_SIZE_MASK;
+        } else {
+            // The remainder would be unusable, so take the whole chunk.
+            @(addr as &UInt64) = csize $ HEAP_ALLOCATED;
+        }
+        __heap_bytes += csize - HEAP_HEADER;
+        __heap_blocks += 1;
+        return (addr + HEAP_HEADER) as &Void;
+    }
+
+    // Releases a block previously returned by alloc or realloc. Freeing
+    // the zero pointer is a no-op. After clearing the allocated bit the
+    // chunk is merged with the physically following chunk whenever that
+    // chunk is free.
+    func free(ptr: &Void): Void {
+        let addr = ptr as UInt64;
+        if addr == 0 {
+            return;
+        }
+        let hdr = addr - HEAP_HEADER;
+        let csize = @(hdr as &UInt64) & HEAP_SIZE_MASK;
+        @(hdr as &UInt64) = csize;
+        __heap_bytes -= csize - HEAP_HEADER;
+        __heap_blocks -= 1;
+        let next = hdr + csize;
+        if next + HEAP_HEADER <= __heap_top {
+            let next_header = @(next as &UInt64);
+            if (next_header & HEAP_ALLOCATED) == 0 {
+                let merged = csize + (next_header & HEAP_SIZE_MASK);
+                @(hdr as &UInt64) = merged & HEAP_SIZE_MASK;
+            }
+        }
+    }
+
+    // Resizes a live block to `size` bytes, preserving its content up to
+    // the smaller of the old and new sizes. A zero pointer is treated as
+    // an allocation request; a zero size frees the block and returns the
+    // zero pointer. On error the original block remains live.
+    func realloc(ptr: &Void, size: UInt64): &Void! {
+        if ptr == 0 {
+            return alloc(size);
+        }
+        if size == 0 {
+            free(ptr);
+            return 0;
+        }
+        let hdr = (ptr as UInt64) - HEAP_HEADER;
+        let old_size = (@(hdr as &UInt64) & HEAP_SIZE_MASK) - HEAP_HEADER;
+        if size <= old_size {
+            return ptr;
+        }
+        let grown = try alloc(size);
+        mem::copy(grown, ptr, old_size);
+        free(ptr);
+        return grown;
+    }
+
+    // Returns the payload capacity of a live block in bytes, which may
+    // exceed the size that was requested.
+    func usable_size(ptr: &Void): UInt64 {
+        let hdr = (ptr as UInt64) - HEAP_HEADER;
+        return (@(hdr as &UInt64) & HEAP_SIZE_MASK) - HEAP_HEADER;
+    }
+
+    // Returns the current allocation counters of the heap.
+    func stats(): HeapStats = HeapStats {__heap_bytes, __heap_blocks};
+
+    // Creates an arena whose backing block holds `cap` bytes.
+    func arena_create(cap: UInt64): Arena! {
+        if cap == 0 {
+            return error ERR_INVALID_SIZE;
+        }
+        let base = try alloc(cap);
+        return Arena {base, 0, cap};
+    }
+
+    // Returns the next `size`-byte region of the arena, aligned to 16
+    // bytes, or an error when the remaining space does not suffice.
+    // Individual arena allocations are not freed; arena_reset releases
+    // them all at once.
+    func arena_alloc(a: &Arena, size: UInt64): &Void! {
+        if size == 0 {
+            return error ERR_INVALID_SIZE;
+        }
+        let want = __align16(size);
+        if (@a).offset + want > (@a).cap {
+            return error ERR_OUT_OF_MEMORY;
+        }
+        let p = ((@a).base as UInt64) + (@a).offset;
+        (@a).offset += want;
+        return p as &Void;
+    }
+
+    // Marks the whole arena free without releasing the backing block.
+    func arena_reset(a: &Arena): Void {
+        (@a).offset = 0;
+    }
+
+    // Releases the arena's backing block.
+    func arena_destroy(a: &Arena): Void {
+        free((@a).base);
+        (@a).base = 0;
+        (@a).offset = 0;
+        (@a).cap = 0;
+    }
+
+    // Creates a pool of `capacity` blocks of `block_size` bytes each.
+    // Every block is at least 16 bytes so a free block can store the
+    // free-list link in its first word with room to spare.
+    func pool_create(block_size: UInt64, capacity: UInt64): Pool! {
+        if block_size == 0 or capacity == 0 {
+            return error ERR_INVALID_SIZE;
+        }
+        let stride = __align16(if block_size < 16 { 16 } else { block_size });
+        let storage = try alloc(stride * capacity);
+        // Thread the free list through every block: the first word of
+        // each free block points at the next free block.
+        let i: UInt64 = 0;
+        while i < capacity {
+            let here = (storage as UInt64) + i * stride;
+            let next: UInt64 = 0;
+            if i + 1 < capacity {
+                next = here + stride;
+            }
+            @(here as &UInt64) = next;
+            i += 1;
+        }
+        return Pool {stride, capacity, storage, storage};
+    }
+
+    // Takes one block off the pool's free list, or reports
+    // ERR_OUT_OF_MEMORY when the pool is exhausted.
+    func pool_alloc(p: &Pool): &Void! {
+        let head = (@p).free_list;
+        if head == 0 {
+            return error ERR_OUT_OF_MEMORY;
+        }
+        (@p).free_list = (@(head as &UInt64)) as &Void;
+        return head;
+    }
+
+    // Returns a block to the pool by pushing it onto the free list.
+    func pool_free(p: &Pool, ptr: &Void): Void {
+        if ptr == 0 {
+            return;
+        }
+        @(ptr as &UInt64) = (@p).free_list as UInt64;
+        (@p).free_list = ptr;
+    }
+
+    // Releases the pool's backing block.
+    func pool_destroy(p: &Pool): Void {
+        free((@p).storage);
+        (@p).storage = 0;
+        (@p).free_list = 0;
+        (@p).block_size = 0;
+        (@p).capacity = 0;
+    }
+}

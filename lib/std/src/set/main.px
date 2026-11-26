@@ -1,0 +1,221 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: set
+ * Set, a hash table of strings for membership tests and
+ * deduplication.
+ *
+ * The table mirrors the map's design: an array of bucket heads with
+ * separate chaining, entries holding a next pointer, a copied key,
+ * and a cached hash, a power-of-two capacity for mask indexing, and
+ * doubling with rehashing when the load factor passes 7/10. Keys are
+ * copied into the set on insertion. Iteration order is unspecified
+ * and may change after any mutation.
+ *
+ * Ownership: the caller of make owns the set; destroy (usually
+ * scheduled with defer) releases it.
+ */
+
+use heap;
+use mem;
+use string;
+
+// Entry layout: next pointer, key pointer, cached hash.
+static ENTRY_NEXT = 0;
+static ENTRY_KEY = 8;
+static ENTRY_HASH = 16;
+static ENTRY_BYTES = 24;
+
+// FNV-1a hash of the key bytes.
+func __hash(key: Char[]): UInt64 {
+    let p = key as UInt64;
+    let h: UInt64 = 14695981039346656037;
+    let i: UInt64 = 0;
+    while true {
+        let c = @((p + i) as &Char) as UInt64;
+        if c == 0 {
+            break;
+        }
+        h = (h ^ c) * 1099511628211;
+        i += 1;
+    }
+    return h;
+}
+
+module set {
+    // A string hash set.
+    static Set = Struct {
+        buckets: &Void,
+        count: UInt64,
+        capacity: UInt64,
+    };
+
+    // Returned when a growth allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Initial bucket count; the capacity always stays a power of two.
+    static INIT_CAP = 16;
+
+    // Returns an empty set; the bucket array appears on the first
+    // insertion.
+    func make(): Set = Set {0, 0, 0};
+
+    // Allocates the bucket array on first use.
+    func __ensure(s: &Set): Void! {
+        if (@s).capacity != 0 {
+            return;
+        }
+        let b = try heap::alloc(INIT_CAP * 8);
+        mem::zero(b, INIT_CAP * 8);
+        (@s).buckets = b;
+        (@s).capacity = INIT_CAP;
+    }
+
+    // Doubles the bucket array and rehashes every entry into it.
+    func __grow(s: &Set): Void! {
+        let newcap = (@s).capacity * 2;
+        let nb = try heap::alloc(newcap * 8);
+        mem::zero(nb, newcap * 8);
+        let i: UInt64 = 0;
+        while i < (@s).capacity {
+            let e = @(((@s).buckets as UInt64 + i * 8) as &UInt64);
+            while e != 0 {
+                let next = @((e + ENTRY_NEXT) as &UInt64);
+                let h = @((e + ENTRY_HASH) as &UInt64);
+                let head = nb as UInt64 + (h & (newcap - 1)) * 8;
+                @((e + ENTRY_NEXT) as &UInt64) = @(head as &UInt64);
+                @(head as &UInt64) = e;
+                e = next;
+            }
+            i += 1;
+        }
+        heap::free((@s).buckets);
+        (@s).buckets = nb;
+        (@s).capacity = newcap;
+    }
+
+    // Finds the entry for `key` in the chain at `head`, or zero.
+    func __find(head: UInt64, key: Char[], hash: UInt64): UInt64 {
+        let e = @(head as &UInt64);
+        while e != 0 {
+            if @((e + ENTRY_HASH) as &UInt64) == hash {
+                let ek = (@((e + ENTRY_KEY) as &UInt64)) as Char[];
+                if string::compare(ek, key) == 0 {
+                    return e;
+                }
+            }
+            e = @((e + ENTRY_NEXT) as &UInt64);
+        }
+        return 0;
+    }
+
+    // Inserts a copy of `key` and returns true when it was not
+    // already present.
+    func add(s: &Set, key: Char[]): Bool! {
+        try __ensure(s);
+        if ((@s).count + 1) * 10 >= (@s).capacity * 7 {
+            try __grow(s);
+        }
+        let h = __hash(key);
+        let head = (@s).buckets as UInt64 + (h & ((@s).capacity - 1)) * 8;
+        if __find(head, key, h) != 0 {
+            return false;
+        }
+        let kn = string::len(key) + 1;
+        let kcopy = try heap::alloc(kn);
+        mem::copy(kcopy, key as &Void, kn);
+        let e = try heap::alloc(ENTRY_BYTES);
+        @((e + ENTRY_NEXT) as &UInt64) = @(head as &UInt64);
+        @((e + ENTRY_KEY) as &UInt64) = kcopy as UInt64;
+        @((e + ENTRY_HASH) as &UInt64) = h;
+        @(head as &UInt64) = e;
+        (@s).count += 1;
+        return true;
+    }
+
+    // Reports whether `key` is present.
+    func has(s: &Set, key: Char[]): Bool {
+        if (@s).capacity == 0 {
+            return false;
+        }
+        let h = __hash(key);
+        let head = (@s).buckets as UInt64 + (h & ((@s).capacity - 1)) * 8;
+        return __find(head, key, h) != 0;
+    }
+
+    // Removes `key` and reports whether it was present; the entry's
+    // key copy and block are released.
+    func remove(s: &Set, key: Char[]): Bool {
+        if (@s).capacity == 0 {
+            return false;
+        }
+        let h = __hash(key);
+        let head = (@s).buckets as UInt64 + (h & ((@s).capacity - 1)) * 8;
+        let link = head;
+        let e = @(link as &UInt64);
+        while e != 0 {
+            if @((e + ENTRY_HASH) as &UInt64) == h {
+                let ek = (@((e + ENTRY_KEY) as &UInt64)) as Char[];
+                if string::compare(ek, key) == 0 {
+                    @(link as &UInt64) = @((e + ENTRY_NEXT) as &UInt64);
+                    heap::free(ek as &Void);
+                    heap::free(e as &Void);
+                    (@s).count -= 1;
+                    return true;
+                }
+            }
+            link = e + ENTRY_NEXT;
+            e = @(link as &UInt64);
+        }
+        return false;
+    }
+
+    // Calls `f` once for every element, in unspecified order. An
+    // error from `f` stops the iteration and propagates.
+    func each(s: &Set, f: func(key: Char[]): Void!): Void! {
+        if (@s).capacity == 0 {
+            return;
+        }
+        let i: UInt64 = 0;
+        while i < (@s).capacity {
+            let e = @(((@s).buckets as UInt64 + i * 8) as &UInt64);
+            while e != 0 {
+                try f((@((e + ENTRY_KEY) as &UInt64)) as Char[]);
+                e = @((e + ENTRY_NEXT) as &UInt64);
+            }
+            i += 1;
+        }
+    }
+
+    // Removes every element and releases its copied key storage
+    // while keeping the bucket array for reuse.
+    func clear(s: &Set): Void {
+        if (@s).capacity == 0 {
+            return;
+        }
+        let i: UInt64 = 0;
+        while i < (@s).capacity {
+            let e = @(((@s).buckets as UInt64 + i * 8) as &UInt64);
+            while e != 0 {
+                let next = @((e + ENTRY_NEXT) as &UInt64);
+                heap::free((@((e + ENTRY_KEY) as &UInt64)) as &Void);
+                heap::free(e as &Void);
+                e = next;
+            }
+            @(((@s).buckets as UInt64 + i * 8) as &UInt64) = 0;
+            i += 1;
+        }
+        (@s).count = 0;
+    }
+
+    // Releases every entry, every key copy, and the bucket array.
+    func destroy(s: &Set): Void {
+        clear(s);
+        if (@s).buckets != 0 {
+            heap::free((@s).buckets);
+        }
+        (@s).buckets = 0;
+        (@s).capacity = 0;
+    }
+}

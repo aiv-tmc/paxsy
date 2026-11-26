@@ -1,0 +1,152 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: bytes
+ * ByteBuffer, a growable byte array with a heap backing store.
+ *
+ * The buffer doubles its allocation geometrically, so a sequence of
+ * appends costs amortised constant time per byte and wastes at most
+ * half of the capacity. The allocation always carries one byte beyond
+ * the payload capacity, and every mutating function restores the zero
+ * byte at offset len, so the content doubles as a NUL-terminated
+ * string of length len at all times.
+ *
+ * Ownership: the caller of make owns the buffer; destroy (usually
+ * scheduled with defer or errdefer) releases it.
+ */
+
+use heap;
+use mem;
+use string;
+
+module bytes {
+    // A growable byte buffer.
+    static ByteBuffer = Struct {
+        data: &Char,
+        len: UInt64,
+        cap: UInt64,
+    };
+
+    // Returned when a growth allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returned when an index is not less than len.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // Smallest backing allocation, sixteen payload bytes plus the
+    // terminator byte.
+    static MIN_CAP = 16;
+
+    // Returns an empty buffer that owns no allocation yet; the first
+    // operation that needs capacity allocates on demand.
+    func make(): ByteBuffer = ByteBuffer {0, 0, 0};
+
+    // Ensures the buffer can hold `want` payload bytes, doubling the
+    // backing allocation until it suffices. The allocation grows to
+    // newcap + 1 bytes so the terminator at offset len always has a
+    // home; the length and the content are unchanged.
+    func reserve(v: &ByteBuffer, want: UInt64): Void! {
+        if want <= (@v).cap {
+            return;
+        }
+        let newcap = if (@v).cap == 0 { MIN_CAP } else { (@v).cap };
+        while newcap < want {
+            if newcap > 9223372036854775807 {
+                newcap = want;
+                break;
+            }
+            newcap *= 2;
+        }
+        if newcap == 18446744073709551615 {
+            return error ERR_OUT_OF_MEMORY;
+        }
+        let fresh: &Void = 0;
+        if (@v).data == 0 {
+            fresh = try heap::alloc(newcap + 1);
+            @((fresh as UInt64) as &Char) = 0 as Char;
+        } else {
+            fresh = try heap::realloc((@v).data as &Void, newcap + 1);
+        }
+        (@v).data = fresh as &Char;
+        (@v).cap = newcap;
+    }
+
+    // Appends a single byte to the end of the buffer and moves the
+    // terminator behind it.
+    func push(v: &ByteBuffer, b: Char): Void! {
+        try reserve(v, (@v).len + 1);
+        let p = (@v).data as UInt64;
+        @((p + (@v).len) as &Char) = b;
+        (@v).len += 1;
+        @((p + (@v).len) as &Char) = 0 as Char;
+    }
+
+    // Appends `count` bytes copied from `src` and moves the
+    // terminator behind them.
+    func append(v: &ByteBuffer, src: Char[], count: UInt64): Void! {
+        if count == 0 {
+            return;
+        }
+        if count > 18446744073709551615 - (@v).len {
+            return error ERR_OUT_OF_MEMORY;
+        }
+        try reserve(v, (@v).len + count);
+        let p = (@v).data as UInt64;
+        mem::copy((p + (@v).len) as &Void, src as &Void, count);
+        (@v).len += count;
+        @((p + (@v).len) as &Char) = 0 as Char;
+    }
+
+    // Appends the string `s`, terminator excluded, and stores a zero
+    // byte at offset len without counting it, so the content doubles
+    // as a NUL-terminated string of length len.
+    func append_string(v: &ByteBuffer, s: Char[]): Void! {
+        try append(v, s, string::len(s));
+    }
+
+    // Returns the byte at index `i`; the caller guarantees i < len.
+    func byte_at(v: &ByteBuffer, i: UInt64): Char {
+        return @(((@v).data as UInt64 + i) as &Char);
+    }
+
+    // Overwrites the byte at index `i`; reports ERR_OUT_OF_RANGE when
+    // `i` is not less than len.
+    func set_byte(v: &ByteBuffer, i: UInt64, b: Char): Void! {
+        if i >= (@v).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        @(((@v).data as UInt64 + i) as &Char) = b;
+    }
+
+    // Borrows the content as a NUL-terminated string of length len.
+    // The borrow aliases the backing storage and stays valid until
+    // the buffer is mutated or destroyed. An empty buffer borrows a
+    // static empty string.
+    func as_str(v: &ByteBuffer): Char[] {
+        if (@v).data == 0 {
+            return "";
+        }
+        return ((@v).data as UInt64) as Char[];
+    }
+
+    // Sets the length to zero while keeping the backing allocation
+    // for reuse; the terminator is restored at offset 0.
+    func clear(v: &ByteBuffer): Void {
+        (@v).len = 0;
+        if (@v).data != 0 {
+            @(((@v).data as UInt64) as &Char) = 0 as Char;
+        }
+    }
+
+    // Releases the backing allocation and returns the buffer to the
+    // state produced by make.
+    func destroy(v: &ByteBuffer): Void {
+        if (@v).data != 0 {
+            heap::free((@v).data as &Void);
+        }
+        (@v).data = 0;
+        (@v).len = 0;
+        (@v).cap = 0;
+    }
+}

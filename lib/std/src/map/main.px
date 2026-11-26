@@ -1,0 +1,263 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: map
+ * Map, a hash table keyed by strings with values of any type stored
+ * inline.
+ *
+ * The table is an array of bucket heads with separate chaining. An
+ * entry is one allocation: a 24-byte header (next pointer, key
+ * pointer, cached hash) followed by the value bytes. Keys are copied
+ * into their own allocations on insertion, so the caller's key memory
+ * is never aliased. The capacity stays a power of two, which turns
+ * bucket selection into a mask, and the table doubles and rehashes
+ * when the load factor passes 7/10, keeping lookup chains short on
+ * average. Iteration order is unspecified and may change after any
+ * mutation.
+ *
+ * Values are shallow bytewise copies; resources referenced by values
+ * remain the caller's responsibility, and no value destructor runs.
+ *
+ * Ownership: the caller of make owns the map; destroy releases the
+ * map and its key and bucket storage.
+ */
+
+use heap;
+use mem;
+use string;
+
+// Entry header layout: next pointer, key pointer, cached hash.
+static ENTRY_NEXT = 0;
+static ENTRY_KEY = 8;
+static ENTRY_HASH = 16;
+static ENTRY_HDR = 24;
+
+// FNV-1a hash of the key bytes, used for bucket selection and as a
+// fast inequality test inside chains.
+func __hash(key: Char[]): UInt64 {
+    let p = key as UInt64;
+    let h: UInt64 = 14695981039346656037;
+    let i: UInt64 = 0;
+    while true {
+        let c = @((p + i) as &Char) as UInt64;
+        if c == 0 {
+            break;
+        }
+        h = (h ^ c) * 1099511628211;
+        i += 1;
+    }
+    return h;
+}
+
+module map {
+    // A string-keyed hash map with inline values.
+    static Map = Struct {
+        buckets: &Void,
+        count: UInt64,
+        capacity: UInt64,
+        value_size: UInt64,
+        value_align: UInt64,
+    };
+
+    // Returned when a growth allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returned by get when the key is absent.
+    static ERR_KEY_NOT_FOUND = 2;
+
+    // Initial bucket count; the capacity always stays a power of two.
+    static INIT_CAP = 16;
+
+    // Returns an empty map storing values of type T; the bucket array
+    // appears on the first insertion.
+    func make(static T): Map = Map {0, 0, 0, sizeof(T), alignof(T)};
+
+    // Allocates the bucket array on first use.
+    func __ensure(m: &Map): Void! {
+        if (@m).capacity != 0 {
+            return;
+        }
+        let b = try heap::alloc(INIT_CAP * 8);
+        mem::zero(b, INIT_CAP * 8);
+        (@m).buckets = b;
+        (@m).capacity = INIT_CAP;
+    }
+
+    // Returns the address of the bucket head that would hold `hash`.
+    func __head(m: &Map, hash: UInt64): UInt64 {
+        let slot = hash & ((@m).capacity - 1);
+        return (@m).buckets as UInt64 + slot * 8;
+    }
+
+    // Doubles the bucket array and rehashes every entry into it.
+    func __grow(m: &Map): Void! {
+        let newcap = (@m).capacity * 2;
+        let nb = try heap::alloc(newcap * 8);
+        mem::zero(nb, newcap * 8);
+        let i: UInt64 = 0;
+        while i < (@m).capacity {
+            let e = @(((@m).buckets as UInt64 + i * 8) as &UInt64);
+            while e != 0 {
+                let next = @((e + ENTRY_NEXT) as &UInt64);
+                let h = @((e + ENTRY_HASH) as &UInt64);
+                let slot = h & (newcap - 1);
+                let head = nb as UInt64 + slot * 8;
+                // Push the entry onto its new bucket's chain.
+                @((e + ENTRY_NEXT) as &UInt64) = @(head as &UInt64);
+                @(head as &UInt64) = e;
+                e = next;
+            }
+            i += 1;
+        }
+        heap::free((@m).buckets);
+        (@m).buckets = nb;
+        (@m).capacity = newcap;
+    }
+
+    // Finds the entry for `key` in the chain at `head` and returns
+    // its address, or zero when absent. A cached-hash mismatch skips
+    // the string comparison for nearly every non-member.
+    func __find(head: UInt64, key: Char[], hash: UInt64): UInt64 {
+        let e = @(head as &UInt64);
+        while e != 0 {
+            if @((e + ENTRY_HASH) as &UInt64) == hash {
+                let ek = (@((e + ENTRY_KEY) as &UInt64)) as Char[];
+                if string::compare(ek, key) == 0 {
+                    return e;
+                }
+            }
+            e = @((e + ENTRY_NEXT) as &UInt64);
+        }
+        return 0;
+    }
+
+    // Inserts `key` and a bytewise copy of `value`, replacing the
+    // stored value when the key is already present. The key is copied
+    // into the map.
+    func put(static T, m: &Map, key: Char[], value: T): Void! {
+        try __ensure(m);
+        // Keep the load factor at or below 7/10.
+        if ((@m).count + 1) * 10 >= (@m).capacity * 7 {
+            try __grow(m);
+        }
+        let h = __hash(key);
+        let head = __head(m, h);
+        let e = __find(head, key, h);
+        if e != 0 {
+            @((e + ENTRY_HDR) as &T) = value;
+            return;
+        }
+        let kn = string::len(key) + 1;
+        let kcopy = try heap::alloc(kn);
+        mem::copy(kcopy, key as &Void, kn);
+        e = try heap::alloc(ENTRY_HDR + (@m).value_size);
+        @((e + ENTRY_NEXT) as &UInt64) = @(head as &UInt64);
+        @((e + ENTRY_KEY) as &UInt64) = kcopy as UInt64;
+        @((e + ENTRY_HASH) as &UInt64) = h;
+        @((e + ENTRY_HDR) as &T) = value;
+        @(head as &UInt64) = e;
+        (@m).count += 1;
+    }
+
+    // Returns the value stored for `key`, or ERR_KEY_NOT_FOUND when
+    // the key is absent.
+    func get(static T, m: &Map, key: Char[]): T! {
+        if (@m).capacity == 0 {
+            return error ERR_KEY_NOT_FOUND;
+        }
+        let h = __hash(key);
+        let e = __find(__head(m, h), key, h);
+        if e == 0 {
+            return error ERR_KEY_NOT_FOUND;
+        }
+        return @((e + ENTRY_HDR) as &T);
+    }
+
+    // Reports whether `key` is present.
+    func has(m: &Map, key: Char[]): Bool {
+        if (@m).capacity == 0 {
+            return false;
+        }
+        let h = __hash(key);
+        return __find(__head(m, h), key, h) != 0;
+    }
+
+    // Removes the entry for `key` and reports whether it was present;
+    // the entry's key copy and block are released.
+    func remove(m: &Map, key: Char[]): Bool {
+        if (@m).capacity == 0 {
+            return false;
+        }
+        let h = __hash(key);
+        let head = __head(m, h);
+        // Walk the chain keeping the link that points at the current
+        // entry, so removal is one store.
+        let link = head;
+        let e = @(link as &UInt64);
+        while e != 0 {
+            if @((e + ENTRY_HASH) as &UInt64) == h {
+                let ek = (@((e + ENTRY_KEY) as &UInt64)) as Char[];
+                if string::compare(ek, key) == 0 {
+                    @(link as &UInt64) = @((e + ENTRY_NEXT) as &UInt64);
+                    heap::free(ek as &Void);
+                    heap::free(e as &Void);
+                    (@m).count -= 1;
+                    return true;
+                }
+            }
+            link = e + ENTRY_NEXT;
+            e = @(link as &UInt64);
+        }
+        return false;
+    }
+
+    // Calls `f` once for every entry, in unspecified order. An error
+    // from `f` stops the iteration and propagates.
+    func each(static T, m: &Map, f: func(key: Char[], value: T): Void!): Void! {
+        if (@m).capacity == 0 {
+            return;
+        }
+        let i: UInt64 = 0;
+        while i < (@m).capacity {
+            let e = @(((@m).buckets as UInt64 + i * 8) as &UInt64);
+            while e != 0 {
+                let key = (@((e + ENTRY_KEY) as &UInt64)) as Char[];
+                try f(key, @((e + ENTRY_HDR) as &T));
+                e = @((e + ENTRY_NEXT) as &UInt64);
+            }
+            i += 1;
+        }
+    }
+
+    // Removes every entry and releases its copied key storage while
+    // keeping the bucket array for reuse.
+    func clear(m: &Map): Void {
+        if (@m).capacity == 0 {
+            return;
+        }
+        let i: UInt64 = 0;
+        while i < (@m).capacity {
+            let e = @(((@m).buckets as UInt64 + i * 8) as &UInt64);
+            while e != 0 {
+                let next = @((e + ENTRY_NEXT) as &UInt64);
+                heap::free((@((e + ENTRY_KEY) as &UInt64)) as &Void);
+                heap::free(e as &Void);
+                e = next;
+            }
+            @(((@m).buckets as UInt64 + i * 8) as &UInt64) = 0;
+            i += 1;
+        }
+        (@m).count = 0;
+    }
+
+    // Releases every entry, every key copy, and the bucket array.
+    func destroy(m: &Map): Void {
+        clear(m);
+        if (@m).buckets != 0 {
+            heap::free((@m).buckets);
+        }
+        (@m).buckets = 0;
+        (@m).capacity = 0;
+    }
+}

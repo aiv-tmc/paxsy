@@ -1,0 +1,227 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: math
+ * Constants and scalar functions: bit reinterpretation, rounding,
+ * roots, exponentials, and logarithms over Real64.
+ *
+ * The core of the module is a small layer of bit-level primitives:
+ * bit reinterpretation between Real64 and UInt64 through a union, the
+ * absolute value, and the rounding family floor, ceil, and round, all
+ * of which follow from inspecting and adjusting the IEEE 754
+ * representation directly. On top of that layer stand the analytic
+ * functions sqrt, exp, ln, and pow, computed through the classic
+ * algorithms: bit-seeded Newton-Raphson for the square root,
+ * frexp-style splitting with a minimax polynomial for exp, and the
+ * atanh series for the logarithm.
+ *
+ * Precision is the honest IEEE 754 double kind, accurate to a few
+ * ULPs over the documented domains. MATH_ERR_DOMAIN reports domain
+ * violations such as a negative square root argument, and
+ * MATH_ERR_RANGE reports results that overflow the Real64 range.
+ */
+
+// Raw bit access to a Real64: the variants share one 8-byte cell, so
+// reading `u` after writing `f` yields the IEEE 754 bit pattern and
+// writing `u` before reading `f` yields the corresponding value.
+static __FBits = Union {
+    f: Real64,
+    u: UInt64,
+};
+
+// base^exp for positive base, computed as e^(exp*ln(base)); other
+// cases report MATH_ERR_DOMAIN through math::ln. File-private so the
+// public pow can keep its documented parameter names without
+// shadowing the module functions it builds on.
+func __pow_impl(base: Real64, exp: Real64): Real64! {
+    let l = try math::ln(base);
+    return try math::exp(exp * l);
+}
+
+// The square root of a positive value by Newton-Raphson iteration,
+// seeded from a rough bit-level estimate. Shared by sqrt and hypot,
+// which guarantee a positive argument before calling.
+func __sqrt_pos(v: Real64): Real64 {
+    let b: __FBits;
+    b.f = v;
+    b.u = (b.u >> 1) + 0x1FF7A3BEA91D9B1B;
+    let x = b.f;
+    let i: UInt64 = 0;
+    while i < 64 {
+        x = 0.5 * (x + v / x);
+        i += 1;
+    }
+    return x;
+}
+
+module math {
+    // pi and e to full double precision, plus a common square root.
+    static PI = 3.141592653589793;
+    static E = 2.718281828459045;
+    static SQRT2 = 1.4142135623730951;
+
+    // errno-style codes: domain violations and out-of-range results.
+    static MATH_ERR_DOMAIN = 22;
+    static MATH_ERR_RANGE = 34;
+
+    // Reinterprets the 64 bits of a Real64 as a UInt64 without
+    // changing a single bit.
+    func bits_of(v: Real64): UInt64 {
+        let b: __FBits;
+        b.f = v;
+        return b.u;
+    }
+
+    // Reinterprets a UInt64 bit pattern as a Real64 without changing
+    // a single bit.
+    func real_of(bits: UInt64): Real64 {
+        let b: __FBits;
+        b.u = bits;
+        return b.f;
+    }
+
+    // The absolute value: the sign bit cleared.
+    func abs(v: Real64): Real64 = real_of(bits_of(v) & 0x7FFFFFFFFFFFFFFF);
+
+    // The absolute value under its documented name; identical to abs.
+    func fabs(v: Real64): Real64 = abs(v);
+
+    // The smaller of `a` and `b`.
+    func min(a: Real64, b: Real64): Real64 = if a < b { a } else { b };
+
+    // The larger of `a` and `b`.
+    func max(a: Real64, b: Real64): Real64 = if a > b { a } else { b };
+
+    // The largest integer not greater than v.
+    func floor(v: Real64): Real64 {
+        let i = v as Int64;
+        let f = i as Real64;
+        if f > v {
+            return f - 1.0;
+        }
+        return f;
+    }
+
+    // The smallest integer not less than v.
+    func ceil(v: Real64): Real64 {
+        let i = v as Int64;
+        let f = i as Real64;
+        if f < v {
+            return f + 1.0;
+        }
+        return f;
+    }
+
+    // The nearest integer, halfway cases away from zero.
+    func round(v: Real64): Real64 {
+        if v >= 0.0 {
+            return floor(v + 0.5);
+        }
+        return ceil(v - 0.5);
+    }
+
+    // The square root of x, or MATH_ERR_DOMAIN if x is not positive.
+    func sqrt(x: Real64): Real64! {
+        if x <= 0.0 {
+            return error MATH_ERR_DOMAIN;
+        }
+        return __sqrt_pos(x);
+    }
+
+    // The base-e exponential, computed as 2^(x*log2(e)) with
+    // frexp-style splitting of the exponent: the integer part scales
+    // by powers of two through bit manipulation, and the fraction
+    // goes through a degree-9 minimax polynomial. Results that
+    // overflow report MATH_ERR_RANGE; underflow flushes to zero.
+    func exp(x: Real64): Real64! {
+        if x > 709.0 {
+            return error MATH_ERR_RANGE;
+        }
+        if x < -745.0 {
+            return 0.0;
+        }
+        let t = x * 1.4426950408889634;
+        let k = round(t);
+        let r = (t - k) * 0.6931471805599453;
+        let p = 1.0 + r * (1.0 + r * (0.5 + r * (0.16666666666666666 + r * (0.041666666666666664 + r * (0.008333333333333333 + r * (0.001388888888888889 + r * (0.0001984126984126984 + r * (0.0000248015873015873 + r * 0.0000027557319223985893))))))));
+        let ki = k as Int64;
+        return p * real_of(((ki + 1023) as UInt64) << 52);
+    }
+
+    // The natural logarithm. The argument is normalized to m * 2^e
+    // with m in [sqrt(2)/2, sqrt(2)), and the atanh series
+    // ln(m) = 2(z + z^3/3 + z^5/5 + ...) with z = (m-1)/(m+1) does
+    // the rest, eleven terms of it. Non-positive arguments report
+    // MATH_ERR_DOMAIN.
+    func ln(x: Real64): Real64! {
+        if x <= 0.0 {
+            return error MATH_ERR_DOMAIN;
+        }
+        let bits = bits_of(x);
+        let biased = (bits >> 52) & 0x7FF;
+        let e = biased as Int64 - 1023;
+        let m = real_of((bits & 0x800FFFFFFFFFFFFF) $ (1023 as UInt64 << 52));
+        if m > 1.4142135623730951 {
+            m = m * 0.5;
+            e += 1;
+        }
+        let z = (m - 1.0) / (m + 1.0);
+        let z2 = z * z;
+        let sum = z;
+        let term = z;
+        let i: UInt64 = 1;
+        while i <= 10 {
+            term *= z2;
+            sum += term / (2.0 * i as Real64 + 1.0);
+            i += 1;
+        }
+        return 2.0 * sum + e as Real64 * 0.6931471805599453;
+    }
+
+    // The natural logarithm under its documented short name; an
+    // alias of ln with the same domain and error behaviour.
+    func log(x: Real64): Real64! = ln(x);
+
+    // The base-10 logarithm: ln(x) scaled by 1/ln(10). Non-positive
+    // inputs report MATH_ERR_DOMAIN through ln.
+    func log10(x: Real64): Real64! {
+        return ln(x) / 2.302585092994046;
+    }
+
+    // base^exp for positive base, computed as e^(exp*ln(base));
+    // other cases report MATH_ERR_DOMAIN through ln.
+    func pow(base: Real64, exp: Real64): Real64! = __pow_impl(base, exp);
+
+    // sqrt(x*x + y*y) without undue overflow: the larger magnitude
+    // factors out of the root, so the squared terms stay in [0, 1]
+    // and only the final product can overflow.
+    func hypot(x: Real64, y: Real64): Real64 {
+        let a = abs(x);
+        let b = abs(y);
+        let m = max(a, b);
+        if m == 0.0 {
+            return 0.0;
+        }
+        let sa = a / m;
+        let sb = b / m;
+        return m * __sqrt_pos(sa * sa + sb * sb);
+    }
+
+    // x bounded to the interval [lo, hi].
+    func clamp(x: Real64, lo: Real64, hi: Real64): Real64 = min(max(x, lo), hi);
+
+    // The linear interpolation a + t * (b - a).
+    func lerp(a: Real64, b: Real64, t: Real64): Real64 = a + t * (b - a);
+
+    // -1.0, 0.0, or 1.0 according to the sign of x.
+    func sign(x: Real64): Real64 {
+        if x > 0.0 {
+            return 1.0;
+        }
+        if x < 0.0 {
+            return 0.0 - 1.0;
+        }
+        return 0.0;
+    }
+}

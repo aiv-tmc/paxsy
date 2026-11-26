@@ -1,0 +1,189 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: poll
+ * Readiness polling over a set of file descriptors.
+ *
+ * poll waits until one of a set of descriptors — sockets, pipes,
+ * input devices — becomes ready for reading or writing, without
+ * dedicating a thread to each. It is the building block beneath
+ * timeout-capable network code and the way a single-threaded
+ * program multiplexes several event sources.
+ *
+ * The set is a heap array of kernel pollfd records: a 4-byte
+ * descriptor, a 2-byte requested-events mask, and a 2-byte
+ * returned-events mask. wait() goes through ppoll(2), whose
+ * timespec argument keeps the timeout in nanoseconds rather than
+ * the milliseconds of plain poll(2).
+ *
+ * Arguments travel through file-private staging cells in .bss and
+ * `syscall` is issued from a volatile assembly sequence.
+ */
+
+use heap;
+
+// Staging cells shared with the assembly sequence below.
+let __pp_num: UInt64;
+let __pp_a1: UInt64;
+let __pp_a2: UInt64;
+let __pp_a3: UInt64;
+let __pp_a4: UInt64;
+let __pp_a5: UInt64;
+let __pp_ret: UInt64;
+
+// Executes the five-argument ppoll(2) system call.
+func __pp5(): UInt64 {
+    volatile asm "mov rax, [__pp_num]";
+    volatile asm "mov rdi, [__pp_a1]";
+    volatile asm "mov rsi, [__pp_a2]";
+    volatile asm "mov rdx, [__pp_a3]";
+    volatile asm "mov r10, [__pp_a4]";
+    volatile asm "mov r8, [__pp_a5]";
+    volatile asm "syscall";
+    volatile asm "mov [__pp_ret], rax";
+    return __pp_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything else
+// passes through.
+func __pp_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module poll {
+    // A descriptor set: a heap array of 8-byte pollfd records with
+    // the count of registered descriptors and the array capacity.
+    static Poll = Struct {
+        fds: &Void,
+        count: UInt64,
+        cap: UInt64,
+    };
+
+    // One readiness report: the descriptor and what happened to it.
+    static PollEvent = Struct {
+        fd: UInt64,
+        readable: Bool,
+        writable: Bool,
+        hangup: Bool,
+    };
+
+    // errno-style codes: growth failure and absent descriptors.
+    static ERR_OUT_OF_MEMORY = 12;
+    static ERR_NOT_FOUND = 2;
+
+    // Kernel event bits of pollfd records.
+    static __POLLIN = 1;
+    static __POLLOUT = 4;
+    static __POLLERR = 8;
+    static __POLLHUP = 16;
+    static __POLLNVAL = 32;
+
+    // Creates an empty descriptor set.
+    func make(): Poll {
+        return Poll {0, 0, 0};
+    }
+
+    // Releases the descriptor array.
+    func destroy(p: &Poll): Void {
+        if (@p).fds as UInt64 != 0 {
+            heap::free((@p).fds);
+        }
+        @p = Poll {0, 0, 0};
+    }
+
+    // Registers interest in `fd`, replacing the previous
+    // registration when the descriptor is already present. The
+    // event mask combines POLLIN for `want_read` and POLLOUT for
+    // `want_write`.
+    func add(p: &Poll, fd: UInt64, want_read: Bool, want_write: Bool): Void! {
+        let pp = @p;
+        let events: UInt64 = (if want_read { __POLLIN } else { 0 }) $ (if want_write { __POLLOUT } else { 0 });
+        let i: UInt64 = 0;
+        while i < pp.count {
+            let rec = (pp.fds as UInt64) + i * 8;
+            if @(rec as &Int32) as UInt32 as UInt64 == fd {
+                @((rec + 4) as &UInt16) = events as UInt16;
+                @((rec + 6) as &UInt16) = 0 as UInt16;
+                return;
+            }
+            i += 1;
+        }
+        if pp.count == pp.cap {
+            let ncap = if pp.cap == 0 { 8 } else { pp.cap * 2 };
+            pp.fds = try heap::realloc(pp.fds, ncap * 8);
+            pp.cap = ncap;
+        }
+        let rec = (pp.fds as UInt64) + pp.count * 8;
+        @(rec as &Int32) = fd as Int32;
+        @((rec + 4) as &UInt16) = events as UInt16;
+        @((rec + 6) as &UInt16) = 0 as UInt16;
+        pp.count += 1;
+        @p = pp;
+    }
+
+    // Drops `fd` from the set, swapping the last record into its
+    // slot; an absent descriptor is ERR_NOT_FOUND.
+    func remove(p: &Poll, fd: UInt64): Void! {
+        let pp = @p;
+        let i: UInt64 = 0;
+        while i < pp.count {
+            let rec = (pp.fds as UInt64) + i * 8;
+            if @(rec as &Int32) as UInt32 as UInt64 == fd {
+                let last = (pp.fds as UInt64) + (pp.count - 1) * 8;
+                @(rec as &UInt64) = @(last as &UInt64);
+                pp.count -= 1;
+                @p = pp;
+                return;
+            }
+            i += 1;
+        }
+        return error ERR_NOT_FOUND;
+    }
+
+    // Waits up to `timeout_ns` for at least one registered
+    // descriptor to become ready, fills `out` with up to out.len
+    // events, and returns the number stored. A return of zero
+    // reports a timeout.
+    func wait(p: &Poll, out: PollEvent[..], timeout_ns: UInt64): UInt64! {
+        let pp = @p;
+        // ppoll takes the timeout as a timespec pair.
+        let ts: Int64[2];
+        ts[0] = (timeout_ns / 1000000000) as Int64;
+        ts[1] = (timeout_ns % 1000000000) as Int64;
+        __pp_num = 271;
+        __pp_a1 = pp.fds as UInt64;
+        __pp_a2 = pp.count;
+        __pp_a3 = &ts[0] as UInt64;
+        __pp_a4 = 0;
+        __pp_a5 = 0;
+        let ready = try __pp_check(__pp5());
+        if ready == 0 {
+            return 0;
+        }
+        // Harvest the records the kernel marked, up to the output
+        // capacity.
+        let stored: UInt64 = 0;
+        let i: UInt64 = 0;
+        while i < pp.count and stored < out.len {
+            let rec = (pp.fds as UInt64) + i * 8;
+            let rev = @((rec + 6) as &UInt16) as UInt64;
+            if rev != 0 {
+                out[stored] = PollEvent {
+                    @(rec as &Int32) as UInt32 as UInt64,
+                    (rev & __POLLIN) != 0,
+                    (rev & __POLLOUT) != 0,
+                    (rev & (__POLLERR $ __POLLHUP $ __POLLNVAL)) != 0,
+                };
+                stored += 1;
+            }
+            i += 1;
+        }
+        return stored;
+    }
+}

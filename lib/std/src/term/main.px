@@ -1,0 +1,132 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: term
+ * Control of the terminal line discipline through the
+ * TCGETS/TCSETS ioctls.
+ *
+ * By default a terminal line-buffers input and echoes every
+ * keystroke, which is right for shells talking to humans and wrong
+ * for programs that want single keystrokes (games, editors, REPLs
+ * with history). The kernel exposes the terminal configuration
+ * through ioctl(2): TCGETS copies the current termios structure
+ * out and TCSETS installs a new one.
+ *
+ * The central operation is raw mode: enter_raw saves the current
+ * Termios structure, clears the ICANON and ECHO flags, and sets
+ * VMIN to 1 and VTIME to 0, so input arrives character by
+ * character and is not echoed; restore puts the saved structure
+ * back. Input processing flags are left alone, so Ctrl-C keeps
+ * its usual signal behaviour. Callers are expected to schedule the
+ * restore with defer immediately after entering raw mode, so every
+ * exit path — including error paths — restores the terminal.
+ *
+ * The Termios struct pins the kernel layout: four 32-bit flag
+ * words (input, output, control, local), one line-discipline
+ * byte, a 19-byte control-character array indexed by the exported
+ * VMIN and VTIME constants, and the input/output speed words. The
+ * kernel's TCGETS fills only up to the control-character array;
+ * uninitialised locals are zeroed, so the speed words read back as
+ * zero.
+ *
+ * Like the other syscall modules, arguments travel through
+ * file-private staging cells in .bss and `syscall` is issued from
+ * a volatile assembly sequence.
+ */
+
+// Staging cells shared with the assembly sequence below.
+let __tm_num: UInt64;
+let __tm_a1: UInt64;
+let __tm_a2: UInt64;
+let __tm_a3: UInt64;
+let __tm_ret: UInt64;
+
+// Executes the three-argument ioctl(2) system call.
+func __tm3(): UInt64 {
+    volatile asm "mov rax, [__tm_num]";
+    volatile asm "mov rdi, [__tm_a1]";
+    volatile asm "mov rsi, [__tm_a2]";
+    volatile asm "mov rdx, [__tm_a3]";
+    volatile asm "syscall";
+    volatile asm "mov [__tm_ret], rax";
+    return __tm_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything
+// else passes through.
+func __tm_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module term {
+    // ioctl(2) request codes for terminal configuration.
+    static TCGETS = 0x5401;
+    static TCSETS = 0x5402;
+
+    // Local-mode flags switched off by raw mode.
+    static ICANON = 0x0002;
+    static ECHO = 0x0008;
+
+    // Indexes into the control-character array.
+    static VTIME = 5;
+    static VMIN = 6;
+
+    // The terminal configuration, mirroring the kernel's termios
+    // structure: flag words, line discipline, control characters
+    // indexed by VMIN and VTIME, and the speed words.
+    static Termios = Struct {
+        iflag: UInt32,
+        oflag: UInt32,
+        cflag: UInt32,
+        lflag: UInt32,
+        line: Char,
+        cc: Char[19],
+        ispeed: UInt32,
+        ospeed: UInt32,
+    };
+
+    // Reads the terminal configuration of the descriptor, which is
+    // usually 0 for standard input. The kernel's error is
+    // returned; 25 (ENOTTY) when the descriptor is not a terminal.
+    func get(fd: UInt32): Termios! {
+        let t: Termios;
+        __tm_num = 16;
+        __tm_a1 = fd as UInt64;
+        __tm_a2 = TCGETS;
+        __tm_a3 = &t as UInt64;
+        try __tm_check(__tm3());
+        return t;
+    }
+
+    // Applies a terminal configuration to the descriptor.
+    func set(fd: UInt32, t: Termios): Void! {
+        __tm_num = 16;
+        __tm_a1 = fd as UInt64;
+        __tm_a2 = TCSETS;
+        __tm_a3 = &t as UInt64;
+        try __tm_check(__tm3());
+    }
+
+    // Saves the current configuration, applies raw mode, and
+    // returns the saved configuration for the matching restore.
+    func enter_raw(fd: UInt32): Termios! {
+        let saved = try get(fd);
+        let raw = saved;
+        raw.lflag = raw.lflag & ~(ICANON $ ECHO);
+        raw.cc[VMIN] = 1 as Char;
+        raw.cc[VTIME] = 0 as Char;
+        try set(fd, raw);
+        return saved;
+    }
+
+    // Restores a configuration previously returned by enter_raw.
+    func restore(fd: UInt32, saved: Termios): Void! {
+        try set(fd, saved);
+    }
+}

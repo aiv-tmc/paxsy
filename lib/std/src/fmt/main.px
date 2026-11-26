@@ -1,0 +1,236 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: fmt
+ * Number formatting and parsing: decimal and hexadecimal integers,
+ * shortest round-trip real rendering, fixed-precision real rendering,
+ * and tolerant parsers for all of the above.
+ *
+ * Buffers are raw character pointers whose capacity is fixed by
+ * contract: 20 bytes for u64_dec, 21 for i64_dec, 16 for u64_hex and
+ * 32 for both real formatters. Nothing is NUL-terminated; every
+ * formatter returns the number of bytes written. Parsers scan from the
+ * first byte of `src`, never skip whitespace, and stop at the first
+ * byte that cannot belong to the number; such trailing bytes are not
+ * an error. real_to_str emits the shortest decimal string that
+ * parse_real reads back as the exact same bit pattern, so the two
+ * functions are mutual inverses for every Real64. The real-number
+ * machinery lives in the package-internal modules fmt_real_parse and
+ * fmt_real_fmt; the public names below delegate to them.
+ */
+
+use fmt_real_parse;
+use fmt_real_fmt;
+
+// Writes the decimal digits of `v` at address `out`, most significant
+// first, and returns the number of bytes written (at most 20).
+func __write_dec(v: UInt64, out: UInt64): UInt64 {
+    let tmp: Char[20];
+    let n: UInt64 = 0;
+    let t = v;
+    while true {
+        tmp[n] = ((t % 10) + 48) as Char;
+        n += 1;
+        t = t / 10;
+        if t == 0 {
+            break;
+        }
+    }
+    let i: UInt64 = 0;
+    while i < n {
+        @((out + i) as &Char) = tmp[n - 1 - i];
+        i += 1;
+    }
+    return n;
+}
+
+module fmt {
+    // errno-style code returned when a number is malformed.
+    static ERR_INVALID_NUMBER = 22;
+
+    // errno-style code returned when a parsed value overflows its type.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // errno-style code returned when a formatted result cannot fit the
+    // 32-byte buffer contract of the real formatters.
+    static ERR_BUFFER_TOO_SMALL = 36;
+
+    // Largest UInt64, used in the overflow checks of the parsers.
+    static __U64_MAX = 18446744073709551615;
+
+    // Writes the decimal digits of `value` into `buf` and returns the
+    // byte count. The buffer must have room for at least 20 bytes.
+    func u64_dec(value: UInt64, buf: Char[]): UInt64 {
+        return __write_dec(value, buf as UInt64);
+    }
+
+    // Writes `value` in decimal into `buf`, with a leading '-' for
+    // negative values, and returns the byte count. The buffer must
+    // have room for at least 21 bytes.
+    func i64_dec(value: Int64, buf: Char[]): UInt64 {
+        let out = buf as UInt64;
+        let n: UInt64 = 0;
+        let mag: UInt64 = 0;
+        if value < 0 {
+            @((out + n) as &Char) = 45 as Char;
+            n += 1;
+            // Wrapping negation keeps INT64_MIN representable.
+            mag = 0 - (value as UInt64);
+        } else {
+            mag = value as UInt64;
+        }
+        return n + __write_dec(mag, out + n);
+    }
+
+    // Writes `value` in lowercase hexadecimal into `buf`, without a
+    // prefix, and returns the byte count. The buffer must have room
+    // for at least 16 bytes.
+    func u64_hex(value: UInt64, buf: Char[]): UInt64 {
+        let out = buf as UInt64;
+        let tmp: Char[16];
+        let n: UInt64 = 0;
+        let t = value;
+        while true {
+            let d = t & 15;
+            if d < 10 {
+                tmp[n] = (d + 48) as Char;
+            } else {
+                tmp[n] = (d + 87) as Char;
+            }
+            n += 1;
+            t = t >> 4;
+            if t == 0 {
+                break;
+            }
+        }
+        let i: UInt64 = 0;
+        while i < n {
+            @((out + i) as &Char) = tmp[n - 1 - i];
+            i += 1;
+        }
+        return n;
+    }
+
+    // Parses an unsigned decimal integer from the start of `src`.
+    // Scanning stops at the first non-digit byte, which is not an
+    // error; an empty digit run is ERR_INVALID_NUMBER and a value past
+    // U64_MAX is ERR_OUT_OF_RANGE.
+    func parse_u64_dec(src: Char[]): UInt64! {
+        let p = src as UInt64;
+        let i: UInt64 = 0;
+        let v: UInt64 = 0;
+        let any = false;
+        while true {
+            let c = @((p + i) as &Char) as UInt64;
+            if c < 48 or c > 57 {
+                break;
+            }
+            let digit = c - 48;
+            if v > (__U64_MAX - digit) / 10 {
+                return error ERR_OUT_OF_RANGE;
+            }
+            v = v * 10 + digit;
+            any = true;
+            i += 1;
+        }
+        if not any {
+            return error ERR_INVALID_NUMBER;
+        }
+        return v;
+    }
+
+    // Parses a signed decimal integer from the start of `src`. A
+    // single leading '-' selects the negative range, whose magnitude
+    // bound is one greater than the positive one.
+    func parse_i64_dec(src: Char[]): Int64! {
+        let p = src as UInt64;
+        let i: UInt64 = 0;
+        let negative = false;
+        if @(p as &Char) as UInt64 == 45 {
+            negative = true;
+            i = 1;
+        }
+        let limit: UInt64 = if negative {
+            9223372036854775808
+        } else {
+            9223372036854775807
+        };
+        let v: UInt64 = 0;
+        let any = false;
+        while true {
+            let c = @((p + i) as &Char) as UInt64;
+            if c < 48 or c > 57 {
+                break;
+            }
+            let digit = c - 48;
+            if v > (limit - digit) / 10 {
+                return error ERR_OUT_OF_RANGE;
+            }
+            v = v * 10 + digit;
+            any = true;
+            i += 1;
+        }
+        if not any {
+            return error ERR_INVALID_NUMBER;
+        }
+        // Wrapping negation maps the magnitude onto the negative
+        // range, including INT64_MIN.
+        return if negative { (0 - v) as Int64 } else { v as Int64 };
+    }
+
+    // Parses an unsigned hexadecimal integer from the start of `src`,
+    // accepting both letter cases. No "0x" prefix is consumed.
+    func parse_u64_hex(src: Char[]): UInt64! {
+        let p = src as UInt64;
+        let i: UInt64 = 0;
+        let v: UInt64 = 0;
+        let any = false;
+        while true {
+            let c = @((p + i) as &Char) as UInt64;
+            let digit: UInt64 = 0;
+            if c >= 48 and c <= 57 {
+                digit = c - 48;
+            } else {
+                if c >= 97 and c <= 102 {
+                    digit = c - 87;
+                } else {
+                    if c >= 65 and c <= 70 {
+                        digit = c - 55;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if v > (__U64_MAX - digit) / 16 {
+                return error ERR_OUT_OF_RANGE;
+            }
+            v = v * 16 + digit;
+            any = true;
+            i += 1;
+        }
+        if not any {
+            return error ERR_INVALID_NUMBER;
+        }
+        return v;
+    }
+
+    // Parses a real number from the start of `src`: an optional sign,
+    // decimal digits, an optional fraction, and an optional decimal
+    // exponent introduced by 'e' or 'E'. The literal names "inf" and
+    // "nan" are recognized because real_to_str produces them.
+    // Magnitudes beyond 1e308 are ERR_OUT_OF_RANGE; an empty digit
+    // run is ERR_INVALID_NUMBER.
+    func parse_real(src: Char[]): Real64! = fmt_real_parse::parse(src);
+
+    // Writes the shortest string that parse_real reads back as exactly
+    // `value` and returns the byte count. The buffer must have room
+    // for at least 32 bytes; infinities and NaN are rendered by name.
+    func real_to_str(value: Real64, buf: Char[]): UInt64 = fmt_real_fmt::shortest(value, buf);
+
+    // Writes `value` with exactly `digits` digits after the decimal
+    // point, rounding half to even, and returns the byte count. The
+    // result must fit the 32-byte buffer contract; requests whose
+    // fixed form cannot fit are ERR_BUFFER_TOO_SMALL.
+    func real_to_str_fixed(value: Real64, digits: UInt64, buf: Char[]): UInt64! = fmt_real_fmt::fixed(value, digits, buf);
+}
