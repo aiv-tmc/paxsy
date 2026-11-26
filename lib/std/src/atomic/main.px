@@ -1,0 +1,245 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: atomic
+ * Atomic loads, stores, read-modify-write operations, and fences
+ * with explicit memory ordering.
+ *
+ * The module exists for code beneath the channel-based concurrency
+ * model of the language: implementing std::sync, sleeping on a
+ * futex, and building lock-free structures that interoperate with
+ * foreign code. Programs that use routine, async, and chan do not
+ * need it — captures are by value and communication is through
+ * channels, so shared mutable state does not arise in ordinary
+ * concurrent code.
+ *
+ * The element type T is a compile-time parameter over the integer
+ * types, Bool, and pointers. Every supported type is at most eight
+ * bytes, so each operation picks the machine instruction for
+ * sizeof(T) — one, two, four, or eight bytes — and moves values in
+ * and out of the assembly through file-private staging cells.
+ *
+ * Hardware notes for x86-64: plain aligned loads and stores are
+ * already atomic and already carry acquire and release semantics,
+ * so Relaxed, Acquire, and Release map to plain movs; a
+ * sequentially consistent store uses xchg, which is implicitly
+ * locked, and a sequentially consistent load is a plain load
+ * followed by mfence. Read-modify-write operations use
+ * lock-prefixed xadd and cmpxchg, whose full fence effect makes the
+ * requested ordering immaterial.
+ */
+
+// Address of the location under operation.
+let __at_addr: UInt64;
+
+// Operand value, zero-extended to the width of the location.
+let __at_val: UInt64;
+
+// Observed value, zero-extended from the width of the location.
+let __at_ret: UInt64;
+
+// Boolean outcome of the compare-and-swap sequence.
+let __at_flag: UInt64;
+
+// Loads the value at the staged address with the staged width:
+// `w` is 1, 2, 4, or 8 bytes.
+func __at_load(w: UInt64): Void {
+    volatile asm "mov rcx, [__at_addr]";
+    if w == 1 {
+        volatile asm "movzx rax, byte [rcx]";
+    } else {
+        if w == 2 {
+            volatile asm "movzx rax, word [rcx]";
+        } else {
+            if w == 4 {
+                volatile asm "mov eax, dword [rcx]";
+            } else {
+                volatile asm "mov rax, [rcx]";
+            }
+        }
+    }
+    volatile asm "mov [__at_ret], rax";
+}
+
+// Stores the staged value at the staged address with the staged
+// width. Sequentially consistent stores go through xchg, which is
+// implicitly locked and therefore a full fence.
+func __at_store(w: UInt64, seq: Bool): Void {
+    volatile asm "mov rcx, [__at_addr]";
+    volatile asm "mov rdx, [__at_val]";
+    if seq {
+        if w == 1 {
+            volatile asm "xchg byte [rcx], dl";
+        } else {
+            if w == 2 {
+                volatile asm "xchg word [rcx], dx";
+            } else {
+                if w == 4 {
+                    volatile asm "xchg dword [rcx], edx";
+                } else {
+                    volatile asm "xchg [rcx], rdx";
+                }
+            }
+        }
+        return;
+    }
+    if w == 1 {
+        volatile asm "mov byte [rcx], dl";
+    } else {
+        if w == 2 {
+            volatile asm "mov word [rcx], dx";
+        } else {
+            if w == 4 {
+                volatile asm "mov dword [rcx], edx";
+            } else {
+                volatile asm "mov [rcx], rdx";
+            }
+        }
+    }
+}
+
+// Adds the staged value to the location with the staged width and
+// returns the previous contents in __at_ret.
+func __at_xadd(w: UInt64): Void {
+    volatile asm "mov rcx, [__at_addr]";
+    volatile asm "mov rdx, [__at_val]";
+    if w == 1 {
+        volatile asm "lock xadd byte [rcx], dl";
+    } else {
+        if w == 2 {
+            volatile asm "lock xadd word [rcx], dx";
+        } else {
+            if w == 4 {
+                volatile asm "lock xadd dword [rcx], edx";
+            } else {
+                volatile asm "lock xadd [rcx], rdx";
+            }
+        }
+    }
+    volatile asm "mov [__at_ret], rdx";
+}
+
+// Compares the location with the staged expected value in rax;
+// on equality it receives the staged desired value and the zero
+// flag is set, otherwise rax receives the observed value. The
+// outcome lands in __at_flag and the observed value in __at_ret.
+func __at_cas(w: UInt64): Void {
+    volatile asm "mov rcx, [__at_addr]";
+    volatile asm "mov rdx, [__at_val]";
+    volatile asm "mov rax, [__at_ret]";
+    if w == 1 {
+        volatile asm "lock cmpxchg byte [rcx], dl";
+    } else {
+        if w == 2 {
+            volatile asm "lock cmpxchg word [rcx], dx";
+        } else {
+            if w == 4 {
+                volatile asm "lock cmpxchg dword [rcx], edx";
+            } else {
+                volatile asm "lock cmpxchg [rcx], rdx";
+            }
+        }
+    }
+    volatile asm "setz byte [__at_flag]";
+    volatile asm "mov [__at_ret], rax";
+}
+
+// Masks a staged value to `w` bytes so narrow operations never see
+// stray high bits.
+func __at_mask(v: UInt64, w: UInt64): UInt64 {
+    if w == 1 {
+        return v & 0xFF;
+    }
+    if w == 2 {
+        return v & 0xFFFF;
+    }
+    if w == 4 {
+        return v & 0xFFFFFFFF;
+    }
+    return v;
+}
+
+module atomic {
+    // Memory orderings with acquire/release semantics. Acquire
+    // prevents subsequent memory operations from moving before the
+    // acquire operation; Release prevents preceding memory
+    // operations from moving after the release operation; AcqRel
+    // combines both constraints; SeqCst provides a single total
+    // order across sequentially consistent operations; Relaxed
+    // imposes no ordering constraint.
+    static Order = Enum {
+        Relaxed,
+        Acquire,
+        Release,
+        AcqRel,
+        SeqCst,
+    };
+
+    // Atomically reads the value at `p` with the given ordering.
+    func load(static T, p: &T, order: Order): T {
+        __at_addr = p as UInt64;
+        __at_load(sizeof(T));
+        if order == Order.SeqCst {
+            // A full fence keeps later operations after the load.
+            volatile asm "mfence";
+        }
+        return __at_ret as T;
+    }
+
+    // Atomically writes `v` at `p` with the given ordering.
+    func store(static T, p: &T, v: T, order: Order): Void {
+        __at_addr = p as UInt64;
+        __at_val = __at_mask(v as UInt64, sizeof(T));
+        __at_store(sizeof(T), order == Order.SeqCst);
+    }
+
+    // Atomically adds `v` to the location and returns the value it
+    // held before the operation. T must be an integer type.
+    func add(static T, p: &T, v: T, order: Order): T {
+        __at_addr = p as UInt64;
+        __at_val = __at_mask(v as UInt64, sizeof(T));
+        __at_xadd(sizeof(T));
+        return __at_mask(__at_ret, sizeof(T)) as T;
+    }
+
+    // Atomically subtracts `v` from the location and returns the
+    // value it held before the operation. Wrapping negation turns
+    // the subtraction into an xadd of the two's complement.
+    func sub(static T, p: &T, v: T, order: Order): T {
+        __at_addr = p as UInt64;
+        __at_val = __at_mask((0 as UInt64) - (v as UInt64), sizeof(T));
+        __at_xadd(sizeof(T));
+        return __at_mask(__at_ret, sizeof(T)) as T;
+    }
+
+    // Compare-and-swap: when `*p` equals `*expected`, writes
+    // `desired` and returns true using `success_order`; otherwise
+    // stores the observed value into `*expected` and returns false
+    // using `failure_order`. The failure order may be Relaxed,
+    // Acquire, or SeqCst and may not impose a stronger ordering
+    // than the success order. Use AcqRel/Acquire when a successful
+    // swap publishes data and a failed comparison must observe
+    // published data.
+    func cas(static T, p: &T, expected: &T, desired: T, success_order: Order, failure_order: Order): Bool {
+        __at_addr = p as UInt64;
+        __at_val = __at_mask(desired as UInt64, sizeof(T));
+        __at_ret = __at_mask((@expected) as UInt64, sizeof(T));
+        __at_cas(sizeof(T));
+        if __at_flag != 0 {
+            return true;
+        }
+        @expected = __at_mask(__at_ret, sizeof(T)) as T;
+        return false;
+    }
+
+    // A stand-alone memory fence. A fence is heavier than the
+    // ordering attached to an operation and is rarely needed;
+    // prefer ordered loads and stores. Only SeqCst needs hardware
+    // assistance on this architecture.
+    func fence(order: Order): Void {
+        if order == Order.SeqCst {
+            volatile asm "mfence";
+        }
+    }
+}

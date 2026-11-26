@@ -1,0 +1,313 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: json_parse (internal)
+ * Recursive-descent parser behind std::json::parse.
+ *
+ * The parser walks the UTF-8 bytes of the document with the cursor
+ * from json_node and builds the DOM on the heap using the node
+ * record, cursor, and string reader defined there. Numbers apply
+ * their exponent by repeated multiplication, capped at 1000 so a
+ * hostile exponent cannot loop forever; the IEEE result saturates
+ * to an infinity beyond the representable range. The root crosses
+ * the module boundary as a tuple of its four words, so this file
+ * never names the public Value type.
+ *
+ * Ownership: every allocation made while a subtree is under
+ * construction is released by an errdefer when the construction
+ * fails, so a syntax error leaves no allocation behind.
+ */
+
+use heap;
+use string;
+use json_node;
+
+// Raw bit access between UInt64 and Real64 for the number payload.
+static __NumBits = Union {
+    u: UInt64,
+    f: Real64,
+};
+
+// Parses a JSON number at the cursor into a Real64. The grammar is
+// an optional minus, an integer part, an optional fraction, and an
+// optional exponent; each present part must hold at least one digit.
+func __parse_number(c: &json_node::Cur): Real64! {
+    let neg = false;
+    if @(((@c).t + (@c).pos) as &Char) as UInt64 == 45 {
+        neg = true;
+        (@c).pos += 1;
+    }
+    let ip: UInt64 = 0;
+    let any = false;
+    while (@c).pos < (@c).len {
+        let ch = @(((@c).t + (@c).pos) as &Char) as UInt64;
+        if ch < 48 or ch > 57 {
+            break;
+        }
+        ip = ip * 10 + (ch - 48);
+        any = true;
+        (@c).pos += 1;
+    }
+    if not any {
+        return error json_node::ERR;
+    }
+    let v = ip as Real64;
+    if (@c).pos < (@c).len and @(((@c).t + (@c).pos) as &Char) as UInt64 == 46 {
+        (@c).pos += 1;
+        let scale: Real64 = 0.1;
+        let fany = false;
+        while (@c).pos < (@c).len {
+            let ch = @(((@c).t + (@c).pos) as &Char) as UInt64;
+            if ch < 48 or ch > 57 {
+                break;
+            }
+            v += (ch - 48) as Real64 * scale;
+            scale /= 10.0;
+            fany = true;
+            (@c).pos += 1;
+        }
+        if not fany {
+            return error json_node::ERR;
+        }
+    }
+    if (@c).pos < (@c).len {
+        let e0 = @(((@c).t + (@c).pos) as &Char) as UInt64;
+        if e0 == 101 or e0 == 69 {
+            (@c).pos += 1;
+            let eneg = false;
+            if (@c).pos < (@c).len {
+                let s = @(((@c).t + (@c).pos) as &Char) as UInt64;
+                if s == 45 {
+                    eneg = true;
+                    (@c).pos += 1;
+                } else if s == 43 {
+                    (@c).pos += 1;
+                }
+            }
+            let e: UInt64 = 0;
+            let eany = false;
+            while (@c).pos < (@c).len and e < 1000 {
+                let ch = @(((@c).t + (@c).pos) as &Char) as UInt64;
+                if ch < 48 or ch > 57 {
+                    break;
+                }
+                e = e * 10 + (ch - 48);
+                eany = true;
+                (@c).pos += 1;
+            }
+            if not eany {
+                return error json_node::ERR;
+            }
+            let k: UInt64 = 0;
+            while k < e {
+                if eneg {
+                    v /= 10.0;
+                } else {
+                    v *= 10.0;
+                }
+                k += 1;
+            }
+        }
+    }
+    if neg {
+        return -v;
+    }
+    return v;
+}
+
+// Parses an array at the cursor; the cursor must sit at '['.
+// Elements live in one contiguous block of node records that
+// doubles in capacity as it fills.
+func __parse_array(c: &json_node::Cur): json_node::Node! {
+    (@c).pos += 1;
+    let cap: UInt64 = 8;
+    let items = try heap::alloc(cap * json_node::NODE_BYTES);
+    let n: UInt64 = 0;
+    errdefer {
+        // Release the fully parsed elements and the block itself.
+        let i: UInt64 = 0;
+        while i < n {
+            json_node::free_node(json_node::load(items as UInt64 + i * json_node::NODE_BYTES));
+            i += 1;
+        }
+        heap::free(items);
+    }
+    json_node::skip_ws(c);
+    if (@c).pos < (@c).len and @(((@c).t + (@c).pos) as &Char) as UInt64 == 93 {
+        (@c).pos += 1;
+        return json_node::Node {json_node::K_ARR, items as UInt64, 0, 0};
+    }
+    while true {
+        json_node::skip_ws(c);
+        let v = try __parse_value(c);
+        if n == cap {
+            cap *= 2;
+            items = try heap::realloc(items, cap * json_node::NODE_BYTES);
+        }
+        json_node::store(items as UInt64 + n * json_node::NODE_BYTES, v);
+        n += 1;
+        json_node::skip_ws(c);
+        if (@c).pos >= (@c).len {
+            return error json_node::ERR;
+        }
+        let ch = @(((@c).t + (@c).pos) as &Char) as UInt64;
+        if ch == 44 {
+            (@c).pos += 1;
+            continue;
+        }
+        if ch == 93 {
+            (@c).pos += 1;
+            break;
+        }
+        return error json_node::ERR;
+    }
+    return json_node::Node {json_node::K_ARR, items as UInt64, n, 0};
+}
+
+// Parses an object at the cursor; the cursor must sit at '{'.
+// Keys live in a block of string addresses, values in a parallel
+// block of node records; both double in capacity as they fill.
+// A parsed key whose value has not yet been accepted is tracked in
+// `pending` so the errdefer can release it on failure.
+func __parse_object(c: &json_node::Cur): json_node::Node! {
+    (@c).pos += 1;
+    let cap: UInt64 = 8;
+    let keys = try heap::alloc(cap * 8);
+    let vals = try heap::alloc(cap * json_node::NODE_BYTES);
+    let n: UInt64 = 0;
+    // Address of a parsed key not yet stored in the keys block.
+    let pending: UInt64 = 0;
+    errdefer {
+        let i: UInt64 = 0;
+        while i < n {
+            heap::free(@((keys as UInt64 + i * 8) as &UInt64) as &Void);
+            json_node::free_node(json_node::load(vals as UInt64 + i * json_node::NODE_BYTES));
+            i += 1;
+        }
+        if pending != 0 {
+            heap::free(pending as &Void);
+        }
+        heap::free(keys);
+        heap::free(vals);
+    }
+    json_node::skip_ws(c);
+    if (@c).pos < (@c).len and @(((@c).t + (@c).pos) as &Char) as UInt64 == 125 {
+        (@c).pos += 1;
+        return json_node::Node {json_node::K_OBJ, keys as UInt64, 0, vals as UInt64};
+    }
+    while true {
+        json_node::skip_ws(c);
+        if (@c).pos >= (@c).len or @(((@c).t + (@c).pos) as &Char) as UInt64 != 34 {
+            return error json_node::ERR;
+        }
+        let key = try json_node::parse_string(c);
+        pending = key.0;
+        json_node::skip_ws(c);
+        if (@c).pos >= (@c).len or @(((@c).t + (@c).pos) as &Char) as UInt64 != 58 {
+            return error json_node::ERR;
+        }
+        (@c).pos += 1;
+        json_node::skip_ws(c);
+        let v = try __parse_value(c);
+        if n == cap {
+            cap *= 2;
+            keys = try heap::realloc(keys, cap * 8);
+            vals = try heap::realloc(vals, cap * json_node::NODE_BYTES);
+        }
+        @((keys as UInt64 + n * 8) as &UInt64) = pending;
+        pending = 0;
+        json_node::store(vals as UInt64 + n * json_node::NODE_BYTES, v);
+        n += 1;
+        json_node::skip_ws(c);
+        if (@c).pos >= (@c).len {
+            return error json_node::ERR;
+        }
+        let ch = @(((@c).t + (@c).pos) as &Char) as UInt64;
+        if ch == 44 {
+            (@c).pos += 1;
+            continue;
+        }
+        if ch == 125 {
+            (@c).pos += 1;
+            break;
+        }
+        return error json_node::ERR;
+    }
+    return json_node::Node {json_node::K_OBJ, keys as UInt64, n, vals as UInt64};
+}
+
+// Parses one value at the cursor, dispatching on its first byte.
+func __parse_value(c: &json_node::Cur): json_node::Node! {
+    json_node::skip_ws(c);
+    if (@c).pos >= (@c).len {
+        return error json_node::ERR;
+    }
+    let ch = @(((@c).t + (@c).pos) as &Char) as UInt64;
+    if ch == 123 {
+        return __parse_object(c);
+    }
+    if ch == 91 {
+        return __parse_array(c);
+    }
+    if ch == 34 {
+        let s = try json_node::parse_string(c);
+        return json_node::Node {json_node::K_STR, s.0, s.1, 0};
+    }
+    if ch == 116 {
+        // "true"
+        if (@c).pos + 4 > (@c).len {
+            return error json_node::ERR;
+        }
+        if @(((@c).t + (@c).pos + 1) as &Char) as UInt64 != 114 or @(((@c).t + (@c).pos + 2) as &Char) as UInt64 != 117 or @(((@c).t + (@c).pos + 3) as &Char) as UInt64 != 101 {
+            return error json_node::ERR;
+        }
+        (@c).pos += 4;
+        return json_node::Node {json_node::K_TRUE, 0, 0, 0};
+    }
+    if ch == 102 {
+        // "false"
+        if (@c).pos + 5 > (@c).len {
+            return error json_node::ERR;
+        }
+        if @(((@c).t + (@c).pos + 1) as &Char) as UInt64 != 97 or @(((@c).t + (@c).pos + 2) as &Char) as UInt64 != 108 or @(((@c).t + (@c).pos + 3) as &Char) as UInt64 != 115 or @(((@c).t + (@c).pos + 4) as &Char) as UInt64 != 101 {
+            return error json_node::ERR;
+        }
+        (@c).pos += 5;
+        return json_node::Node {json_node::K_FALSE, 0, 0, 0};
+    }
+    if ch == 110 {
+        // "null"
+        if (@c).pos + 4 > (@c).len {
+            return error json_node::ERR;
+        }
+        if @(((@c).t + (@c).pos + 1) as &Char) as UInt64 != 117 or @(((@c).t + (@c).pos + 2) as &Char) as UInt64 != 108 or @(((@c).t + (@c).pos + 3) as &Char) as UInt64 != 108 {
+            return error json_node::ERR;
+        }
+        (@c).pos += 4;
+        return json_node::Node {json_node::K_NULL, 0, 0, 0};
+    }
+    if (ch >= 48 and ch <= 57) or ch == 45 {
+        let num = try __parse_number(c);
+        let bits: __NumBits;
+        bits.f = num;
+        return json_node::Node {json_node::K_NUM, bits.u, 0, 0};
+    }
+    return error json_node::ERR;
+}
+
+module json_parse {
+    // Parses the whole document at `text` and returns the root
+    // node as its four words. Trailing non-whitespace after the
+    // document frees the tree and reports a syntax error.
+    func parse(text: Char[]): (UInt64, UInt64, UInt64, UInt64)! {
+        let c = json_node::Cur {text as UInt64, string::len(text), 0};
+        let v = try __parse_value(&c);
+        json_node::skip_ws(&c);
+        if c.pos != c.len {
+            json_node::free_node(v);
+            return error json_node::ERR;
+        }
+        return {v.kind, v.a, v.b, v.c};
+    }
+}

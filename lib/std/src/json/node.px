@@ -1,0 +1,214 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: json_node (internal)
+ * DOM node representation and lexical machinery behind the JSON parser.
+ *
+ * A node is four UInt64 words — kind, then three payload words. Numbers
+ * carry the IEEE-754 bits, strings a heap copy of the decoded text,
+ * arrays a contiguous block of 32-byte node records, and objects two
+ * parallel blocks of key pointers and node records. This file also owns
+ * the parser cursor, the whitespace skipper, and the string reader with
+ * full escape decoding, shared by the recursive-descent parser in the
+ * sibling parse file.
+ *
+ * Ownership: a string node owns the buffer at payload word one; array
+ * and object nodes own their child blocks. `free_node` releases a whole
+ * subtree recursively.
+ */
+
+use heap;
+use string;
+use unicode;
+
+module json_node {
+// errno-style code for every malformed document.
+static ERR = 22;
+
+// Node kinds, mirrored by the public module.
+static K_NULL = 0;
+static K_FALSE = 1;
+static K_TRUE = 2;
+static K_NUM = 3;
+static K_STR = 4;
+static K_ARR = 5;
+static K_OBJ = 6;
+
+// Node size in bytes.
+static NODE_BYTES = 32;
+
+// A DOM node under construction: kind plus three payload words.
+static Node = Struct {
+    kind: UInt64,
+    a: UInt64,
+    b: UInt64,
+    c: UInt64,
+};
+
+// Parser cursor over the input text: base address, length, offset.
+static Cur = Struct {
+    t: UInt64,
+    len: UInt64,
+    pos: UInt64,
+};
+
+// Writes the four words of `v` at the raw address `dst`.
+func store(dst: UInt64, v: Node): Void {
+    @(dst as &UInt64) = v.kind;
+    @((dst + 8) as &UInt64) = v.a;
+    @((dst + 16) as &UInt64) = v.b;
+    @((dst + 24) as &UInt64) = v.c;
+}
+
+// Reads the node stored at the raw address `src`.
+func load(src: UInt64): Node {
+    return Node {@(src as &UInt64), @((src + 8) as &UInt64), @((src + 16) as &UInt64), @((src + 24) as &UInt64)};
+}
+
+// Releases the subtree rooted at `v`: strings, arrays and objects
+// are freed recursively. Used for a fully parsed document that
+// turns out to be followed by garbage, and by the parser's errdefer
+// blocks when a subtree under construction fails.
+func free_node(v: Node): Void {
+    if v.kind == K_STR {
+        heap::free(v.a as &Void);
+        return;
+    }
+    if v.kind == K_ARR {
+        let i: UInt64 = 0;
+        while i < v.b {
+            free_node(load(v.a + i * NODE_BYTES));
+            i += 1;
+        }
+        heap::free(v.a as &Void);
+        return;
+    }
+    if v.kind == K_OBJ {
+        let i: UInt64 = 0;
+        while i < v.b {
+            heap::free(@((v.a + i * 8) as &UInt64) as &Void);
+            free_node(load(v.c + i * NODE_BYTES));
+            i += 1;
+        }
+        heap::free(v.a as &Void);
+        heap::free(v.c as &Void);
+    }
+}
+
+// Skips JSON whitespace at the cursor.
+func skip_ws(c: &Cur): Void {
+    while (@c).pos < (@c).len {
+        let b = @(((@c).t + (@c).pos) as &Char) as UInt64;
+        if b == 32 or b == 9 or b == 10 or b == 13 {
+            (@c).pos += 1;
+        } else {
+            return;
+        }
+    }
+}
+
+// Reads four hex digits after a 'u' at the cursor and advances
+// past the whole "\uXXXX" span.
+func hex4(c: &Cur): UInt32! {
+    if (@c).pos + 5 > (@c).len {
+        return error ERR;
+    }
+    if @(((@c).t + (@c).pos) as &Char) as UInt64 != 117 {
+        return error ERR;
+    }
+    let v: UInt32 = 0;
+    let i: UInt64 = 1;
+    while i <= 4 {
+        let b = @(((@c).t + (@c).pos + i) as &Char) as UInt64;
+        let d: UInt32;
+        if b >= 48 and b <= 57 {
+            d = (b - 48) as UInt32;
+        } else if b >= 97 and b <= 102 {
+            d = (b - 97) as UInt32 + 10;
+        } else if b >= 65 and b <= 70 {
+            d = (b - 65) as UInt32 + 10;
+        } else {
+            return error ERR;
+        }
+        v = v * 16 + d;
+        i += 1;
+    }
+    (@c).pos += 5;
+    return v;
+}
+
+// Parses a quoted string at the cursor, decoding escapes, and
+// returns the address of a heap copy of the decoded bytes
+// (NUL-terminated) together with its length. The cursor must sit
+// at the opening quote. Escapes decode in full, including \u
+// sequences with surrogate-pair combination.
+func parse_string(c: &Cur): (UInt64, UInt64)! {
+    (@c).pos += 1;
+    // The decoded form is never longer than the whole document.
+    let buf = try heap::alloc((@c).len + 1);
+    errdefer heap::free(buf);
+    let b = buf as UInt64;
+    let n: UInt64 = 0;
+    while true {
+        if (@c).pos >= (@c).len {
+            return error ERR;
+        }
+        let ch = @(((@c).t + (@c).pos) as &Char) as UInt64;
+        if ch == 34 {
+            (@c).pos += 1;
+            @((b + n) as &Char) = 0 as Char;
+            return {b, n};
+        }
+        if ch == 92 {
+            (@c).pos += 1;
+            if (@c).pos >= (@c).len {
+                return error ERR;
+            }
+            let e = @(((@c).t + (@c).pos) as &Char) as UInt64;
+            if e == 117 {
+                // Unicode escape, with surrogate-pair combination.
+                let hi = try hex4(c);
+                let cp: UInt32;
+                if hi >= 0xD800 and hi <= 0xDBFF {
+                    let lo = try hex4(c);
+                    if lo < 0xDC00 or lo > 0xDFFF {
+                        return error ERR;
+                    }
+                    cp = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00);
+                } else if hi >= 0xDC00 and hi <= 0xDFFF {
+                    return error ERR;
+                } else {
+                    cp = hi;
+                }
+                let w = try unicode::encode(cp, (b + n) as &Char);
+                n += w;
+            } else {
+                let d: UInt64;
+                if e == 34 or e == 92 or e == 47 {
+                    d = e;
+                } else if e == 98 {
+                    d = 8;
+                } else if e == 102 {
+                    d = 12;
+                } else if e == 110 {
+                    d = 10;
+                } else if e == 114 {
+                    d = 13;
+                } else if e == 116 {
+                    d = 9;
+                } else {
+                    return error ERR;
+                }
+                @((b + n) as &Char) = d as Char;
+                n += 1;
+                (@c).pos += 1;
+            }
+        } else {
+            @((b + n) as &Char) = ch as Char;
+            n += 1;
+            (@c).pos += 1;
+        }
+    }
+}
+}

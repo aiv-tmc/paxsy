@@ -1,0 +1,56 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: camera
+ * Perspective and orthographic projection matrices and the look-at
+ * view matrix: the viewing half of a model-view-projection stack.
+ *
+ * The value types come from linalg and the angles are degrees. The
+ * projections follow the usual clip-space conventions: a right-handed
+ * view space looking down the negative z axis, depth mapped into the
+ * [-1, 1] range, and column vectors in products, so a projection
+ * applies to a view-space point as mul_vec4(proj, v).
+ */
+
+use linalg;
+use trig;
+
+module camera {
+    // A perspective projection matrix. `fov` is the vertical field
+    // of view in degrees, `aspect` the viewport's width divided by
+    // its height, and `near` and `far` the distances to the clipping
+    // planes.
+    func perspective(fov: Real64, aspect: Real64, near: Real64, far: Real64): linalg::Mat4 {
+        let f = 1.0 / trig::tan(trig::deg_to_rad(fov) / 2.0);
+        return linalg::mat4(
+            f / aspect, 0.0, 0.0, 0.0,
+            0.0, f, 0.0, 0.0,
+            0.0, 0.0, (far + near) / (near - far), (2.0 * far * near) / (near - far),
+            0.0, 0.0, -1.0, 0.0);
+    }
+
+    // An orthographic projection matrix covering the given volume.
+    func orthographic(left: Real64, right: Real64, bottom: Real64, top: Real64, near: Real64, far: Real64): linalg::Mat4 {
+        return linalg::mat4(
+            2.0 / (right - left), 0.0, 0.0, 0.0 - (right + left) / (right - left),
+            0.0, 2.0 / (top - bottom), 0.0, 0.0 - (top + bottom) / (top - bottom),
+            0.0, 0.0, -2.0 / (far - near), 0.0 - (far + near) / (far - near),
+            0.0, 0.0, 0.0, 1.0);
+    }
+
+    // The view matrix looking from `eye` toward `center` with `up`
+    // as the reference up direction: an orthonormal basis built from
+    // the forward direction and the cross products, followed by the
+    // translation that brings `eye` to the origin.
+    func look_at(eye: linalg::Vec3, center: linalg::Vec3, up: linalg::Vec3): linalg::Mat4 {
+        let f = linalg::normalize3(linalg::Vec3 {center.x - eye.x, center.y - eye.y, center.z - eye.z});
+        let s = linalg::normalize3(linalg::cross3(f, up));
+        let u = linalg::cross3(s, f);
+        return linalg::mat4(
+            s.x, s.y, s.z, 0.0 - linalg::dot3(s, eye),
+            u.x, u.y, u.z, 0.0 - linalg::dot3(u, eye),
+            0.0 - f.x, 0.0 - f.y, 0.0 - f.z, linalg::dot3(f, eye),
+            0.0, 0.0, 0.0, 1.0);
+    }
+}

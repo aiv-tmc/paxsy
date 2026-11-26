@@ -1,0 +1,299 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: text
+ * String transformations: splitting, joining, trimming, case
+ * conversion, replacement, repetition, and padding.
+ *
+ * Functions that produce a new string return an owning str::Str; the
+ * caller releases it with str::destroy, usually scheduled with defer
+ * or errdefer. split additionally returns its parts as an
+ * array::Array of Str elements, one owning allocation per part.
+ * split_each performs no allocation at all: every part is a
+ * NUL-terminated copy on the stack, valid only for the duration of
+ * the call. Case conversion is ASCII-only.
+ */
+
+use array;
+use heap;
+use str;
+use string;
+
+// Capacity of the stack buffer that split_each copies each part
+// into; longer parts are reported through a heap copy instead.
+static PART_BUF = 4096;
+
+module text {
+    // Returned when an allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Calls `f` once for each part of `s` between occurrences of
+    // `sep`. A part shorter than PART_BUF is delivered from a stack
+    // buffer, a longer part from a temporary heap copy; either way
+    // the part is valid only for the duration of the call. An error
+    // from `f` stops the iteration and propagates.
+    func split_each(s: Char[], sep: Char[], f: func(part: Char[]): Void!): Void! {
+        let slen = string::len(sep);
+        if slen == 0 {
+            // An empty separator never matches; the whole string is
+            // the single part.
+            try f(s);
+            return;
+        }
+        let buf: Char[PART_BUF];
+        let base = s as UInt64;
+        let n = string::len(s);
+        let pos: UInt64 = 0;
+        while pos <= n {
+            let rest = (base + pos) as Char[];
+            let at = string::find_substring(rest, sep);
+            // `at` is the part length: the match offset, or the rest
+            // length at the final part.
+            if at < PART_BUF {
+                let i: UInt64 = 0;
+                while i < at {
+                    buf[i] = @((base + pos + i) as &Char);
+                    i += 1;
+                }
+                buf[at] = 0 as Char;
+                try f(&buf[0] as UInt64 as Char[]);
+            } else {
+                let tmp = try heap::alloc(at + 1);
+                let i: UInt64 = 0;
+                while i < at {
+                    @((tmp as UInt64 + i) as &Char) = @((base + pos + i) as &Char);
+                    i += 1;
+                }
+                @((tmp as UInt64 + at) as &Char) = 0 as Char;
+                f(tmp as UInt64 as Char[]) catch |e| {
+                    // The temporary must not outlive the call, even
+                    // on the error path.
+                    heap::free(tmp);
+                    return error e;
+                };
+                heap::free(tmp);
+            }
+            if at == n - pos {
+                // The final part ran to the end of the string.
+                break;
+            }
+            pos += at + slen;
+        }
+    }
+
+    // Returns the parts of `s` between occurrences of `sep` as an
+    // array of owning strings. The caller owns the array and every
+    // element: each element must reach str::destroy and the array
+    // must reach array::destroy.
+    func split(s: Char[], sep: Char[]): array::Array! {
+        let out = array::make(str::Str);
+        errdefer {
+            // On the error path the parts collected so far are
+            // released one by one before the array storage goes.
+            let k: UInt64 = 0;
+            while k < out.len {
+                let elem = @((out.data as UInt64 + k * sizeof(str::Str)) as &str::Str);
+                str::destroy(&elem);
+                k += 1;
+            }
+            array::destroy(&out);
+        }
+        let slen = string::len(sep);
+        let base = s as UInt64;
+        let n = string::len(s);
+        if slen == 0 {
+            // Degenerate separator: one part holding the whole input.
+            let whole = try str::from(s);
+            try array::push(str::Str, &out, whole);
+            return out;
+        }
+        let pos: UInt64 = 0;
+        while pos <= n {
+            let rest = (base + pos) as Char[];
+            let at = string::find_substring(rest, sep);
+            // Build the part through a bounded slice copy: the source
+            // region is not NUL-terminated at `at`.
+            let part = str::make();
+            try str::reserve(&part, at);
+            let i: UInt64 = 0;
+            while i < at {
+                @((part.data as UInt64 + i) as &Char) = @((base + pos + i) as &Char);
+                i += 1;
+            }
+            @((part.data as UInt64 + at) as &Char) = 0 as Char;
+            part.len = at;
+            array::push(str::Str, &out, part) catch |e| {
+                // A failed push leaves the part unowned.
+                str::destroy(&part);
+                return error e;
+            };
+            if at == n - pos {
+                break;
+            }
+            pos += at + slen;
+        }
+        return out;
+    }
+
+    // Returns a new owning string holding `parts` separated by `sep`.
+    func join(parts: str::Str[..], sep: Char[]): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        let i: UInt64 = 0;
+        while i < parts.len {
+            if i > 0 {
+                try str::append(&out, sep);
+            }
+            try str::append(&out, str::as_chars(&parts[i]));
+            i += 1;
+        }
+        return out;
+    }
+
+    // Returns a new owning string with leading and trailing ASCII
+    // whitespace removed.
+    func trim(s: Char[]): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        let n = string::len(s);
+        try str::reserve(&out, if n == 0 { 1 } else { n });
+        out.len = try string::trim_into(s, (out.data as UInt64) as Char[], n + 1);
+        return out;
+    }
+
+    // Returns a new owning ASCII-uppercased copy of `s`.
+    func to_upper(s: Char[]): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        let n = string::len(s);
+        try str::reserve(&out, if n == 0 { 1 } else { n });
+        out.len = try string::to_upper_into(s, (out.data as UInt64) as Char[], n + 1);
+        return out;
+    }
+
+    // Returns a new owning ASCII-lowercased copy of `s`.
+    func to_lower(s: Char[]): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        let n = string::len(s);
+        try str::reserve(&out, if n == 0 { 1 } else { n });
+        out.len = try string::to_lower_into(s, (out.data as UInt64) as Char[], n + 1);
+        return out;
+    }
+
+    // Returns a new owning string in which every occurrence of
+    // `from` is replaced by `to`. An empty `from` matches nowhere,
+    // so the result is a copy of `s`. The result length is computed
+    // in a first pass so the second pass writes every byte exactly
+    // once into a single allocation.
+    func replace(s: Char[], from: Char[], to: Char[]): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        let flen = string::len(from);
+        if flen == 0 {
+            try str::append(&out, s);
+            return out;
+        }
+        let tlen = string::len(to);
+        let base = s as UInt64;
+        let n = string::len(s);
+        // Pass one: count the occurrences and size the result.
+        let hits: UInt64 = 0;
+        let pos: UInt64 = 0;
+        while pos <= n {
+            let at = string::find_substring((base + pos) as Char[], from);
+            if at == n - pos {
+                break;
+            }
+            hits += 1;
+            pos += at + flen;
+        }
+        // The matched spans are non-overlapping, so hits * flen
+        // never exceeds n and the difference cannot underflow.
+        let total = n - hits * flen + hits * tlen;
+        try str::reserve(&out, total);
+        // Pass two: copy literal chunks and replacements into place.
+        let dst = out.data as UInt64;
+        let di: UInt64 = 0;
+        let src: UInt64 = 0;
+        while src <= n {
+            let at = string::find_substring((base + src) as Char[], from);
+            let i: UInt64 = 0;
+            while i < at {
+                @((dst + di) as &Char) = @((base + src + i) as &Char);
+                di += 1;
+                i += 1;
+            }
+            if at == n - src {
+                break;
+            }
+            let j: UInt64 = 0;
+            while j < tlen {
+                @((dst + di) as &Char) = @((to as UInt64 + j) as &Char);
+                di += 1;
+                j += 1;
+            }
+            src += at + flen;
+        }
+        @((dst + di) as &Char) = 0 as Char;
+        out.len = di;
+        return out;
+    }
+
+    // Returns a new owning string containing `s` concatenated `n`
+    // times.
+    func repeat(s: Char[], n: UInt64): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        try str::reserve(&out, string::len(s) * n);
+        let i: UInt64 = 0;
+        while i < n {
+            try str::append(&out, s);
+            i += 1;
+        }
+        return out;
+    }
+
+    // Returns a new owning string padded on the left with `fill`
+    // until it is `width` code units long; a string already at
+    // least `width` long is copied unchanged.
+    func pad_start(s: Char[], width: UInt64, fill: Char): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        let n = string::len(s);
+        if n < width {
+            let pad = width - n;
+            try str::reserve(&out, width);
+            let i: UInt64 = 0;
+            while i < pad {
+                @((out.data as UInt64 + i) as &Char) = fill;
+                i += 1;
+            }
+            out.len = pad;
+        }
+        try str::append(&out, s);
+        return out;
+    }
+
+    // Returns a new owning string padded on the right with `fill`
+    // until it is `width` code units long; a string already at
+    // least `width` long is copied unchanged.
+    func pad_end(s: Char[], width: UInt64, fill: Char): str::Str! {
+        let out = str::make();
+        errdefer str::destroy(&out);
+        let n = string::len(s);
+        try str::append(&out, s);
+        if n < width {
+            try str::reserve(&out, width);
+            let i = n;
+            while i < width {
+                @((out.data as UInt64 + i) as &Char) = fill;
+                i += 1;
+            }
+            out.len = width;
+            @((out.data as UInt64 + width) as &Char) = 0 as Char;
+        }
+        return out;
+    }
+}

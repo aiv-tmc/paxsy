@@ -1,0 +1,152 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: file
+ * File handles and whole-file reading.
+ *
+ * A File value is the kernel file descriptor bundled with the
+ * operations the kernel provides on it. Opening and closing go
+ * through sys::open and sys::close, positional access through
+ * sys::lseek, and bulk transfers through the looping read_all and
+ * write_all helpers, which turn the kernel's partial-transfer
+ * contract into all-or-error. Advisory locking wraps flock(2)
+ * through the lock module.
+ *
+ * read_file is the common convenience of slurping a whole file into
+ * memory: it sizes the file, allocates the exact buffer on the heap,
+ * reads the content in one loop, and appends a zero byte so textual
+ * content can be handled with the string module without a separate
+ * copy. Errors are the raw kernel errno values: 2 when the file does
+ * not exist, 13 when the program lacks permission, 21 when the path
+ * names a directory, and 5 for an I/O failure.
+ */
+
+use sys;
+use heap;
+use lock;
+
+module file {
+    // An open file, identified by its kernel file descriptor.
+    static File = Struct {
+        fd: UInt64,
+    };
+
+    // A heap-allocated byte buffer together with its valid length.
+    // The allocation always has room for len + 1 bytes and the byte
+    // at offset len is always zero, so a Blob holding text is
+    // directly usable as a Char[].
+    static Blob = Struct {
+        data: &Char,
+        len: UInt64,
+    };
+
+    // Opens the existing file at `path` with the given combination of
+    // sys::O_* flags and returns it as a File.
+    func File.open(path: Char[], flags: UInt32): File! {
+        let fd = try sys::open(path, flags, 0);
+        return File {fd};
+    }
+
+    // Creates a new file at `path`, truncating any existing file,
+    // with the given permission bits, and returns it opened for
+    // writing.
+    func File.create(path: Char[], mode: UInt32): File! {
+        let fd = try sys::open(path, sys::O_CREAT $ sys::O_TRUNC $ sys::O_WRONLY, mode);
+        return File {fd};
+    }
+
+    // Performs one kernel transfer: up to `cap` bytes into `buf`,
+    // returning the byte count, which is smaller at end of file;
+    // zero means the end has been reached.
+    func File.read(this: File, buf: &Void, cap: UInt64): UInt64! {
+        return sys::read(this.fd as UInt32, buf, cap);
+    }
+
+    // Performs one kernel transfer: `count` bytes from `buf`,
+    // returning the number accepted, which may be smaller than
+    // requested.
+    func File.write(this: File, buf: &Void, count: UInt64): UInt64! {
+        return sys::write(this.fd as UInt32, buf, count);
+    }
+
+    // Reads until `buf` is exactly full or end of file is reached,
+    // and returns the total stored. End of file is reported as a
+    // short total, never as an error.
+    func File.read_all(this: File, buf: &Void, cap: UInt64): UInt64! {
+        let p = buf as UInt64;
+        let total: UInt64 = 0;
+        while total < cap {
+            let n = try sys::read(this.fd as UInt32, (p + total) as &Void, cap - total);
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        return total;
+    }
+
+    // Writes every byte, looping past short writes, and returns the
+    // total written.
+    func File.write_all(this: File, buf: &Void, count: UInt64): UInt64! {
+        let p = buf as UInt64;
+        let total: UInt64 = 0;
+        while total < count {
+            let n = try sys::write(this.fd as UInt32, (p + total) as &Void, count - total);
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        return total;
+    }
+
+    // Returns the size of the file in bytes. The current file offset
+    // is preserved: the position is saved, moved to the end for
+    // measurement, and restored afterwards.
+    func File.size(this: File): UInt64! {
+        let pos = try sys::lseek(this.fd as UInt32, 0, sys::SEEK_CUR);
+        let end = try sys::lseek(this.fd as UInt32, 0, sys::SEEK_END);
+        try sys::lseek(this.fd as UInt32, pos as Int64, sys::SEEK_SET);
+        return end;
+    }
+
+    // Closes the underlying file descriptor. The File value must not
+    // be used afterwards.
+    func File.close(this: File): Void! {
+        try sys::close(this.fd as UInt32);
+    }
+
+    // Opens `path`, reads its entire content into a freshly allocated
+    // heap buffer, closes the file, and returns the buffer with its
+    // length. The caller owns the buffer and releases it with free.
+    func read_file(path: Char[]): Blob! {
+        let f = try File.open(path, sys::O_RDONLY);
+        errdefer {
+            File.close(f) catch |e| {
+            };
+        }
+        let size = try File.size(f);
+        let raw = try heap::alloc(size + 1);
+        errdefer heap::free(raw);
+        let got = try File.read_all(f, raw, size);
+        try File.close(f);
+        // Terminate regardless of how many bytes were read, which
+        // keeps the Blob a valid string when the file shrank between
+        // sizing and reading.
+        @((raw as UInt64 + got) as &Char) = 0 as Char;
+        return Blob {raw as &Char, got};
+    }
+
+    // Places an exclusive advisory lock on the open file, blocking
+    // until every other holder releases. Advisory locks coordinate
+    // cooperative programs and never survive the process.
+    func lock_exclusive(f: File): Void! = lock::lock_exclusive(f.fd);
+
+    // Places a shared advisory lock on the open file, which excludes
+    // exclusive lockers only.
+    func lock_shared(f: File): Void! = lock::lock_shared(f.fd);
+
+    // Releases the file's advisory lock.
+    func unlock(f: File): Void! = lock::unlock(f.fd);
+}

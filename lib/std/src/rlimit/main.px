@@ -1,0 +1,99 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: rlimit
+ * Per-process resource limits.
+ *
+ * Every process carries a table of resource limits enforced by the
+ * kernel: caps on core dumps, address space, stack, process count,
+ * and the number of open files. getrlimit(2) copies one entry out as
+ * a two-word structure — the current (soft) limit and the hard
+ * limit — and setrlimit(2) installs a new pair. The kernel enforces
+ * the soft limit; the hard limit caps how high the soft limit may be
+ * raised, and raising the hard limit itself requires privileges.
+ *
+ * The RLimit struct pins the two-word layout so Paxsy code reads the
+ * fields by name. Typical uses: reading RLIMIT_NOFILE before a
+ * program that opens many files, or widening the soft core-dump
+ * limit during debugging. The constants cover the resources most
+ * programs touch; any kernel resource number works with the
+ * low-level get and set functions.
+ *
+ * Arguments travel through file-private staging cells in .bss and
+ * `syscall` is issued from a volatile assembly sequence.
+ */
+
+// Staging cells shared with the assembly sequence below.
+let __rl_num: UInt64;
+let __rl_a1: UInt64;
+let __rl_a2: UInt64;
+let __rl_ret: UInt64;
+
+// Executes a two-argument system call (getrlimit, setrlimit).
+func __rl2(): UInt64 {
+    volatile asm "mov rax, [__rl_num]";
+    volatile asm "mov rdi, [__rl_a1]";
+    volatile asm "mov rsi, [__rl_a2]";
+    volatile asm "syscall";
+    volatile asm "mov [__rl_ret], rax";
+    return __rl_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything else
+// passes through.
+func __rl_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+module rlimit {
+    // Resource numbers for the common cases.
+    static RLIMIT_CORE = 0;
+    static RLIMIT_STACK = 3;
+    static RLIMIT_NPROC = 6;
+    static RLIMIT_NOFILE = 7;
+    static RLIMIT_AS = 9;
+
+    // The "no limit" value for either field.
+    static RLIM_INFINITY = 0xFFFFFFFFFFFFFFFF;
+
+    // The kernel's two-word resource limit entry: the current (soft)
+    // limit and the hard limit.
+    static RLimit = Struct {
+        cur: UInt64,
+        max: UInt64,
+    };
+
+    // Reads the limit pair for the resource `res`.
+    func get(res: UInt32): RLimit! {
+        let r: RLimit;
+        __rl_num = 97;
+        __rl_a1 = res as UInt64;
+        __rl_a2 = &r as UInt64;
+        try __rl_check(__rl2());
+        return r;
+    }
+
+    // Installs the limit pair for the resource `res`. The soft value
+    // may not exceed the hard value, and raising the hard value
+    // fails without privileges; the kernel reports error 1 (EPERM)
+    // in that case.
+    func set(res: UInt32, cur: UInt64, max: UInt64): Void! {
+        let r = RLimit {cur, max};
+        __rl_num = 160;
+        __rl_a1 = res as UInt64;
+        __rl_a2 = &r as UInt64;
+        try __rl_check(__rl2());
+    }
+
+    // Returns the soft limit on open file descriptors.
+    func nofile(): UInt64! {
+        let r = try get(RLIMIT_NOFILE);
+        return r.cur;
+    }
+}

@@ -1,0 +1,241 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: csv
+ * Reading and writing of comma-separated values in the common
+ * RFC 4180 form: a comma between fields, a double quote quoting a
+ * field that contains a comma, quote, or newline, and a doubled
+ * quote for a literal quote inside a quoted field. Lines may end
+ * in LF or CRLF.
+ *
+ * Streaming is expressed with closures, so parsing a large file
+ * needs no intermediate storage: parse_row decodes one record
+ * field by field, and each_row walks a document record by record.
+ * Both decode into a single reusable heap buffer sized once from
+ * the input, so a field and a record are always presented as
+ * ordinary NUL-terminated strings. An empty record yields one
+ * empty field, the CSV convention for a blank line.
+ *
+ * Malformed quoting — an unterminated quoted field, or bytes
+ * other than a comma after a closing quote — is ERR_INVALID_DATA.
+ * Errors returned by a caller-supplied closure propagate
+ * unchanged, and the scratch buffer is released on every path.
+ */
+
+use heap;
+use string;
+use str;
+
+// Scans the text at `t` from `start` for the end of the record
+// that begins there: the first line feed outside a quoted field,
+// or the end of the text. Returns the record's end (before any
+// carriage return) and the position at which the next record
+// starts. An unterminated quote is error 22.
+func __record_end(t: UInt64, start: UInt64, len: UInt64): (UInt64, UInt64)! {
+    let i = start;
+    let quoted = false;
+    while i < len {
+        let c = @((t + i) as &Char) as UInt64;
+        if quoted {
+            if c == 34 {
+                if i + 1 < len and @((t + i + 1) as &Char) as UInt64 == 34 {
+                    // Doubled quote: one literal quote, no toggle.
+                    i += 2;
+                    continue;
+                }
+                quoted = false;
+            }
+        } else {
+            if c == 34 {
+                quoted = true;
+            } else if c == 10 {
+                let end = i;
+                if end > start and @((t + end - 1) as &Char) as UInt64 == 13 {
+                    end -= 1;
+                }
+                return {end, i + 1};
+            }
+        }
+        i += 1;
+    }
+    if quoted {
+        return error 22;
+    }
+    return {len, len};
+}
+
+module csv {
+    // errno-style code returned on malformed quoting.
+    static ERR_INVALID_DATA = 22;
+
+    // errno-style code returned when an allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Calls `f` once for every field of a single record. The
+    // record is the text of one line without the line ending;
+    // quoted fields may not span records in this form. Fields are
+    // decoded — doubled quotes become one literal quote — and
+    // each is passed as a NUL-terminated string that stays valid
+    // until parse_row returns.
+    func parse_row(row: Char[], f: func(field: Char[]): Void!): Void! {
+        let len = string::len(row);
+        let buf = try heap::alloc(len + 1);
+        defer heap::free(buf);
+        let t = row as UInt64;
+        let b = buf as UInt64;
+        let i: UInt64 = 0;
+        while true {
+            let n: UInt64 = 0;
+            if i < len and @((t + i) as &Char) as UInt64 == 34 {
+                // Quoted field: decode until the closing quote.
+                i += 1;
+                let closed = false;
+                while i < len {
+                    let c = @((t + i) as &Char) as UInt64;
+                    if c == 34 {
+                        if i + 1 < len and @((t + i + 1) as &Char) as UInt64 == 34 {
+                            @((b + n) as &Char) = 34 as Char;
+                            n += 1;
+                            i += 2;
+                            continue;
+                        }
+                        i += 1;
+                        closed = true;
+                        break;
+                    }
+                    @((b + n) as &Char) = c as Char;
+                    n += 1;
+                    i += 1;
+                }
+                if not closed {
+                    return error ERR_INVALID_DATA;
+                }
+                // Only a comma or the record end may follow a
+                // closing quote.
+                if i < len and @((t + i) as &Char) as UInt64 != 44 {
+                    return error ERR_INVALID_DATA;
+                }
+            } else {
+                // Unquoted field: bytes up to the next comma or
+                // the record end.
+                while i < len and @((t + i) as &Char) as UInt64 != 44 {
+                    @((b + n) as &Char) = @((t + i) as &Char);
+                    n += 1;
+                    i += 1;
+                }
+            }
+            @((b + n) as &Char) = 0 as Char;
+            try f(buf as Char[]);
+            if i >= len {
+                break;
+            }
+            // Skip the comma and start the next field.
+            i += 1;
+        }
+    }
+
+    // Calls `f` once for every record of a document. Quoted
+    // fields may span lines; the record passed to `f` is the raw
+    // record text without the line ending, presented as a
+    // NUL-terminated string that stays valid until each_row
+    // returns. A document ending in a line ending has no phantom
+    // empty record after it.
+    func each_row(text: Char[], f: func(row: Char[]): Void!): Void! {
+        let len = string::len(text);
+        let buf = try heap::alloc(len + 1);
+        defer heap::free(buf);
+        let t = text as UInt64;
+        let b = buf as UInt64;
+        let start: UInt64 = 0;
+        while start < len {
+            let r = try __record_end(t, start, len);
+            let i: UInt64 = 0;
+            while i < r.0 - start {
+                @((b + i) as &Char) = @((t + start + i) as &Char);
+                i += 1;
+            }
+            @((b + i) as &Char) = 0 as Char;
+            try f(buf as Char[]);
+            start = r.1;
+        }
+    }
+
+    // Returns the number of records in the document.
+    func count_rows(text: Char[]): UInt64! {
+        let len = string::len(text);
+        let t = text as UInt64;
+        let start: UInt64 = 0;
+        let n: UInt64 = 0;
+        while start < len {
+            let r = try __record_end(t, start, len);
+            n += 1;
+            start = r.1;
+        }
+        return n;
+    }
+
+    // Appends one record to `out`: fields joined by commas,
+    // quoted where the content requires it, terminated by a
+    // newline. A field is quoted when it contains a comma, a
+    // quote, or a line break; literal quotes inside it are
+    // doubled.
+    func write_row(out: &str::Str, fields: str::Str[..]): Void! {
+        // Grow once: two bytes per content byte plus quoting,
+        // commas, and the newline are a safe bound.
+        let need = (@out).len + 1;
+        let i: UInt64 = 0;
+        while i < fields.len {
+            need += fields[i].len * 2 + 3;
+            i += 1;
+        }
+        try str::reserve(out, need);
+        let base = (@out).data as UInt64;
+        let w = base + (@out).len;
+        i = 0;
+        while i < fields.len {
+            if i > 0 {
+                @(w as &Char) = 44 as Char;
+                w += 1;
+            }
+            let f = fields[i].data as UInt64;
+            let flen = fields[i].len;
+            // Decide whether the content requires quoting.
+            let quoted = false;
+            let j: UInt64 = 0;
+            while j < flen {
+                let c = @((f + j) as &Char) as UInt64;
+                if c == 34 or c == 44 or c == 10 or c == 13 {
+                    quoted = true;
+                    break;
+                }
+                j += 1;
+            }
+            if quoted {
+                @(w as &Char) = 34 as Char;
+                w += 1;
+            }
+            j = 0;
+            while j < flen {
+                let c = @((f + j) as &Char) as UInt64;
+                if c == 34 {
+                    // A literal quote travels as a doubled quote.
+                    @(w as &Char) = 34 as Char;
+                    w += 1;
+                }
+                @(w as &Char) = c as Char;
+                w += 1;
+                j += 1;
+            }
+            if quoted {
+                @(w as &Char) = 34 as Char;
+                w += 1;
+            }
+            i += 1;
+        }
+        @(w as &Char) = 10 as Char;
+        w += 1;
+        @(w as &Char) = 0 as Char;
+        (@out).len = w - base;
+    }
+}

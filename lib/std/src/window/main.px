@@ -1,0 +1,171 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: window
+ * Off-screen pixel surfaces presented to the Linux framebuffer.
+ *
+ * A surface is a rectangular buffer of 32-bit BGRA pixels with a
+ * title and a visibility flag. Surfaces draw into their own buffers
+ * at any time, and present() paints the visible ones centered over
+ * the screen through the graphics module. There is no window-manager
+ * negotiation and no decoration rendering; the title travels with the
+ * handle for title-aware callers. Input events are not part of this
+ * module — they come from the input module.
+ *
+ * Ownership: create() allocates the handle, a copy of the title, and
+ * the pixel buffer; destroy() releases all three. A zero handle
+ * reports ERR_INVALID_WINDOW on every call, and ERR_NO_DISPLAY covers
+ * allocation failure at creation.
+ */
+
+use heap;
+use string;
+use mem;
+use graphics;
+
+module window {
+    // The window record behind the opaque handle.
+    static WinHandle = Struct {
+        title: Char[],
+        width: UInt64,
+        height: UInt64,
+        visible: Bool,
+        buf: &Void,
+    };
+
+    // The opaque window handle.
+    static Win = &WinHandle;
+
+    // errno-style codes: allocation failure at creation, and a zero
+    // or already destroyed handle.
+    static ERR_NO_DISPLAY = 19;
+    static ERR_INVALID_WINDOW = 22;
+
+    // Creates a window of `width` by `height` pixels with the given
+    // title; the buffer starts cleared to black and the window starts
+    // hidden. Non-positive dimensions report ERR_INVALID_WINDOW;
+    // allocation failure reports ERR_NO_DISPLAY.
+    func create(title: Char[], width: Int32, height: Int32): Win! {
+        if width <= 0 or height <= 0 {
+            return error ERR_INVALID_WINDOW;
+        }
+        let w = width as UInt64;
+        let h = height as UInt64;
+        let tlen = string::len(title);
+        let tcopy = heap::alloc(tlen + 1) catch {
+            return error ERR_NO_DISPLAY;
+        };
+        errdefer heap::free(tcopy);
+        mem::copy(tcopy, (title as UInt64) as &Void, tlen + 1);
+        let buf = heap::alloc(w * h * 4) catch {
+            return error ERR_NO_DISPLAY;
+        };
+        errdefer heap::free(buf);
+        mem::zero(buf, w * h * 4);
+        let hh = heap::alloc(sizeof(WinHandle)) catch {
+            return error ERR_NO_DISPLAY;
+        };
+        let win = hh as &WinHandle;
+        (@win).title = tcopy as Char[];
+        (@win).width = w;
+        (@win).height = h;
+        (@win).visible = false;
+        (@win).buf = buf;
+        return win;
+    }
+
+    // Releases the title copy, the pixel buffer, and the handle.
+    func destroy(window: Win): Void! {
+        if (window as UInt64) == 0 {
+            return error ERR_INVALID_WINDOW;
+        }
+        heap::free(((@window).title as UInt64) as &Void);
+        heap::free((@window).buf);
+        heap::free(window as &Void);
+    }
+
+    // Makes the window visible to the next present().
+    func show(window: Win): Void! {
+        if (window as UInt64) == 0 {
+            return error ERR_INVALID_WINDOW;
+        }
+        (@window).visible = true;
+    }
+
+    // Makes the window invisible; the next present() skips it.
+    func hide(window: Win): Void! {
+        if (window as UInt64) == 0 {
+            return error ERR_INVALID_WINDOW;
+        }
+        (@window).visible = false;
+    }
+
+    // Draws one pixel into the window's own buffer; out-of-range
+    // coordinates are ignored, matching the graphics clipping rule.
+    func put_pixel(window: Win, x: UInt64, y: UInt64, r: Char, g: Char, b: Char): Void! {
+        if (window as UInt64) == 0 {
+            return error ERR_INVALID_WINDOW;
+        }
+        let w = @window;
+        if x >= w.width or y >= w.height {
+            return;
+        }
+        let p = (w.buf as UInt64) + (y * w.width + x) * 4;
+        @(p as &Char) = b;
+        @((p + 1) as &Char) = g;
+        @((p + 2) as &Char) = r;
+        @((p + 3) as &Char) = 0 as Char;
+    }
+
+    // Fills the window buffer with one color.
+    func fill(window: Win, r: Char, g: Char, b: Char): Void! {
+        if (window as UInt64) == 0 {
+            return error ERR_INVALID_WINDOW;
+        }
+        let w = @window;
+        let n = w.width * w.height;
+        let i: UInt64 = 0;
+        while i < n {
+            let p = (w.buf as UInt64) + i * 4;
+            @(p as &Char) = b;
+            @((p + 1) as &Char) = g;
+            @((p + 2) as &Char) = r;
+            @((p + 3) as &Char) = 0 as Char;
+            i += 1;
+        }
+    }
+
+    // Blits the window's buffer onto the framebuffer, centered.
+    // Hidden windows are skipped.
+    func present(window: Win, ctx: graphics::GraphicsContext): Void! {
+        if (window as UInt64) == 0 {
+            return error ERR_INVALID_WINDOW;
+        }
+        let w = @window;
+        if not w.visible {
+            return;
+        }
+        let ox: UInt64 = 0;
+        if ctx.width > w.width {
+            ox = (ctx.width - w.width) / 2;
+        }
+        let oy: UInt64 = 0;
+        if ctx.height > w.height {
+            oy = (ctx.height - w.height) / 2;
+        }
+        let y: UInt64 = 0;
+        while y < w.height {
+            let x: UInt64 = 0;
+            while x < w.width {
+                let sp = (w.buf as UInt64) + (y * w.width + x) * 4;
+                let pb = @(sp as &Char);
+                let pg = @((sp + 1) as &Char);
+                let pr = @((sp + 2) as &Char);
+                try graphics::put_pixel(ctx, ox + x, oy + y, pr, pg, pb);
+                x += 1;
+            }
+            y += 1;
+        }
+    }
+}

@@ -1,0 +1,311 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: url
+ * URL parsing and reconstruction.
+ *
+ * A Url bundles six components: scheme, host, port, path, query, and
+ * fragment. parse() splits a URL string into the components and
+ * stores them as NUL-terminated strings; serialize() joins the
+ * components back into one URL string. Percent-encoding of individual
+ * components lives in the encoding module.
+ *
+ * Memory layout: the five string components of a parsed Url alias a
+ * single heap block laid out back to back, each followed by its NUL
+ * terminator, with the scheme at the base of the block. The
+ * allocation is owned by the Url value and released with destroy();
+ * individual fields are borrowed views and must not be freed
+ * separately. The string returned by serialize() is an independent
+ * heap allocation owned by the caller.
+ *
+ * Error policy: a malformed URL reports 22 (EINVAL) as
+ * ERR_INVALID_URL; allocation failure propagates 12 (ENOMEM) as
+ * ERR_ALLOC.
+ */
+
+use heap;
+use string;
+use mem;
+
+// ASCII codes of the component delimiters and the NUL terminator.
+static __CH_NUL = 0;
+static __CH_HASH = 35;
+static __CH_COLON = 58;
+static __CH_QUESTION = 63;
+static __CH_SLASH = 47;
+
+// Reports whether `c` terminates the host part of a URL.
+func __is_host_end(c: UInt8): Bool {
+    if c == __CH_NUL as UInt8 { return true; }
+    if c == __CH_COLON as UInt8 { return true; }
+    if c == __CH_SLASH as UInt8 { return true; }
+    if c == __CH_QUESTION as UInt8 { return true; }
+    if c == __CH_HASH as UInt8 { return true; }
+    return false;
+}
+
+// Reports whether `c` terminates the path, query, or port digits:
+// the start of the next component or the end of the string.
+func __is_component_end(c: UInt8): Bool {
+    if c == __CH_NUL as UInt8 { return true; }
+    if c == __CH_SLASH as UInt8 { return true; }
+    if c == __CH_QUESTION as UInt8 { return true; }
+    if c == __CH_HASH as UInt8 { return true; }
+    return false;
+}
+
+// Copies the `n` bytes at `src` + `off` into the block at `cur`,
+// appends a NUL, and returns the position after it. A zero length
+// places only the NUL, producing an empty component.
+func __place(cur: UInt64, src: UInt64, off: UInt64, n: UInt64): UInt64 {
+    if n > 0 {
+        mem::copy(cur as &Void, (src + off) as &Void, n);
+    }
+    @(cur as &UInt8) = 0 as UInt8;
+    return cur + n + 1;
+}
+
+// Splits the part after "://" into positions, validates the port, and
+// copies every component into one freshly allocated block. No
+// allocation happens before every byte range is known, so an invalid
+// URL reports its error without releasing anything.
+func __parse_rest(base: UInt64, scheme_len: UInt64, start: UInt64): url::Url! {
+    // The host ends at the first of: colon (port), slash, question
+    // mark, hash sign, or the NUL terminator.
+    let host_b = start;
+    let i = start;
+    while not __is_host_end(@((base + i) as &UInt8)) {
+        i += 1;
+    }
+    let host_e = i;
+    // Optional port: digits between a colon and the next delimiter.
+    let port: UInt16 = 0;
+    if @((base + i) as &UInt8) == __CH_COLON as UInt8 {
+        let port_b = i + 1;
+        let m = port_b;
+        while not __is_component_end(@((base + m) as &UInt8)) {
+            m += 1;
+        }
+        if m == port_b {
+            // A colon with no digits after it.
+            return error url::ERR_INVALID_URL;
+        }
+        let pv: UInt64 = 0;
+        let q = port_b;
+        while q < m {
+            let d = @((base + q) as &UInt8);
+            if d < 48 or d > 57 {
+                return error url::ERR_INVALID_URL;
+            }
+            pv = pv * 10 + ((d - 48) as UInt64);
+            if pv > 65535 {
+                return error url::ERR_INVALID_URL;
+            }
+            q += 1;
+        }
+        port = pv as UInt16;
+        i = m;
+    }
+    // Optional path: runs from a slash up to the query, the fragment,
+    // or the end of the string.
+    let path_b = i;
+    if @((base + i) as &UInt8) == __CH_SLASH as UInt8 {
+        while not __is_component_end(@((base + i) as &UInt8)) {
+            i += 1;
+        }
+    }
+    let path_e = i;
+    // Optional query: runs from a question mark up to the fragment or
+    // the end of the string.
+    let query_b = i;
+    if @((base + i) as &UInt8) == __CH_QUESTION as UInt8 {
+        i += 1;
+        query_b = i;
+        while @((base + i) as &UInt8) != __CH_NUL as UInt8 {
+            if @((base + i) as &UInt8) == __CH_HASH as UInt8 {
+                break;
+            }
+            i += 1;
+        }
+    }
+    let query_e = i;
+    // Optional fragment: runs from a hash sign to the end of the
+    // string.
+    let frag_b = i;
+    if @((base + i) as &UInt8) == __CH_HASH as UInt8 {
+        i += 1;
+        frag_b = i;
+        while @((base + i) as &UInt8) != __CH_NUL as UInt8 {
+            i += 1;
+        }
+    }
+    let frag_e = i;
+    // One block holds all five strings, each with its NUL: there is
+    // exactly one resource to release on any failure path.
+    let total = scheme_len + 1
+        + (host_e - host_b) + 1
+        + (path_e - path_b) + 1
+        + (query_e - query_b) + 1
+        + (frag_e - frag_b) + 1;
+    let block = try heap::alloc(total);
+    let cur = block as UInt64;
+    let scheme = cur as Char[];
+    cur = __place(cur, base, 0, scheme_len);
+    let host = cur as Char[];
+    cur = __place(cur, base, host_b, host_e - host_b);
+    let path = cur as Char[];
+    cur = __place(cur, base, path_b, path_e - path_b);
+    let query = cur as Char[];
+    cur = __place(cur, base, query_b, query_e - query_b);
+    let fragment = cur as Char[];
+    cur = __place(cur, base, frag_b, frag_e - frag_b);
+    return url::Url {scheme, host, port, path, query, fragment};
+}
+
+// Copies the string `s` onto the block at `cur` and returns the
+// position just past its last byte.
+func __append(cur: UInt64, s: Char[]): UInt64 {
+    let n = string::len(s);
+    mem::copy(cur as &Void, (s as UInt64) as &Void, n);
+    return cur + n;
+}
+
+// Writes one byte onto the block at `cur` and returns the next
+// position.
+func __append_byte(cur: UInt64, b: UInt8): UInt64 {
+    @(cur as &UInt8) = b;
+    return cur + 1;
+}
+
+// Counts the decimal digits of `n`; `n` is never zero at call sites
+// because a port of zero is omitted entirely.
+func __digits(n: UInt64): UInt64 {
+    let d: UInt64 = 1;
+    let v = n;
+    while v >= 10 {
+        v /= 10;
+        d += 1;
+    }
+    return d;
+}
+
+module url {
+    // The components of a URL. The string fields of a parsed Url are
+    // slices into one owned heap allocation released by destroy();
+    // `port` is zero when the URL carries no explicit port.
+    static Url = Struct {
+        scheme: Char[],
+        host: Char[],
+        port: UInt16,
+        path: Char[],
+        query: Char[],
+        fragment: Char[],
+    };
+
+    // errno-style code reported for a malformed URL.
+    static ERR_INVALID_URL = 22;
+
+    // errno-style code reported when an allocation fails.
+    static ERR_ALLOC = 12;
+
+    // Parses `url` into its components. The scheme is required and
+    // must be followed by "://". A port, when present, must be
+    // decimal digits no greater than 65535. The path, query, and
+    // fragment are optional and default to empty strings; a port that
+    // is absent defaults to zero.
+    func parse(url: Char[]): Url! {
+        let base = url as UInt64;
+        // Phase 1: locate the "://" separator that ends the scheme.
+        let i: UInt64 = 0;
+        while true {
+            let c = @((base + i) as &UInt8);
+            if c == __CH_NUL as UInt8 {
+                // The string ended before any scheme separator.
+                return error ERR_INVALID_URL;
+            }
+            if c == __CH_COLON as UInt8 {
+                let c1 = @((base + i + 1) as &UInt8);
+                let c2 = @((base + i + 2) as &UInt8);
+                if c1 == __CH_SLASH as UInt8 and c2 == __CH_SLASH as UInt8 {
+                    if i == 0 {
+                        // An empty scheme is not a URL.
+                        return error ERR_INVALID_URL;
+                    }
+                    return try __parse_rest(base, i, i + 3);
+                }
+            }
+            i += 1;
+        }
+    }
+
+    // Releases the allocation owned by a parsed URL — the scheme
+    // field points at the base of the block — and resets every field
+    // to an empty value. Call this exactly once for every successful
+    // parse whose ownership is not transferred.
+    func destroy(url: &Url): Void {
+        heap::free(((@url).scheme as UInt64) as &Void);
+        (@url).scheme = "";
+        (@url).host = "";
+        (@url).port = 0;
+        (@url).path = "";
+        (@url).query = "";
+        (@url).fragment = "";
+    }
+
+    // Reconstructs a URL string from its components. A component that
+    // is empty is omitted, so parsing "http://host/p" and serialising
+    // the result yields the same string; a trailing "?" or "#" with
+    // no content is not preserved. The caller owns the returned
+    // string.
+    func serialize(url: &Url): Char[]! {
+        let uu = @url;
+        // Size every piece: "://" is three bytes; ':', '?', and '#'
+        // are one each. The port contributes only when nonzero.
+        let total: UInt64 = string::len(uu.scheme) + 3 + string::len(uu.host);
+        total += string::len(uu.path);
+        if string::len(uu.query) > 0 {
+            total += 1 + string::len(uu.query);
+        }
+        if string::len(uu.fragment) > 0 {
+            total += 1 + string::len(uu.fragment);
+        }
+        if uu.port > 0 {
+            total += 1 + __digits(uu.port as UInt64);
+        }
+        total += 1;
+        let buf = try heap::alloc(total);
+        let cur = buf as UInt64;
+        cur = __append(cur, uu.scheme);
+        cur = __append_byte(cur, __CH_COLON as UInt8);
+        cur = __append_byte(cur, __CH_SLASH as UInt8);
+        cur = __append_byte(cur, __CH_SLASH as UInt8);
+        cur = __append(cur, uu.host);
+        if uu.port > 0 {
+            // The port is at most 65535: five digits written from the
+            // back of a small buffer.
+            let pb: UInt8[5];
+            let v = uu.port as UInt64;
+            let pn: UInt64 = 5;
+            while v > 0 {
+                pn -= 1;
+                pb[pn] = (48 + (v % 10)) as UInt8;
+                v /= 10;
+            }
+            cur = __append_byte(cur, __CH_COLON as UInt8);
+            mem::copy(cur as &Void, &pb[pn] as &Void, 5 - pn);
+            cur += 5 - pn;
+        }
+        cur = __append(cur, uu.path);
+        if string::len(uu.query) > 0 {
+            cur = __append_byte(cur, __CH_QUESTION as UInt8);
+            cur = __append(cur, uu.query);
+        }
+        if string::len(uu.fragment) > 0 {
+            cur = __append_byte(cur, __CH_HASH as UInt8);
+            cur = __append(cur, uu.fragment);
+        }
+        @(cur as &UInt8) = 0 as UInt8;
+        return buf as Char[];
+    }
+}

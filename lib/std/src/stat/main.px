@@ -1,0 +1,131 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: stat
+ * File metadata records.
+ *
+ * stat(2) copies the kernel's metadata record for a path — file
+ * kind, permissions, size, timestamps — into a 144-byte structure
+ * whose kernel layout the private KStat struct pins for the x86-64
+ * target; the module reads the fields the public Stat struct
+ * exposes and discards the rest. lstat(2) reports a symbolic link
+ * itself instead of following it, which is how a program tells a
+ * link apart from its target. The is_* helpers decode the kind from
+ * the mode word's high bits without the caller remembering the mask
+ * values.
+ *
+ * Errors are the kernel's: 2 when the path does not exist, 13 when
+ * permission is lacking, 40 (ELOOP) on a symlink loop.
+ *
+ * Arguments travel through file-private staging cells in .bss and
+ * `syscall` is issued from a volatile assembly sequence.
+ */
+
+// Staging cells shared with the assembly sequence below.
+let __st_num: UInt64;
+let __st_a1: UInt64;
+let __st_a2: UInt64;
+let __st_ret: UInt64;
+
+// Executes a two-argument system call (stat, lstat).
+func __st2(): UInt64 {
+    volatile asm "mov rax, [__st_num]";
+    volatile asm "mov rdi, [__st_a1]";
+    volatile asm "mov rsi, [__st_a2]";
+    volatile asm "syscall";
+    volatile asm "mov [__st_ret], rax";
+    return __st_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything else
+// passes through.
+func __st_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+// The kernel's 144-byte metadata record for the x86-64 target.
+static __KStat = Struct {
+    dev: UInt64,
+    ino: UInt64,
+    nlink: UInt64,
+    mode: UInt32,
+    uid: UInt32,
+    gid: UInt32,
+    pad0: UInt32,
+    rdev: UInt64,
+    size: Int64,
+    blksize: Int64,
+    blocks: Int64,
+    atime: Int64,
+    atime_nsec: Int64,
+    mtime: Int64,
+    mtime_nsec: Int64,
+    ctime: Int64,
+    ctime_nsec: Int64,
+    unused: Int64[3],
+};
+
+// Runs the syscall `nr` for `path` and returns the kernel record.
+func __query(nr: UInt64, path: Char[]): __KStat! {
+    let k: __KStat;
+    __st_num = nr;
+    __st_a1 = path as UInt64;
+    __st_a2 = &k as UInt64;
+    try __st_check(__st2());
+    return k;
+}
+
+module stat {
+    // The file-kind mask and kind values of the mode word's high
+    // bits (the octal constants 0170000, 0040000, 0100000, 0120000,
+    // 0010000, 0140000).
+    static S_IFMT = 61440;
+    static S_IFDIR = 16384;
+    static S_IFREG = 32768;
+    static S_IFLNK = 40960;
+    static S_IFIFO = 4096;
+    static S_IFSOCK = 49152;
+
+    // The public metadata record: what kind of file it is, how large
+    // it is, and when it was last modified.
+    static Stat = Struct {
+        mode: UInt32,
+        size: UInt64,
+        mtime_sec: Int64,
+        mtime_nsec: UInt64,
+    };
+
+    // Reads the metadata of `path`, following symbolic links.
+    func stat(path: Char[]): Stat! {
+        let k = try __query(4, path);
+        return Stat {k.mode, k.size as UInt64, k.mtime, k.mtime_nsec as UInt64};
+    }
+
+    // Reads the metadata of `path` without following the final
+    // symbolic link, so a link reports its own kind and size.
+    func lstat(path: Char[]): Stat! {
+        let k = try __query(6, path);
+        return Stat {k.mode, k.size as UInt64, k.mtime, k.mtime_nsec as UInt64};
+    }
+
+    // Reports whether the record belongs to a directory.
+    func is_dir(st: Stat): Bool = (st.mode & S_IFMT) == S_IFDIR;
+
+    // Reports whether the record belongs to a regular file.
+    func is_reg(st: Stat): Bool = (st.mode & S_IFMT) == S_IFREG;
+
+    // Reports whether the record belongs to a symbolic link.
+    func is_lnk(st: Stat): Bool = (st.mode & S_IFMT) == S_IFLNK;
+
+    // Reports whether the record belongs to a named pipe.
+    func is_fifo(st: Stat): Bool = (st.mode & S_IFMT) == S_IFIFO;
+
+    // Reports whether the record belongs to a socket.
+    func is_sock(st: Stat): Bool = (st.mode & S_IFMT) == S_IFSOCK;
+}

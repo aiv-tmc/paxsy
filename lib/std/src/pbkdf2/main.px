@@ -1,0 +1,92 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: pbkdf2
+ * PBKDF2 key derivation (RFC 2898, PKCS #5) over HMAC-SHA-256.
+ *
+ * PBKDF2 stretches a password into an arbitrary-length key by
+ * iterating HMAC: the derived key is the concatenation of blocks, and
+ * block i is the XOR sum of U1..Uc where U1 is HMAC under the password
+ * over the salt with the block index appended and each subsequent Ui
+ * is HMAC over the previous one. The iteration count is the cost
+ * parameter; the salt makes identical passwords derive distinct keys.
+ *
+ * The implementation composes the hmac module: each Ui needs one HMAC
+ * call, and the in-place update U <- HMAC(P, U) is safe because hmac
+ * copies the message into its internal scratch buffer before writing
+ * the digest to the caller's buffer. Intermediate state lives in a
+ * heap copy of the salt plus four index bytes and two 32-byte stack
+ * blocks.
+ *
+ * Failure policy: error 34 (ERANGE) reports invalid parameters; only
+ * heap allocation can otherwise fail, and the salt buffer is released
+ * on every path.
+ */
+
+use heap;
+use mem;
+use hmac;
+
+// HMAC-SHA-256 output size, also the derived-key block size.
+static __BLOCK = 32;
+
+module pbkdf2 {
+    // errno-style code for parameter problems.
+    static PBKDF2_ERR_RANGE = 34;
+
+    // Derives `dk_len` bytes into `out` from `password`/`pass_len` and
+    // `salt`/`salt_len` over `iterations` rounds. `iterations` must be
+    // positive and the requested length must fit the 32-bit block
+    // index (up to 137 gigabytes, far beyond any use of this module).
+    func pbkdf2_sha256(password: &Void, pass_len: UInt64, salt: &Void, salt_len: UInt64, iterations: UInt32, out: Char[], dk_len: UInt64): Void! {
+        if iterations == 0 {
+            return error PBKDF2_ERR_RANGE;
+        }
+        let blocks = (dk_len + __BLOCK - 1) / __BLOCK;
+        if blocks > 4294967295 {
+            return error PBKDF2_ERR_RANGE;
+        }
+        // Salt with four bytes of block index appended per derivation.
+        let salt_ext = try heap::alloc(salt_len + 4);
+        errdefer heap::free(salt_ext);
+        mem::copy(salt_ext, salt, salt_len);
+        let se = salt_ext as UInt64;
+        let u: UInt8[__BLOCK];
+        let t: UInt8[__BLOCK];
+        let b: UInt64 = 0;
+        while b < blocks {
+            // INT(b + 1) in big-endian form at the end of the salt.
+            @((se + salt_len) as &UInt8) = (((b + 1) >> 24) & 255) as UInt8;
+            @((se + salt_len + 1) as &UInt8) = (((b + 1) >> 16) & 255) as UInt8;
+            @((se + salt_len + 2) as &UInt8) = (((b + 1) >> 8) & 255) as UInt8;
+            @((se + salt_len + 3) as &UInt8) = ((b + 1) & 255) as UInt8;
+            // U1 and the accumulated T start identical.
+            try hmac::hmac_sha256(password, pass_len, salt_ext, salt_len + 4, &u[0] as &Char);
+            mem::copy(&t[0] as &Void, &u[0] as &Void, __BLOCK);
+            let i: UInt32 = 1;
+            while i < iterations {
+                // Ui <- HMAC(P, U(i-1)), computed in place: hmac
+                // copies the message before writing the digest, so u
+                // can serve as both input and output.
+                try hmac::hmac_sha256(password, pass_len, &u[0] as &Void, __BLOCK, &u[0] as &Char);
+                let x: UInt64 = 0;
+                while x < __BLOCK {
+                    @((&t[0] as UInt64 + x) as &UInt8) = @((&t[0] as UInt64 + x) as &UInt8) ^ @((&u[0] as UInt64 + x) as &UInt8);
+                    x += 1;
+                }
+                i += 1;
+            }
+            // Copy the block into the output, truncated on the last
+            // one.
+            let remain = dk_len - b * __BLOCK;
+            let take: UInt64 = __BLOCK;
+            if remain < __BLOCK {
+                take = remain;
+            }
+            mem::copy((out as UInt64 + b * __BLOCK) as &Void, &t[0] as &Void, take);
+            b += 1;
+        }
+        heap::free(salt_ext);
+    }
+}

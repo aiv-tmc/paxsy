@@ -1,0 +1,176 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: sha512
+ * SHA-512 message digest (FIPS 180-4).
+ *
+ * The 64-bit sibling of the sha256 module: a 128-byte block, an
+ * eight-word state, and 80 rounds built from the same building
+ * blocks — UInt64 XOR, AND, NOT, shifts, and wrapping additions. The
+ * message schedule expands sixteen input words to eighty with the
+ * small sigma rotations, and the round function mixes a Ch and a Maj
+ * with the big sigma rotations exactly as the standard defines; the
+ * round constants and the initial state are the published SHA-512
+ * values.
+ *
+ * The entry point is one-shot: sha512() pads the message internally —
+ * the 0x80 bit, zeros, and the 128-bit big-endian bit length, whose
+ * high half this implementation writes as zero, which is exact for
+ * every message below 2^61 bytes, the entire practical range — and
+ * writes the 64-byte digest to the caller's buffer. The module
+ * allocates nothing. There is no streaming API: the one-shot form
+ * covers the module's role, and a streaming variant would hold the
+ * same State across calls.
+ */
+
+use mem;
+
+// The 80 SHA-512 round constants (fractional parts of the cube roots
+// of the first 80 primes), as a UInt64 table.
+let K: UInt64[80] = {
+    0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc, 0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118,
+    0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2, 0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694,
+    0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65, 0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5,
+    0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4, 0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70,
+    0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df, 0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b,
+    0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30, 0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8,
+    0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8, 0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3,
+    0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec, 0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b,
+    0xca273eceea26619c, 0xd186b8c721c0c207, 0xeada7dd6cde0eb1e, 0xf57d4f7fee6ed178, 0x06f067aa72176fba, 0x0a637dc5a2c898a6, 0x113f9804bef90dae, 0x1b710b35131c471b,
+    0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c, 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817,
+};
+
+// The eight working state words, updated once per 128-byte block.
+static State = Struct {
+    h: UInt64[8],
+};
+
+// Rotates a 64-bit word right by `n` bits.
+func __rotr(x: UInt64, n: UInt64): UInt64 = (x >> n) $ (x << (64 - n));
+
+// Reads one big-endian 64-bit word from `p`.
+func __be64(p: UInt64): UInt64 {
+    let w: UInt64 = 0;
+    let k: UInt64 = 0;
+    while k < 8 {
+        w = (w << 8) $ (@((p + k) as &UInt8) as UInt64);
+        k += 1;
+    }
+    return w;
+}
+
+// Compresses one 128-byte message block into the state.
+func __block(st: &State, blk: &UInt8): Void {
+    let w: UInt64[80];
+    let b = blk as UInt64;
+    let t: UInt64 = 0;
+    while t < 16 {
+        w[t] = __be64(b + t * 8);
+        t += 1;
+    }
+    while t < 80 {
+        let x = w[t - 15];
+        let y = w[t - 2];
+        let s0 = __rotr(x, 1) ^ __rotr(x, 8) ^ (x >> 7);
+        let s1 = __rotr(y, 19) ^ __rotr(y, 61) ^ (y >> 6);
+        w[t] = w[t - 16] + s0 + w[t - 7] + s1;
+        t += 1;
+    }
+    let a = (@st).h[0];
+    let bb = (@st).h[1];
+    let c = (@st).h[2];
+    let d = (@st).h[3];
+    let e = (@st).h[4];
+    let f = (@st).h[5];
+    let g = (@st).h[6];
+    let h = (@st).h[7];
+    t = 0;
+    while t < 80 {
+        let s1 = __rotr(e, 14) ^ __rotr(e, 18) ^ __rotr(e, 41);
+        let ch = (e & f) ^ (~e & g);
+        let t1 = h + s1 + ch + K[t] + w[t];
+        let s0 = __rotr(a, 28) ^ __rotr(a, 34) ^ __rotr(a, 39);
+        let maj = (a & bb) ^ (a & c) ^ (bb & c);
+        let t2 = s0 + maj;
+        h = g;
+        g = f;
+        f = e;
+        e = d + t1;
+        d = c;
+        c = bb;
+        bb = a;
+        a = t1 + t2;
+        t += 1;
+    }
+    (@st).h[0] = (@st).h[0] + a;
+    (@st).h[1] = (@st).h[1] + bb;
+    (@st).h[2] = (@st).h[2] + c;
+    (@st).h[3] = (@st).h[3] + d;
+    (@st).h[4] = (@st).h[4] + e;
+    (@st).h[5] = (@st).h[5] + f;
+    (@st).h[6] = (@st).h[6] + g;
+    (@st).h[7] = (@st).h[7] + h;
+}
+
+module sha512 {
+    // Computes the SHA-512 digest of the `len` bytes at `data` and
+    // writes the 64-byte digest to `out`. The message bit length is
+    // written as a 128-bit field whose high half is zero, which is
+    // exact for every message below 2^61 bytes.
+    func sha512(data: &Void, len: UInt64, out: Char[64]): Void {
+        let st = State {0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
+                        0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179};
+        let p = data as UInt64;
+        let off: UInt64 = 0;
+        // Consume every full 128-byte block directly from the message.
+        while off + 128 <= len {
+            __block(&st, (p + off) as &UInt8);
+            off += 128;
+        }
+        // Assemble the final one or two padded blocks: remaining
+        // bytes, the 0x80 bit, zeros, and the 16-byte big-endian bit
+        // length.
+        let tail: UInt8[256];
+        let tail_len = len - off;
+        mem::copy(&tail[0] as &Void, (p + off) as &Void, tail_len);
+        @((&tail[0] as UInt64 + tail_len) as &UInt8) = 0x80;
+        let len_pos: UInt64;
+        if tail_len < 112 {
+            len_pos = 112;
+        } else {
+            len_pos = 240;
+        }
+        let z: UInt64 = tail_len + 1;
+        while z < len_pos {
+            @((&tail[0] as UInt64 + z) as &UInt8) = 0 as UInt8;
+            z += 1;
+        }
+        let bit_len = len * 8;
+        let k: UInt64 = 0;
+        while k < 16 {
+            let byte: UInt8 = 0;
+            if k >= 8 {
+                byte = ((bit_len >> ((15 - k) * 8)) & 255) as UInt8;
+            }
+            @((&tail[0] as UInt64 + len_pos + k) as &UInt8) = byte;
+            k += 1;
+        }
+        __block(&st, &tail[0]);
+        if len_pos == 240 {
+            __block(&st, (&tail[0] as UInt64 + 128) as &UInt8);
+        }
+        // Emit the state as eight big-endian words.
+        let o = out as UInt64;
+        let i: UInt64 = 0;
+        while i < 8 {
+            let word = st.h[i];
+            let k2: UInt64 = 0;
+            while k2 < 8 {
+                @((o + i * 8 + (7 - k2)) as &UInt8) = ((word >> (k2 * 8)) & 255) as UInt8;
+                k2 += 1;
+            }
+            i += 1;
+        }
+    }
+}

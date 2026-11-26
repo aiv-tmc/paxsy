@@ -1,0 +1,260 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: process
+ * Child process management built on the fork/execve pair of system
+ * calls.
+ *
+ * fork() clones the calling process and returns twice: the child's
+ * process id in the parent, zero in the child, and the return value
+ * is how the two copies tell which one they are. execve() replaces
+ * the calling process image with a new program, so the classic
+ * spawn sequence is: fork, run execve in the child, and wait in the
+ * parent for it to finish.
+ *
+ * Argument passing uses the kernel convention: the argument vector
+ * and the environment are arrays of pointers terminated by a zero
+ * entry. spawn1() builds those arrays on the heap for the
+ * single-argument case; the low-level spawn() accepts pre-built
+ * vectors for full control. The built environment is empty —
+ * without a runtime there is no original environ pointer to
+ * inherit — and callers that need a specific environment build the
+ * vector themselves.
+ *
+ * Three waiting flavours are provided. wait() blocks for one child;
+ * wait_any() blocks for whichever child ends next and reports which
+ * one through the pid field; wait_timeout() polls with waitpid's
+ * WNOHANG flag against the monotonic clock and reports error 110
+ * (ETIMEDOUT) once the deadline passes, the only deadline mechanism
+ * available without signals. All three resume automatically when a
+ * signal interrupts the underlying waitpid call.
+ *
+ * Buffering caveat: fork copies the whole address space, including
+ * pending buffered-writer content; flush writers before forking
+ * when the child must not re-send what the parent already wrote.
+ *
+ * Like the other syscall modules, arguments travel through
+ * file-private staging cells in .bss and `syscall` is issued from
+ * volatile assembly sequences.
+ */
+
+use sys;
+use heap;
+use time;
+
+// Staging cells shared with the assembly sequences below.
+let __pr_num: UInt64;
+let __pr_a1: UInt64;
+let __pr_a2: UInt64;
+let __pr_a3: UInt64;
+let __pr_ret: UInt64;
+
+// waitpid writes the termination status through this cell.
+let __pr_status: UInt64;
+
+// Executes a zero-argument process system call (fork).
+func __pr0(): UInt64 {
+    volatile asm "mov rax, [__pr_num]";
+    volatile asm "syscall";
+    volatile asm "mov [__pr_ret], rax";
+    return __pr_ret;
+}
+
+// Executes a three-argument process system call (execve, waitpid).
+func __pr3(): UInt64 {
+    volatile asm "mov rax, [__pr_num]";
+    volatile asm "mov rdi, [__pr_a1]";
+    volatile asm "mov rsi, [__pr_a2]";
+    volatile asm "mov rdx, [__pr_a3]";
+    volatile asm "syscall";
+    volatile asm "mov [__pr_ret], rax";
+    return __pr_ret;
+}
+
+// Converts a raw kernel return value into the error contract:
+// negative values in -4095..-1 become `error <errno>`, anything
+// else passes through.
+func __pr_check(raw: UInt64): UInt64! {
+    if (raw as Int64) < 0 {
+        let code: UInt64 = (0 as UInt64) - raw;
+        return error code;
+    }
+    return raw;
+}
+
+// Decodes a raw waitpid status word into a ChildResult for `pid`.
+func __pr_decode(status: UInt64, pid: UInt64): process::ChildResult {
+    if (status & 0x7F) == 0 {
+        // Lower seven bits zero: the child called exit().
+        return process::ChildResult {pid, true, (status >> 8) & 0xFF};
+    }
+    // Otherwise the low seven bits carry the signal number.
+    return process::ChildResult {pid, false, status & 0x7F};
+}
+
+module process {
+    // errno value handled internally, never surfaced to callers.
+    static EINTR = 4;
+
+    // errno value reported by wait_timeout when the deadline passes
+    // while the child is still running.
+    static ETIMEDOUT = 110;
+
+    // waitpid(2) option flag: report instead of blocking.
+    static WNOHANG = 1;
+
+    // Poll cadence for wait_timeout in nanoseconds (one millisecond).
+    static WAIT_POLL_NS = 1000000;
+
+    // The termination report of a reaped child. `pid` identifies
+    // which child produced the report; `exited` selects the meaning
+    // of `code`: the exit status for a normal exit, or the signal
+    // number for a signal death.
+    static ChildResult = Struct {
+        pid: UInt64,
+        exited: Bool,
+        code: UInt64,
+    };
+
+    // Clones the calling process. Returns the child's process id in
+    // the parent and zero in the child. Both copies keep running
+    // from the instruction after the call; the return value is how
+    // they tell which copy they are.
+    func fork(): UInt64! {
+        __pr_num = 57;
+        return __pr_check(__pr0());
+    }
+
+    // Replaces the calling process image with the program at `path`,
+    // passing `argv` and `envp` as pointer vectors. On success this
+    // function never returns; it returns an error only when the
+    // image could not be started, in which case the caller is
+    // expected to exit the child with the errno as its status.
+    func execve(path: Char[], argv: &Void, envp: &Void): UInt64! {
+        __pr_num = 59;
+        __pr_a1 = path as UInt64;
+        __pr_a2 = argv as UInt64;
+        __pr_a3 = envp as UInt64;
+        return __pr_check(__pr3());
+    }
+
+    // Forks and runs execve in the child with the given raw
+    // argument and environment vectors. Returns the child's process
+    // id in the parent. In the child, an execve failure terminates
+    // the child with the errno as its exit status, so the parent's
+    // wait observes the same code.
+    func spawn(path: Char[], argv: &Void, envp: &Void): UInt64! {
+        let pid = try fork();
+        if pid == 0 {
+            execve(path, argv, envp) catch |e| {
+                // No error channel exists in the child; the errno
+                // becomes the exit status the parent will observe.
+                sys::exit(e as Int32);
+            };
+            // Type-system path only: a successful execve replaces
+            // the image and never reaches this line, and a failed
+            // one exits inside the catch block above.
+            return error 0;
+        }
+        return pid;
+    }
+
+    // Spawns `path` with one argument and an empty environment, the
+    // common case for helper tools. The temporary pointer vectors
+    // are freed in the parent before returning; the child keeps its
+    // own copy, which execve consumes.
+    func spawn1(path: Char[], arg0: Char[]): UInt64! {
+        // argv: two pointers plus the terminating zero entry.
+        let mem = try heap::alloc(3 * 8);
+        let mp = mem as UInt64;
+        @(mp as &UInt64) = path as UInt64;
+        @((mp + 8) as &UInt64) = arg0 as UInt64;
+        @((mp + 16) as &UInt64) = 0;
+        // envp: a vector holding only the terminating zero entry.
+        let env = try heap::alloc(8);
+        @(env as UInt64 as &UInt64) = 0;
+        let pid = spawn(path, mem, env) catch |e| {
+            heap::free(mem);
+            heap::free(env);
+            return error e;
+        };
+        heap::free(mem);
+        heap::free(env);
+        return pid;
+    }
+
+    // Waits for the child `child` to terminate and returns its
+    // termination report. Interruption by a signal resumes the
+    // wait automatically.
+    func wait(child: UInt64): ChildResult! {
+        while true {
+            __pr_num = 61;
+            __pr_a1 = child;
+            __pr_a2 = (&__pr_status as UInt64);
+            __pr_a3 = 0;
+            __pr_check(__pr3()) catch |e| {
+                if e == EINTR {
+                    continue;
+                }
+                return error e;
+            };
+            return __pr_decode(__pr_status, child);
+        }
+    }
+
+    // Waits for whichever child terminates next and returns its
+    // report, with `pid` identifying the reaped child. When no
+    // children remain, reports error 10 (ECHILD).
+    func wait_any(): ChildResult! {
+        while true {
+            __pr_num = 61;
+            __pr_a1 = 0xFFFFFFFFFFFFFFFF;
+            __pr_a2 = (&__pr_status as UInt64);
+            __pr_a3 = 0;
+            let pid = __pr_check(__pr3()) catch |e| {
+                if e == EINTR {
+                    continue;
+                }
+                return error e;
+            };
+            return __pr_decode(__pr_status, pid);
+        }
+    }
+
+    // Waits up to `timeout_ns` of monotonic time for the child to
+    // terminate, polling with the non-blocking WNOHANG option.
+    // When the deadline passes while the child is still running,
+    // reports error 110 (ETIMEDOUT); the child keeps running and
+    // can be waited on again.
+    func wait_timeout(child: UInt64, timeout_ns: UInt64): ChildResult! {
+        let deadline = try time::monotonic_ns() + timeout_ns;
+        while true {
+            __pr_num = 61;
+            __pr_a1 = child;
+            __pr_a2 = (&__pr_status as UInt64);
+            __pr_a3 = WNOHANG;
+            let done = try __pr_check(__pr3());
+            if done == child {
+                return __pr_decode(__pr_status, child);
+            }
+            let now = try time::monotonic_ns();
+            if now >= deadline {
+                return error ETIMEDOUT;
+            }
+            try time::sleep_ns(WAIT_POLL_NS);
+        }
+    }
+
+    // Runs `path` with one argument to completion and returns its
+    // exit status. When the child dies on a signal, the signal
+    // number is reported as the error code instead.
+    func run(path: Char[], arg0: Char[]): UInt64! {
+        let child = try spawn1(path, arg0);
+        let r = try wait(child);
+        if r.exited {
+            return r.code;
+        }
+        return error r.code;
+    }
+}

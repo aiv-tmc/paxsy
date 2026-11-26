@@ -1,0 +1,115 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: template
+ * Rendering of text with {{name}} placeholders, substituting
+ * values from a std::map::Map of strings.
+ *
+ * The module suits messages, mail bodies, and configuration
+ * snippets — any document whose shape is fixed and whose values
+ * come from a map. A placeholder whose name is not in the map
+ * renders as the empty string; text outside placeholders is
+ * copied verbatim, so arbitrary punctuation and newlines pass
+ * through. An unclosed "{{" is ERR_INVALID_TEMPLATE.
+ *
+ * Rendering runs in two passes over the template: the first
+ * measures the exact output length, the second reserves it once
+ * and writes. The result is an owning std::str::Str the caller
+ * releases with std::str::destroy.
+ */
+
+use heap;
+use map;
+use mem;
+use str;
+
+// Looks up the name span [`name`, `name`+len) in `vars` and
+// returns its value, or the empty string when the name is absent.
+// The lookup key needs a terminator, so the span is copied into a
+// temporary buffer.
+func __tpl_lookup(vars: &map::Map, name: UInt64, len: UInt64): str::Str! {
+    let buf = try heap::alloc(len + 1);
+    defer heap::free(buf);
+    mem::copy(buf, name as &Void, len);
+    @((buf as UInt64 + len) as &Char) = 0 as Char;
+    let v = map::get(str::Str, vars, buf as Char[]) catch {
+        return str::make();
+    };
+    return v;
+}
+
+// Finds the "}}" closing the placeholder that opened at `open`
+// (the index of the second brace) and returns the index of the
+// first closing brace. An unclosed placeholder is error 22.
+func __tpl_close(t: UInt64, open: UInt64): UInt64! {
+    let j = open + 1;
+    while true {
+        let c = @((t + j) as &Char) as UInt64;
+        if c == 0 {
+            return error 22;
+        }
+        if c == 125 and @((t + j + 1) as &Char) as UInt64 == 125 {
+            return j;
+        }
+        j += 1;
+    }
+}
+
+module template {
+    // errno-style code returned when an allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // errno-style code returned on an unclosed "{{".
+    static ERR_INVALID_TEMPLATE = 22;
+
+    // Renders `text`, substituting every {{name}} with the value
+    // of `name` in `vars`. The caller owns the result and
+    // releases it with std::str::destroy.
+    func render(text: Char[], vars: &map::Map): str::Str! {
+        let t = text as UInt64;
+        // First pass: the exact output length.
+        let total: UInt64 = 0;
+        let i: UInt64 = 0;
+        while @((t + i) as &Char) as UInt64 != 0 {
+            if @((t + i) as &Char) as UInt64 == 123 and @((t + i + 1) as &Char) as UInt64 == 123 {
+                let close = try __tpl_close(t, i + 1);
+                let v = try __tpl_lookup(vars, t + i + 2, close - i - 2);
+                total += v.len;
+                i = close + 2;
+                continue;
+            }
+            total += 1;
+            i += 1;
+        }
+        // Second pass: reserve once and write.
+        let out = str::make();
+        try str::reserve(&out, total);
+        // A mid-render failure releases the output before the
+        // error propagates.
+        errdefer str::destroy(&out);
+        let w = out.data as UInt64;
+        let n: UInt64 = 0;
+        i = 0;
+        while @((t + i) as &Char) as UInt64 != 0 {
+            if @((t + i) as &Char) as UInt64 == 123 and @((t + i + 1) as &Char) as UInt64 == 123 {
+                // Measured successfully in the first pass, so the
+                // closing brace is known to exist.
+                let close = try __tpl_close(t, i + 1);
+                let v = try __tpl_lookup(vars, t + i + 2, close - i - 2);
+                if v.len > 0 {
+                    mem::copy((w + n) as &Void, v.data as &Void, v.len);
+                    n += v.len;
+                }
+                i = close + 2;
+                continue;
+            }
+            @((w + n) as &Char) = @((t + i) as &Char);
+            n += 1;
+            i += 1;
+        }
+        @((w + n) as &Char) = 0 as Char;
+        out.len = n;
+        return out;
+    }
+}

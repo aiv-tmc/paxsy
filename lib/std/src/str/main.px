@@ -1,0 +1,197 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: str
+ * Str, the owning, heap-allocated, growable string.
+ *
+ * A Str owns its backing allocation, tracks its length, and always
+ * keeps a zero byte at data[len], so it interoperates with every
+ * function that takes a Char[]: pass s.data, or the borrow returned by
+ * as_chars. The recorded capacity excludes the terminator byte, which
+ * the allocation always carries in addition. Growth doubles the
+ * backing allocation, so a sequence of appends costs amortised
+ * constant time per byte.
+ *
+ * Ownership: every value produced by make, from, clone, and concat
+ * must reach exactly one destroy.
+ */
+
+use heap;
+use mem;
+use string;
+
+module str {
+    // The owning growable string.
+    static Str = Struct {
+        data: &Char,
+        len: UInt64,
+        cap: UInt64,
+    };
+
+    // Returned when a growth allocation fails.
+    static ERR_OUT_OF_MEMORY = 12;
+
+    // Returned when a view range runs past the end of the string.
+    static ERR_OUT_OF_RANGE = 34;
+
+    // Smallest backing allocation, sixteen payload bytes plus the
+    // terminator.
+    static MIN_CAP = 16;
+
+    // Returns an empty string that owns no allocation yet; the first
+    // append or reserve allocates on demand.
+    func make(): Str = Str {0, 0, 0};
+
+    // Releases the backing allocation and returns the value to the
+    // state produced by make.
+    func destroy(s: &Str): Void {
+        if (@s).data != 0 {
+            heap::free((@s).data as &Void);
+        }
+        (@s).data = 0;
+        (@s).len = 0;
+        (@s).cap = 0;
+    }
+
+    // Ensures the string can hold `want` payload bytes, doubling the
+    // backing allocation until it suffices. The allocation reserves
+    // one additional byte for the trailing zero; the length and the
+    // content are unchanged.
+    func reserve(s: &Str, want: UInt64): Void! {
+        if want <= (@s).cap {
+            return;
+        }
+        let newcap = if (@s).cap == 0 { MIN_CAP } else { (@s).cap };
+        while newcap < want {
+            newcap *= 2;
+        }
+        let fresh = try heap::alloc(newcap + 1);
+        if (@s).len > 0 {
+            mem::copy(fresh, (@s).data as &Void, (@s).len);
+        }
+        @((fresh as UInt64 + (@s).len) as &Char) = 0 as Char;
+        if (@s).data != 0 {
+            heap::free((@s).data as &Void);
+        }
+        (@s).data = fresh as &Char;
+        (@s).cap = newcap;
+    }
+
+    // Returns a new owning string containing a copy of `s`.
+    func from(s: Char[]): Str! {
+        let n = string::len(s);
+        let r = Str {0, 0, 0};
+        try reserve(&r, n);
+        mem::copy(r.data as &Void, s as &Void, n + 1);
+        r.len = n;
+        return r;
+    }
+
+    // Returns a new owning string containing a copy of the content of
+    // `s`.
+    func clone(s: &Str): Str! {
+        let r = Str {0, 0, 0};
+        try reserve(&r, (@s).len);
+        if (@s).len > 0 {
+            mem::copy(r.data as &Void, (@s).data as &Void, (@s).len + 1);
+        } else {
+            @((r.data as UInt64) as &Char) = 0 as Char;
+        }
+        r.len = (@s).len;
+        return r;
+    }
+
+    // Appends the borrowed string `suffix` to the end of `s`,
+    // maintaining the terminator at data[len].
+    func append(s: &Str, suffix: Char[]): Void! {
+        let n = string::len(suffix);
+        if n == 0 {
+            return;
+        }
+        try reserve(s, (@s).len + n);
+        let dst = ((@s).data as UInt64) + (@s).len;
+        mem::copy(dst as &Void, suffix as &Void, n + 1);
+        (@s).len += n;
+    }
+
+    // Appends the content of the string `suffix` to the end of `s`.
+    func append_str(s: &Str, suffix: &Str): Void! {
+        if (@suffix).len == 0 {
+            return;
+        }
+        try reserve(s, (@s).len + (@suffix).len);
+        let dst = ((@s).data as UInt64) + (@s).len;
+        mem::copy(dst as &Void, (@suffix).data as &Void, (@suffix).len + 1);
+        (@s).len += (@suffix).len;
+    }
+
+    // Returns a new owning string containing `a` followed by `b`.
+    func concat(a: Char[], b: Char[]): Str! {
+        let r = try from(a);
+        errdefer destroy(&r);
+        try append(&r, b);
+        return r;
+    }
+
+    // Compares the two strings code unit by code unit, treating units
+    // as unsigned; delegates the walk to string::compare.
+    func compare(a: &Str, b: &Str): Int32 {
+        return string::compare(as_chars(a), as_chars(b));
+    }
+
+    // Returns the offset of the first occurrence of `needle` in `s`,
+    // or s.len when it is absent.
+    func find_substring(s: &Str, needle: Char[]): UInt64 {
+        let at = string::find_substring(as_chars(s), needle);
+        return if at > (@s).len { (@s).len } else { at };
+    }
+
+    // Sets the length to zero while keeping the backing allocation
+    // for reuse; the terminator is restored at data[0].
+    func clear(s: &Str): Void {
+        (@s).len = 0;
+        if (@s).data != 0 {
+            @(((@s).data as UInt64) as &Char) = 0 as Char;
+        }
+    }
+
+    // Borrows the whole content as a NUL-terminated Char[]. The
+    // borrow aliases the backing storage and stays valid until the
+    // string is mutated or destroyed. An empty string borrows a
+    // static empty string.
+    func as_chars(s: &Str): Char[] {
+        if (@s).data == 0 {
+            return "";
+        }
+        return ((@s).data as UInt64) as Char[];
+    }
+
+    // Borrows the window selected by `range` as a NUL-terminated
+    // Char[]. The borrow aliases the backing storage. The terminator
+    // is written in place at the end of the window: when the window
+    // ends before the string, the byte at the window's end position
+    // is replaced by the terminator, so a later whole-string borrow
+    // ends at the window until the string is appended to or cleared.
+    // The window is contiguous: the range is read as its first value
+    // plus its element count, which matches any unit-step range.
+    func view(s: &Str, range): Char[]! {
+        let start: UInt64 = 0;
+        let count: UInt64 = 0;
+        let first = true;
+        for range |v| {
+            if first {
+                start = v as UInt64;
+                first = false;
+            }
+            count += 1;
+        }
+        if start + count > (@s).len {
+            return error ERR_OUT_OF_RANGE;
+        }
+        // The allocation always has room for the terminator at
+        // data[len], so index start + count is writable here.
+        @(((@s).data as UInt64 + start + count) as &Char) = 0 as Char;
+        return (((@s).data as UInt64) + start) as Char[];
+    }
+}

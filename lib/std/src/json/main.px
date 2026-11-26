@@ -1,0 +1,189 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: json
+ * JSON parsing into a Value tree; the companion module
+ * std::json_write serialises a Value back to text.
+ *
+ * A Value is one of null, a boolean, a number, a string, an
+ * array, or an object; the kind is queried with the is_*
+ * predicates and the content extracted with the as_* accessors,
+ * each of which reports error 22 when the value is not of the
+ * expected kind. Arrays and objects are opaque to the caller:
+ * arr_len/arr_get and obj_len/obj_get walk them by index, and
+ * free_value releases the whole tree.
+ *
+ * The node layout is the module's own business: a kind word plus
+ * three payload words. Numbers carry the IEEE-754 bits of the
+ * Real64, strings a heap copy of the decoded text with its byte
+ * length, arrays a pointer to a contiguous node block with the
+ * element count, and objects two parallel blocks of key pointers
+ * and nodes with the pair count.
+ *
+ * Ownership: the tree is built entirely on the heap by parse();
+ * every value it produces must reach exactly one free_value().
+ */
+
+use heap;
+use json_parse;
+
+// errno-style code for kind mismatches and out-of-range indexes.
+static __J_ERR = 22;
+
+// Node kinds.
+static __K_NULL = 0;
+static __K_FALSE = 1;
+static __K_TRUE = 2;
+static __K_NUM = 3;
+static __K_STR = 4;
+static __K_ARR = 5;
+static __K_OBJ = 6;
+
+// Node size in bytes.
+static __NODE_BYTES = 32;
+
+// Reads the node stored at the raw address `src`.
+func __load(src: UInt64): json::Value {
+    return json::Value {@(src as &UInt64), @((src + 8) as &UInt64), @((src + 16) as &UInt64), @((src + 24) as &UInt64)};
+}
+
+module json {
+    // A parsed JSON value; the payload interpretation is private
+    // to the module and described in the file header.
+    static Value = Struct {
+        kind: UInt64,
+        a: UInt64,
+        b: UInt64,
+        c: UInt64,
+    };
+
+    // Parses the given JSON text into a Value. The parser is
+    // recursive descent over the UTF-8 bytes and builds the tree
+    // on the heap; error 22 is reported when the text is not
+    // valid JSON, with every partial allocation released.
+    func parse(text: Char[]): Value! {
+        let w = try json_parse::parse(text);
+        return Value {w.0, w.1, w.2, w.3};
+    }
+
+    // The kind predicates.
+    func is_null(v: &Value): Bool = (@v).kind == __K_NULL;
+    func is_bool(v: &Value): Bool = (@v).kind == __K_FALSE or (@v).kind == __K_TRUE;
+    func is_num(v: &Value): Bool = (@v).kind == __K_NUM;
+    func is_str(v: &Value): Bool = (@v).kind == __K_STR;
+    func is_arr(v: &Value): Bool = (@v).kind == __K_ARR;
+    func is_obj(v: &Value): Bool = (@v).kind == __K_OBJ;
+
+    // Extracts the boolean content; error 22 when the value is
+    // not a boolean.
+    func as_bool(v: &Value): Bool! {
+        if not is_bool(v) {
+            return error __J_ERR;
+        }
+        return (@v).kind == __K_TRUE;
+    }
+
+    // Extracts the numeric content; error 22 when the value is
+    // not a number.
+    func as_num(v: &Value): Real64! {
+        if not is_num(v) {
+            return error __J_ERR;
+        }
+        let bits: __NumBits;
+        bits.u = (@v).a;
+        return bits.f;
+    }
+
+    // Extracts the string content; error 22 when the value is not
+    // a string. The returned pointer aliases the tree's heap copy
+    // and stays valid until free_value.
+    func as_str(v: &Value): Char[]! {
+        if not is_str(v) {
+            return error __J_ERR;
+        }
+        return (@v).a as Char[];
+    }
+
+    // The length of a string value in bytes, for buffers that
+    // must hold its content; zero for other kinds.
+    func str_len(v: &Value): UInt64 {
+        if not is_str(v) {
+            return 0;
+        }
+        return (@v).b;
+    }
+
+    // The number of elements of an array value; zero for other
+    // kinds.
+    func arr_len(v: &Value): UInt64 {
+        if not is_arr(v) {
+            return 0;
+        }
+        return (@v).b;
+    }
+
+    // The i-th element of an array value; error 22 when the value
+    // is not an array or the index is out of range.
+    func arr_get(v: &Value, i: UInt64): Value! {
+        if not is_arr(v) or i >= (@v).b {
+            return error __J_ERR;
+        }
+        return __load((@v).a + i * __NODE_BYTES);
+    }
+
+    // The number of pairs of an object value; zero for other
+    // kinds.
+    func obj_len(v: &Value): UInt64 {
+        if not is_obj(v) {
+            return 0;
+        }
+        return (@v).b;
+    }
+
+    // The i-th (key, value) pair of an object value, in document
+    // order; error 22 when the value is not an object or the
+    // index is out of range. The key pointer aliases the tree's
+    // heap copy and stays valid until free_value.
+    func obj_get(v: &Value, i: UInt64): (Char[], Value)! {
+        if not is_obj(v) or i >= (@v).b {
+            return error __J_ERR;
+        }
+        let key = @(((@v).a + i * 8) as &UInt64) as Char[];
+        return {key, __load((@v).c + i * __NODE_BYTES)};
+    }
+
+    // Releases the value and every nested allocation. Every value
+    // produced by parse must reach exactly one free_value.
+    func free_value(v: Value): Void {
+        if v.kind == __K_STR {
+            heap::free(v.a as &Void);
+            return;
+        }
+        if v.kind == __K_ARR {
+            let i: UInt64 = 0;
+            while i < v.b {
+                free_value(__load(v.a + i * __NODE_BYTES));
+                i += 1;
+            }
+            heap::free(v.a as &Void);
+            return;
+        }
+        if v.kind == __K_OBJ {
+            let i: UInt64 = 0;
+            while i < v.b {
+                heap::free(@((v.a + i * 8) as &UInt64) as &Void);
+                free_value(__load(v.c + i * __NODE_BYTES));
+                i += 1;
+            }
+            heap::free(v.a as &Void);
+            heap::free(v.c as &Void);
+        }
+    }
+}
+
+// Raw bit access between UInt64 and Real64 for as_num.
+static __NumBits = Union {
+    u: UInt64,
+    f: Real64,
+};

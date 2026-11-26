@@ -1,0 +1,85 @@
+/*
+ * Copyright (C) 2026 The Paxsy Authors
+ * Distributed under the Apache License, Version 2.0.
+ *
+ * Module: hmac
+ * HMAC-SHA-256 keyed hash (RFC 2104 over FIPS 180-4).
+ *
+ * HMAC turns the one-shot sha256 module into a keyed hash:
+ *
+ *     HMAC(K, m) = H((K' ^ opad) || H((K' ^ ipad) || m))
+ *
+ * where K' is the key normalized to one 64-byte block (hashed down to
+ * the 32-byte digest when longer, zero-padded when shorter) and ipad /
+ * opad are the 0x36 / 0x5C padding constants. Both intermediate
+ * messages are assembled in heap scratch buffers around the one-shot
+ * digest, so no streaming API is needed.
+ *
+ * Failure policy: only heap allocation can fail. Every buffer is
+ * released before the function returns, on success and on failure
+ * alike; the normalized key block is covered by an errdefer because
+ * it stays live across the later allocations.
+ */
+
+use heap;
+use mem;
+use sha256;
+
+// SHA-256 block size and digest size in bytes.
+static __BLOCK = 64;
+static __DIGEST = 32;
+
+// Inner and outer pad bytes.
+static __IPAD = 0x36;
+static __OPAD = 0x5C;
+
+module hmac {
+    // Computes the HMAC-SHA-256 code of the `msg_len` bytes at `msg`
+    // under the `key_len` bytes at `key` and writes the 32-byte code
+    // to `out`. The key is normalized to one 64-byte block as the
+    // standard requires.
+    func hmac_sha256(key: &Void, key_len: UInt64, msg: &Void, msg_len: UInt64, out: Char[32]): Void! {
+        // Normalize the key into a zero-padded full block.
+        let kbuf = try heap::alloc(__BLOCK);
+        errdefer heap::free(kbuf);
+        let k = kbuf as UInt64;
+        let effective: UInt64;
+        if key_len > __BLOCK {
+            sha256::sha256(key, key_len, kbuf as &Char);
+            effective = __DIGEST;
+        } else {
+            mem::copy(kbuf, key, key_len);
+            effective = key_len;
+        }
+        mem::zero((k + effective) as &Void, __BLOCK - effective);
+
+        // Inner message: padded key XORed with ipad, followed by the
+        // caller's message. No fallible call sits between this
+        // allocation and its release, so the buffer needs no errdefer.
+        let ibuf = try heap::alloc(__BLOCK + msg_len);
+        let ib = ibuf as UInt64;
+        let i: UInt64 = 0;
+        while i < __BLOCK {
+            @((ib + i) as &UInt8) = @((k + i) as &UInt8) ^ (__IPAD as UInt8);
+            i += 1;
+        }
+        mem::copy((ib + __BLOCK) as &Void, msg, msg_len);
+        let inner_digest: UInt8[__DIGEST];
+        sha256::sha256(ibuf, __BLOCK + msg_len, &inner_digest[0] as &Char);
+        heap::free(ibuf);
+
+        // Outer message: padded key XORed with opad, followed by the
+        // inner digest.
+        let obuf = try heap::alloc(__BLOCK + __DIGEST);
+        let ob = obuf as UInt64;
+        i = 0;
+        while i < __BLOCK {
+            @((ob + i) as &UInt8) = @((k + i) as &UInt8) ^ (__OPAD as UInt8);
+            i += 1;
+        }
+        heap::free(kbuf);
+        mem::copy((ob + __BLOCK) as &Void, &inner_digest[0] as &Void, __DIGEST);
+        sha256::sha256(obuf, __BLOCK + __DIGEST, out);
+        heap::free(obuf);
+    }
+}
